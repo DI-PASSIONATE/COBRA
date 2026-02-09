@@ -1,5 +1,5 @@
 from cobra.stages.base_stage import COBRABaseStage
-
+from typing import Dict
 
 class EMFineTuningStage(COBRABaseStage):
     """
@@ -10,5 +10,6 @@ class EMFineTuningStage(COBRABaseStage):
     def __init__(self, palace_executable):
         self.palace_executable = palace_executable
 
-    def run(self, context):
-        pass
+    def run(self, context: Dict) -> Dict:
+        # TODO: implement me
+        return context

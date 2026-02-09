@@ -1,3 +1,4 @@
+from typing import Dict
 from cobra.stages.base_stage import COBRABaseStage
 
 
@@ -10,5 +11,6 @@ class CircuitSimulationStage(COBRABaseStage):
     def __init__(self, simulator):
         self.simulator = simulator
 
-    def run(self, context):
-        pass
+    def run(self, context: Dict) -> Dict:
+        # TODO: implement me
+        return context

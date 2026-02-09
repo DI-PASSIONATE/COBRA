@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-
+from typing import Dict
 
 class COBRABaseStage(ABC):
     """
@@ -9,7 +9,7 @@ class COBRABaseStage(ABC):
     """
 
     @abstractmethod
-    def run(self, context):
+    def run(self, context) -> Dict:
         """
         Process the given design state and return an updated state.
 

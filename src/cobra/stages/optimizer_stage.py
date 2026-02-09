@@ -1,3 +1,4 @@
+from typing import Dict
 from cobra.stages.base_stage import COBRABaseStage
 
 class OptimizerStage(COBRABaseStage):
@@ -9,5 +10,6 @@ class OptimizerStage(COBRABaseStage):
     def __init__(self, optimizer):
         self.optimizer = optimizer
 
-    def run(self, context):
-        pass
+    def run(self, context: Dict) -> Dict:
+        # TODO: implement me
+        return context
