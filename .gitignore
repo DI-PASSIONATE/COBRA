@@ -1,0 +1,17 @@
+/**/*.egg-info
+/**/.venv
+/**/*.pytest_cache
+/**/__pycache__
+/**/*.pyo
+/**/*.pyd
+/**/*.pyc
+*.msh
+*.s4p
+*.s6p
+*.gds
+*.pth
+*.onnx
+*.onnx.data
+*cache
+*.zip
+*.csv

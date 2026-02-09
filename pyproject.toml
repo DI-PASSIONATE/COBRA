@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cobra"
+version = "0.0.1"
+description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+authors = [
+    {name = "David Lurz", email = "david.lurz@fau.de"},
+    {name = "Gianluca Simone", email = "gianluca.simone@fau.de"},
+]
+
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+]
+
+requires-python = ">=3.11"
+dependencies = [
+    "scikit-rf",
+    "numpy",
+    "PySide6",
+    "pandas",
+    "onnxruntime",
+    "colorlog",
+    "matplotlib",
+]
+
+[project.scripts]
+cobra = "cobra.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+cobra = "src/cobra"
+[tool.setuptools.package-data]
+"orca" = ["**/*.simcfg", "**/*.xml"]
+
+[tool.black]
+line-length = 79
+target-version = ['py311', 'py312', 'py313', 'py314']
+
+[tool.isort]
+profile = "black"
+line_length = 79
