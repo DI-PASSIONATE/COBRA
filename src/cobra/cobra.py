@@ -18,8 +18,8 @@ class COBRA:
 
     def __init__(
         self,
+        em_surrogate_stage: EMSurrogateStage,
         optimizer_stage: OptimizerStage = OptimizerStage(None),
-        em_surrogate_stage: EMSurrogateStage = EMSurrogateStage(None),
         circuit_simulation_stage: CircuitSimulationStage = CircuitSimulationStage(None),
         em_fine_tuning_stage: EMFineTuningStage | None = EMFineTuningStage("palace"),
     ):
@@ -47,7 +47,6 @@ class COBRA:
             "output": None,
             "goal_achieved": False,
         }
-        num_iterations = 0
 
         # Perform optimizer step
         for iteration in tqdm.tqdm(range(max_iterations), desc="COBRA Optimization Progress"):

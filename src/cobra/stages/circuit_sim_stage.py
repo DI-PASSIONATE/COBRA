@@ -1,4 +1,6 @@
 from typing import Dict
+from cobra.spice_sim.base_simulator import BaseSimulator
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
 
 
@@ -8,7 +10,7 @@ class CircuitSimulationStage(COBRABaseStage):
     It takes the current design state, runs the circuit simulation, and updates the design state with the new simulation results.
     """
 
-    def __init__(self, simulator):
+    def __init__(self, simulator: BaseSimulator = XyceSimulator("Xyce")):
         self.simulator = simulator
 
     def run(self, context: Dict) -> Dict:
