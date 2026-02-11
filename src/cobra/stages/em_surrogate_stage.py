@@ -19,10 +19,7 @@ class EMSurrogateStage(COBRABaseStage):
     def run(self, context: Dict) -> Dict:
         params = context["parameters"]
         ntwk = self.inference_snp(params)
-        ntwk.plot_s_db()
-
-        # Comment this out later - just for debugging
-        plt.show()
+        context["network"] = ntwk
         return context
 
 

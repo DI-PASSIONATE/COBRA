@@ -9,13 +9,13 @@ class BaseOptimizer(ABC):
     """
 
     @abstractmethod
-    def step(self, context: Dict[str, Any], input_parameter_range: Dict[str, tuple | list | np.ndarray], constraints: Dict) -> Dict:
+    def step(self, context: Dict[str, Any], input_parameter_range: Dict[str, tuple | list | np.ndarray]) -> Dict:
         """
         Optimize the parameters based on the given input parameter range and constraints.
 
         Parameters:
+        - context: A dictionary containing the current design state, including the netlist, design goals, and any other relevant information.
         - input_parameter_range: A dictionary of parameter names and their corresponding ranges.
-        - constraints: A dictionary of design goals and constraints that must be satisfied. Not sure yet how to structure this.
 
         Returns:
         - A dictionary of optimized parameters that meet the design goals and constraints.
