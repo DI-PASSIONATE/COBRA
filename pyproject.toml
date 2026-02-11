@@ -35,6 +35,8 @@ dependencies = [
     "onnxruntime",
     "colorlog",
     "tqdm",
+    "optuna",
+    "pillow",
     "matplotlib",
 ]
 
