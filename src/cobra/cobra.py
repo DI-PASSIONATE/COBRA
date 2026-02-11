@@ -1,5 +1,8 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
+from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import BaseOptimizer
+from cobra.spice_sim.base_simulator import BaseSimulator
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages import (
     CircuitSimulationStage,
     EMSurrogateStage,
@@ -18,24 +21,24 @@ class COBRA:
 
     def __init__(
         self,
-        em_surrogate_stage: EMSurrogateStage,
-        optimizer_stage: OptimizerStage = OptimizerStage(None),
-        circuit_simulation_stage: CircuitSimulationStage = CircuitSimulationStage(None),
-        em_fine_tuning_stage: EMFineTuningStage | None = EMFineTuningStage("palace"),
+        em_surrogate_model: str,
+        optimizer: BaseOptimizer = OptunaOptimizer(),
+        circuit_simulator: BaseSimulator = XyceSimulator(),
+        palace_fine_tuning_command: Optional[str] = None,
     ):
-        self.optimizer_stage = optimizer_stage
-        self.em_surrogate_stage = em_surrogate_stage
-        self.circuit_simulation_stage = circuit_simulation_stage
-        self.em_fine_tuning_stage = em_fine_tuning_stage
+        self.optimizer_stage = OptimizerStage(optimizer)
+        self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model)
+        self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
+        self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
 
-    def run(self, netlist: str, design_goals: dict, parameters: dict, max_iterations: int = 100) -> dict:
+    def run(self, netlist: str, design_goals: dict, parameter_range: dict, max_iterations: int = 500) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
         Parameters:
         - netlist: A string representation of the circuit netlist.
         - design_goals: A dictionary of design goals and constraints.
-        - parameters: A dictionary of input parameters and their ranges.
+        - parameter_range: A dictionary of input parameters and their ranges.
 
         Returns:
         - The optimized parameters that meet the design goals.
@@ -43,7 +46,7 @@ class COBRA:
         context = {
             "netlist": netlist,
             "design_goals": design_goals,
-            "parameters": parameters,
+            "parameter_range": parameter_range,
             "output": None,
             "goal_achieved": False,
         }
@@ -59,6 +62,9 @@ class COBRA:
 
             # Perform circuit-level simulation
             context = self.circuit_simulation_stage.run(context)
+
+            # Tell the optimizer about the performance of the current parameters
+            self.optimizer_stage.tell(context)
 
             # Check design goals
             context = check_design_goals(context)

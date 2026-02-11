@@ -1,20 +1,15 @@
 from abc import ABC, abstractmethod
-
+from typing import Any, Dict, Callable
+import numpy as np
 
 class BaseOptimizer(ABC):
     """
     Abstract base class for optimizers in COBRA.
     Defines the interface that all optimizers must implement.
     """
-    @abstractmethod
-    def initialize(self):
-        """
-        Initialize any necessary state for the optimizer.
-        """
-        pass
 
     @abstractmethod
-    def step(self, input_parameter_range: dict, constraints: dict) -> dict:
+    def step(self, context: Dict[str, Any], input_parameter_range: Dict[str, tuple | list | np.ndarray], constraints: Dict) -> Dict:
         """
         Optimize the parameters based on the given input parameter range and constraints.
 
@@ -27,7 +22,7 @@ class BaseOptimizer(ABC):
         """
 
     @abstractmethod
-    def tell(self, parameters: dict, metrics: dict):
+    def tell(self, context, loss):
         """
         Provide feedback to the optimizer about the performance of the given parameters.
 

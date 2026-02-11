@@ -92,12 +92,15 @@ class EMSurrogateStage(COBRABaseStage):
                     )
                 S[:, i, j] = real + 1j * imag  # note: frequency as first dimension
 
+        frequencies = frequencies / 1e9  # convert to GHz for skrf compatibility
+
         # Create skrf Network object
-        ntwk = rf.Network(frequency=frequencies, s=S, f_unit="Hz")
+        ntwk = rf.Network(frequency=frequencies, s=S, f_unit="GHz")
 
         merged_output = {}
         for i in range(N):
             for j in range(N):
                 merged_output[f"S{i + 1}{j + 1}"] = S[:, i, j]
+
 
         return N, ntwk, merged_output

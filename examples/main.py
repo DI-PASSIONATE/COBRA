@@ -1,11 +1,10 @@
 # Example usage
 from cobra.cobra import COBRA
-from cobra.stages import *
-
 
 cobra = COBRA(
-    em_surrogate_stage=EMSurrogateStage("/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx"),
+    em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
 )
+
 netlist = "netlist.cir"
 design_goals = {}
 parameters = {
