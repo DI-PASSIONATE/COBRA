@@ -210,7 +210,7 @@ def plot_rfic_transformer_metrics(ntwk):
     axes[2, 0].plot(freq, k, color="purple", lw=2)
     axes[2, 0].set_title("Coupling Coefficient (k)", fontsize=14)
     axes[2, 0].set_ylabel("k")
-    axes[2, 0].set_ylim(-1.1, 1.1)
+    axes[2, 0].set_ylim(0, 1.1)
 
     # Subplot 6: Reactance & SRF Identification
     axes[2, 1].plot(freq, np.imag(z_d11), label="Im(Zdd11)", color="brown")
