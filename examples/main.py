@@ -9,11 +9,11 @@ cobra = COBRA(
 netlist = "netlist.cir"
 design_goals = {}
 parameters = {
-    "input_winding_diameter": 40,
-    "output_winding_diameter": 40,
-    "center_displacement": 0,
-    "bottom_linewidth": 5,
-    "upper_linewidth": 5,
+    "input_winding_diameter": [20, 100],
+    "output_winding_diameter": [20, 100],
+    "center_displacement": [0, 20],
+    "bottom_linewidth": [2, 8],
+    "upper_linewidth": [2, 8],
 }
 optimized_parameters = cobra.run(netlist, design_goals, parameters)
 print("Optimized Parameters:", optimized_parameters)

@@ -55,10 +55,10 @@ class COBRA:
             context = self.optimizer_stage.run(context)
 
             # Perform EM simulations / s parameter prediction using surrogate model from ORCA
-            context = self.circuit_simulation_stage.run(context)
+            context = self.em_surrogate_stage.run(context)
 
             # Perform circuit-level simulation
-            context = self.em_surrogate_stage.run(context)
+            context = self.circuit_simulation_stage.run(context)
 
             # Check design goals
             context = check_design_goals(context)
