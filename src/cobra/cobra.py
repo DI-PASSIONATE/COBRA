@@ -81,9 +81,7 @@ class COBRA:
                 ntwk = context["network"]
                 ntwk.plot_s_db()
                 plot_rfic_transformer_metrics(ntwk)
-                plt.title("Optimized Design S-Parameters")
-                plt.show()
-                break
+                return context["parameters"]
         
         if self.em_fine_tuning_stage is None:
             if context["iteration"] == max_iterations:
