@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
+import math
 
 class BaseSimulator(ABC):
     @abstractmethod
-    def run_simulation(self, netlist_name, output_name) -> str:
+    def run_simulation(self, netlist_name: str, output_name: str) -> str:
         """
         Run the circuit simulation using the provided netlist and output name.
         Args:
@@ -12,3 +13,29 @@ class BaseSimulator(ABC):
             str: The path to the output file containing the simulation results (e.g., a Touchstone file).
         """
         pass
+
+    def equivalent_RCL(self, Z, f):
+        # returns RLC values for a specific impedance
+        # returns large inductor instead of negative cap values, and cap becomes zero
+        w = 2 * math.pi * f
+    
+        # Parallel form
+        Y = 1 / Z
+        G = Y.real
+        B = Y.imag
+    
+        Rpar = round(1 / G,2) if G != 0 else None
+    
+        if B > 0:
+            Cpar_fF = round((B/w)*1e15,2)
+            Cpar = Cpar_fF/1e15
+            Lpar = 1e3 # verryy large to have no impact for Rf-freq
+        elif B < 0:
+            Lpar_pH = round(-1 / (w * B)*1e12,2)
+            Lpar = Lpar_pH/1e12
+            Cpar = 0 # keine Cap da
+        else:
+            Lpar = 1e3 # verryy large to have no impact for Rf-freq
+            Cpar = 0 # keine Cap da
+    
+        return (Rpar, Cpar, Lpar) 

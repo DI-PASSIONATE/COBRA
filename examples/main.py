@@ -6,7 +6,7 @@ frequency_range = "140-150ghz"  # Define the frequency range of interest for the
 design_goals = [
     DesignGoal(DesignParameter.S11, min_value=-90, max_value=-5), # 
     DesignGoal(DesignParameter.S21, min_value=-5, max_value=0),
-    DesignGoal(DesignParameter.k, min_value=0.3, max_value=0.85),
+    DesignGoal(DesignParameter.k, min_value=0.5, max_value=0.85),
 ]
 
 cobra = COBRA(
