@@ -4,9 +4,8 @@ from cobra import COBRA, DesignGoal, DesignParameter, DesignGoalChecker
 frequency_range = "140-150ghz"  # Define the frequency range of interest for the design goals
 
 design_goals = [
-    DesignGoal(DesignParameter.S11, min_value=-90, max_value=90), # 
-    DesignGoal(DesignParameter.S21, min_value=-90, max_value=90),
-    DesignGoal(DesignParameter.k, min_value=-90, max_value=0.85),
+    DesignGoal(DesignParameter.S11, min_value=-90, max_value=-10), # 
+    DesignGoal(DesignParameter.S21, min_value=-5, max_value=0),
 ]
 
 cobra = COBRA(
