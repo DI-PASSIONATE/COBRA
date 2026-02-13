@@ -22,5 +22,9 @@ class OptimizerStage(COBRABaseStage):
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
         ntwk = context["simulated_network"]
         loss = design_goal_checker.loss(ntwk)
+        context["iterations"].append({
+            "parameters": context["parameters"],
+            "loss": loss,
+        })
         self.optimizer.tell(context, loss)
 

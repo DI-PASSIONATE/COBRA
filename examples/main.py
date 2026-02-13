@@ -1,15 +1,17 @@
 # Example usage
-from cobra import COBRA, DesignGoal, DesignParameter, DesignGoalChecker
+from cobra import COBRA, DesignGoal, DesignParameter
+from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
 
 frequency_range = "125-135ghz"  # Define the frequency range of interest for the design goals
 
 design_goals = [
-    DesignGoal(DesignParameter.S11, min_value=-90, max_value=-10), # 
+    DesignGoal(DesignParameter.S11, min_value=-90, max_value=-11), # 
     DesignGoal(DesignParameter.S21, min_value=-5, max_value=0),
 ]
 
 cobra = COBRA(
     em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
+    palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"
 )
 
 netlist = "netlist_xyce_vector.cir"
@@ -21,5 +23,11 @@ parameters = {
     "bottom_linewidth": (2.0, 8.0),
     "upper_linewidth": (2.0, 8.0),
 }
-optimized_parameters = cobra.run(netlist, design_goals, frequency_range, parameters)
-print("Optimized Parameters:", optimized_parameters)
+context = cobra.run(
+    netlist, 
+    design_goals, 
+    frequency_range, 
+    parameters, 
+    orca_geometry=TransformerOcta()
+)
+print("Optimized Parameters:", context["parameters"])

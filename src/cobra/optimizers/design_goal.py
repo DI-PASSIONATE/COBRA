@@ -37,7 +37,7 @@ class DesignGoalChecker:
         goal_strs = []
         for goal in self.design_goals:
             goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {self.frequency_range if self.frequency_range else 'full range'}")
-        return "Design Goals:\n" + "\n".join(goal_strs)
+        return "Design Goals:" + " | ".join(goal_strs)
     
     def loss(self, ntwk: rf.Network) -> float:
         """
@@ -73,7 +73,6 @@ class DesignGoal:
     
 
 class DesignParameter(Enum):
-    FREQUENCY = "frequency"
     S11 = "S11"
     S21 = "S21"
     S12 = "S12"

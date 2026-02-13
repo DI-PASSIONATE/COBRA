@@ -16,3 +16,7 @@
 *.zip
 *.csv
 /**/testing/
+*.sp
+*.s*p
+*.prn
+/**/output/

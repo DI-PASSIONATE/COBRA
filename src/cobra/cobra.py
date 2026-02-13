@@ -1,4 +1,5 @@
 from typing import List, Dict, Optional
+import json
 from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import BaseOptimizer
 from cobra.optimizers.design_goal import DesignGoal, plot_rfic_transformer_metrics
@@ -33,7 +34,7 @@ class COBRA:
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, parameter_range: dict, max_iterations: int = 500) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, parameter_range: dict, max_iterations: int = 500, orca_geometry=None) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
@@ -54,6 +55,8 @@ class COBRA:
             "parameter_range": parameter_range,
             "output": None,
             "goal_achieved": False,
+            "iterations": [],
+            "orca_geometry": orca_geometry,
             "times": {
                 "optimizer": 0.0,
                 "em_surrogate": 0.0,
@@ -99,50 +102,72 @@ class COBRA:
 
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
-                print(f"Design goals achieved at iteration {iteration + 1}.")
-                ntwk = context["predicted_network"]
-                ntwk2 = context["simulated_network"]
-                plot_rfic_transformer_metrics(ntwk)
-                ntwk2.name = "Simulated Network"
-                ntwk2.plot_s_db()
-                plt.show()
-                return context["parameters"]
+                break
+                
         
-        if self.em_fine_tuning_stage is None:
-            if context["iteration"] == max_iterations:
-                print("Maximum iterations reached without achieving design goals. Returning best parameters found.")
-            return context
+        ntwk = context["predicted_network"]
+        ntwk.write_touchstone("surrogate_s_params.s6p")
+        
+        if not context["goal_achieved"]:
+            print("Maximum iterations reached without achieving design goals.")
         else:
-            return self.fine_tuning(context)
+            print(f"Design goals achieved at iteration {context['iteration']}.")
+
+        if self.em_fine_tuning_stage is not None:
+            context = self.fine_tuning(context)
+
+        # Save final context to a JSON file for analysis            
+        with open("cobra_optimization_context.json", "w") as f:
+            # Save context as txt file
+            json.dump(context, f, indent=4, default=str)
+
+        # Plot final results
+        print("Plotting final results...")
+        ntwk = context["predicted_network"]
+        ntwk2 = context["simulated_network"]
+        
+        plot_rfic_transformer_metrics(ntwk)
+        ntwk2.name = "Simulated Network"
+        ntwk2.plot_s_db()
+        plt.show()
+        return context
         
 
     def fine_tuning(self, context: Dict) -> Dict:
         """ Perform EM fine-tuning using the EM fine-tuning stage. """
         if self.em_fine_tuning_stage is None:
             raise ValueError("EM fine-tuning stage is not defined. Cannot perform fine-tuning.")
-        
-        context = self.em_fine_tuning_stage.run(context)
 
-        if context["goal_achieved"]:
-            print("Design goals ensured via EM fine-tuning. Returning optimized parameters.")
-            return context
+        design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
 
-        #### Optional EM fine-tuning stage
         for iteration in tqdm.tqdm(range(3), desc="COBRA EM Fine-Tuning Progress"):
 
-            # Perform EM fine-tuning using the fine-tuning stage
-            context = self.em_fine_tuning_stage.run(context)
+            # Perform EM simulation INSTEAD OF surrogate model prediction
+            context = self.em_fine_tuning_stage.run(context, orca_geometry=context.get("orca_geometry", None))
 
-            # Check design goals again after fine-tuning
-            context = context["design_goal_checker"].check(context)
+            # Perform circuit-level simulation
+            context = self.circuit_simulation_stage.run(context)
 
-            # If design goals are achieved, break the loop
+            # Tell the optimizer about the performance of the current parameters
+            self.optimizer_stage.tell(context)
+
+            # Check design goals
+            context = design_goal_checker.check_goals(context)
+
+            # If design goals are achieved, break the loop and don't tell the optimizer about the results → fine-tune
             if context["goal_achieved"]:
-                print(f"Design goals achieved after EM fine-tuning at iteration {context['iteration']}.")
+                print(f"Design goals achieved after EM fine-tuning at iteration {iteration}.")
                 break
+            else:
+                print(f"Design goals not achieved after EM fine-tuning at iteration {iteration}. Continuing optimization...")
+
+            self.optimizer_stage.tell(context)
+            context = self.optimizer_stage.run(context)
 
         if not context["goal_achieved"]:
             print("EM fine-tuning completed without achieving design goals. Returning best parameters found.")
+        else:
+            print(f"Design goals achieved and geometry verified with EM simulation. Returning optimized parameters.")
 
         return context
     
