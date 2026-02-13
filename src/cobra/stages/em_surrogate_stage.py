@@ -36,7 +36,7 @@ class EMSurrogateStage(COBRABaseStage):
         input_values = np.array([input_params[name] for name in input_names], dtype=np.float32)
 
         # Create frequency points from 1 GHz to 200 GHz in 1 GHz steps
-        frequency_points = np.arange(0, 201e9, 1e9)
+        frequency_points = np.arange(1e9, 201e9, 1e9)
 
         # Create batched input by repeating the input parameters for each frequency point and adding the frequency as an additional feature
         batched_input = np.repeat(input_values[np.newaxis, :], len(frequency_points), axis=0)

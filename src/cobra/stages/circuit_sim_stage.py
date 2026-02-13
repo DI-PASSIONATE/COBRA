@@ -2,7 +2,8 @@ from typing import Dict
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
-
+import skrf as rf
+import matplotlib.pyplot as plt
 
 class CircuitSimulationStage(COBRABaseStage):
     """
@@ -14,5 +15,10 @@ class CircuitSimulationStage(COBRABaseStage):
         self.simulator = simulator
 
     def run(self, context: Dict) -> Dict:
-        # TODO: implement me
+        ntwk = context["network"]
+        # Preprocess (e.g. vector fitting)
+        preprocessed_file = self.simulator.preprocess_ntwk(ntwk)
+        new_ntwk = self.simulator.run_simulation(netlist_name=context["netlist"])
+        context["network"] = new_ntwk
+
         return context

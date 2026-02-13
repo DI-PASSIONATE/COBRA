@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 import math
+import skrf as rf
 
 class BaseSimulator(ABC):
     @abstractmethod
-    def run_simulation(self, netlist_name: str, output_name: str) -> str:
+    def run_simulation(self, netlist_name: str) -> rf.Network:
         """
         Run the circuit simulation using the provided netlist and output name.
         Args:
@@ -11,6 +12,18 @@ class BaseSimulator(ABC):
             output_name (str): The name of the output file where simulation results will be stored.
         Returns:
             str: The path to the output file containing the simulation results (e.g., a Touchstone file).
+        """
+        pass
+
+    @abstractmethod
+    def preprocess_ntwk(self, ntwk) -> str:
+        """
+        Preprocess the network by performing some operations (e.g., vector fitting) 
+        that the simulator requires before running the simulation. 
+        Args:
+            ntwk: The network object containing the S-parameters and frequency information.
+        Returns:
+            A file path to the preprocessed network data (e.g., a SPICE subcircuit file) that can be included in the netlist for circuit simulation.
         """
         pass
 

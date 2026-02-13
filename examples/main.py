@@ -13,8 +13,7 @@ cobra = COBRA(
     em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
 )
 
-
-netlist = "netlist.cir"
+netlist = "netlist_xyce_vector.cir"
 
 parameters = {
     "input_winding_diameter": (20.0, 100.0),
