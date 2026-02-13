@@ -20,7 +20,6 @@ class XyceSimulator(BaseSimulator):
         parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
         command = parallel_command + [self.xyce_command, netlist_name, "-o", output_name]
         
-        print(f"Running Xyce simulation on {netlist_name}...")
         result = subprocess.run(command, capture_output=True, text=True)
         
         if result.returncode != 0:

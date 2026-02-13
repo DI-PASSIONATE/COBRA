@@ -11,10 +11,10 @@ from cobra.stages import (
     EMFineTuningStage,
     COBRABaseStage,
 )
+import numpy as np
 import matplotlib.pyplot as plt
 from cobra.optimizers.design_goal import DesignGoalChecker
 import tqdm, time
-
 
 class COBRA:
     """
@@ -54,6 +54,14 @@ class COBRA:
             "parameter_range": parameter_range,
             "output": None,
             "goal_achieved": False,
+            "times": {
+                "optimizer": 0.0,
+                "em_surrogate": 0.0,
+                "circuit_simulation": 0.0,
+                "design_goal_checking": 0.0,
+                "em_fine_tuning": 0.0,
+                "total_time": 0.0,
+            }
         }
 
 
@@ -61,19 +69,33 @@ class COBRA:
         for iteration in tqdm.tqdm(range(max_iterations), desc="COBRA Optimization Progress"):
             context["iteration"] = iteration + 1
             # Generate new parameters using the optimizer stage
+            t1 = time.time()
             context = self.optimizer_stage.run(context)
-
             # Perform EM simulations / s parameter prediction using surrogate model from ORCA
+            t2 = time.time()
             context = self.em_surrogate_stage.run(context)
 
             # Perform circuit-level simulation
+            t3 = time.time()
             context = self.circuit_simulation_stage.run(context)
 
             # Tell the optimizer about the performance of the current parameters
+            t4 = time.time()
             self.optimizer_stage.tell(context)
 
             # Check design goals
+            t5 = time.time()
             context = design_goal_checker.check_goals(context)
+
+            t6 = time.time()
+
+            # Log times for each stage
+            context["times"]["optimizer"] += t2 - t1
+            context["times"]["em_surrogate"] += t3 - t2
+            context["times"]["circuit_simulation"] += t4 - t3
+            context["times"]["design_goal_checking"] += t5 - t4
+            context["times"]["em_fine_tuning"] += t6 - t5
+            context["times"]["total_time"] += t6 - t1
 
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
@@ -120,3 +142,18 @@ class COBRA:
             print("EM fine-tuning completed without achieving design goals. Returning best parameters found.")
 
         return context
+    
+    def print_time(self, context: Dict):
+        """
+        Prints the percentage of time spent in each stage of the optimization process.
+        """
+        total_time = context["times"]["total_time"]
+        if total_time == 0:
+            return
+        
+        print(f"Time spent in Optimizer: {context['times']['optimizer'] / total_time * 100:.2f}%")
+        print(f"Time spent in EM Surrogate: {context['times']['em_surrogate'] / total_time * 100:.2f}%")
+        print(f"Time spent in Circuit Simulation: {context['times']['circuit_simulation'] / total_time * 100:.2f}%")
+        print(f"Time spent in Design Goal Checking: {context['times']['design_goal_checking'] / total_time * 100:.2f}%")
+        if self.em_fine_tuning_stage is not None:
+            print(f"Time spent in EM Fine-Tuning: {context['times']['em_fine_tuning'] / total_time * 100:.2f}%")
