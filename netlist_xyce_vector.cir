@@ -1,5 +1,5 @@
-* --- Inclusion of the Vector Fitted Model ---
 .INCLUDE "cobra_output.sp"
+X1 Port1 Port2 Port3 Port4 _net0 _net1 s_equivalent 
 
 C2 Port4 Port3  0F 
 C1 Port2 Port1  7.94F 
@@ -7,10 +7,9 @@ L2 Port4 Port3  1
 L1 Port2 Port1  1 
 C4 Port3 0  5F 
 C3 0 Port4  5F 
-X1 Port1 Port2 Port3 Port4 _net0 _net1 s_equivalent 
 P1 Port1 Port2 port=1  z0=925  AC 2.72029  SIN 0 2.72029 130G
 P2 Port3 Port4 port=2  z0=100  AC 0.894427  SIN 0 0.894427 130G
 .AC LIN 500 1G 200G
 .LIN format=touchstone sparcalc=1
-.PRINT ac format=std file=spice4qucs_sparam.prn sdb(1,1) s(1,1) sp(1,1) y(1,1) z(1,1) sdb(1,2) s(1,2) sp(1,2) y(1,2) z(1,2) sdb(2,1) s(2,1) sp(2,1) y(2,1) z(2,1) sdb(2,2) s(2,2) sp(2,2) y(2,2) z(2,2)
+*.PRINT ac format=std file=spice4qucs_sparam.prn sdb(1,1) s(1,1) sp(1,1) y(1,1) z(1,1) sdb(1,2) s(1,2) sp(1,2) y(1,2) z(1,2) sdb(2,1) s(2,1) sp(2,1) y(2,1) z(2,1) sdb(2,2) s(2,2) sp(2,2) y(2,2) z(2,2)
 .END

@@ -82,27 +82,24 @@ class COBRA:
             t3 = time.time()
             context = self.circuit_simulation_stage.run(context)
 
-            # Tell the optimizer about the performance of the current parameters
-            t4 = time.time()
-            self.optimizer_stage.tell(context)
-
             # Check design goals
-            t5 = time.time()
+            t4 = time.time()
             context = design_goal_checker.check_goals(context)
 
-            t6 = time.time()
+            t5 = time.time()
 
             # Log times for each stage
             context["times"]["optimizer"] += t2 - t1
             context["times"]["em_surrogate"] += t3 - t2
             context["times"]["circuit_simulation"] += t4 - t3
             context["times"]["design_goal_checking"] += t5 - t4
-            context["times"]["em_fine_tuning"] += t6 - t5
-            context["times"]["total_time"] += t6 - t1
+            context["times"]["total_time"] += t5 - t1
 
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
                 break
+
+            self.optimizer_stage.tell(context)
                 
         
         ntwk = context["predicted_network"]
@@ -141,15 +138,12 @@ class COBRA:
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
 
         for iteration in tqdm.tqdm(range(3), desc="COBRA EM Fine-Tuning Progress"):
-
+            context["iteration"] = iteration + 1
             # Perform EM simulation INSTEAD OF surrogate model prediction
             context = self.em_fine_tuning_stage.run(context, orca_geometry=context.get("orca_geometry", None))
 
             # Perform circuit-level simulation
             context = self.circuit_simulation_stage.run(context)
-
-            # Tell the optimizer about the performance of the current parameters
-            self.optimizer_stage.tell(context)
 
             # Check design goals
             context = design_goal_checker.check_goals(context)
