@@ -15,10 +15,10 @@ class CircuitSimulationStage(COBRABaseStage):
         self.simulator = simulator
 
     def run(self, context: Dict) -> Dict:
-        ntwk = context["network"]
+        ntwk = context["predicted_network"]
         # Preprocess (e.g. vector fitting)
         preprocessed_file = self.simulator.preprocess_ntwk(ntwk)
         new_ntwk = self.simulator.run_simulation(netlist_name=context["netlist"])
-        context["network"] = new_ntwk
+        context["simulated_network"] = new_ntwk
 
         return context

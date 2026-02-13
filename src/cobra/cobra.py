@@ -100,9 +100,12 @@ class COBRA:
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
                 print(f"Design goals achieved at iteration {iteration + 1}.")
-                ntwk = context["network"]
-                ntwk.plot_s_db()
+                ntwk = context["predicted_network"]
+                ntwk2 = context["simulated_network"]
                 plot_rfic_transformer_metrics(ntwk)
+                ntwk2.name = "Simulated Network"
+                ntwk2.plot_s_db()
+                plt.show()
                 return context["parameters"]
         
         if self.em_fine_tuning_stage is None:

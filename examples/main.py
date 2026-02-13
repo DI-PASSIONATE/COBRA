@@ -1,7 +1,7 @@
 # Example usage
 from cobra import COBRA, DesignGoal, DesignParameter, DesignGoalChecker
 
-frequency_range = "140-150ghz"  # Define the frequency range of interest for the design goals
+frequency_range = "125-135ghz"  # Define the frequency range of interest for the design goals
 
 design_goals = [
     DesignGoal(DesignParameter.S11, min_value=-90, max_value=-10), # 

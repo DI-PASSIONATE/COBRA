@@ -17,7 +17,7 @@ class DesignGoalChecker:
         """
         Checks if the design goals are met based on the current design state.
         """
-        design_state = calculate_electrical_parameters(context["network"], frequency_range=self.frequency_range)  # Use the instance's frequency range
+        design_state = calculate_electrical_parameters(context["simulated_network"], frequency_range=self.frequency_range)  # Use the instance's frequency range
 
         for goal in self.design_goals:
             parameter_value = design_state.get(goal.parameter.value)

@@ -19,7 +19,8 @@ class EMSurrogateStage(COBRABaseStage):
     def run(self, context: Dict) -> Dict:
         params = context["parameters"]
         ntwk = self.inference_snp(params)
-        context["network"] = ntwk
+        context["predicted_network"] = ntwk
+        ntwk.write_touchstone("predicted_s_parameters.s2p")
         return context
 
 
