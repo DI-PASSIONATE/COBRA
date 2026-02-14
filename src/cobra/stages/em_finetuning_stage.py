@@ -26,7 +26,7 @@ class EMFineTuningStage(COBRABaseStage):
             raise ValueError("orca_geometry must be an instance of BaseGeometry")
         
         base_dir = os.path.join(os.getcwd(), "output")
-        name = "cobra_result_" + context["iteration"]
+        name = f"cobra_result_{context['iteration']}"
         gds_output_path = os.path.join(base_dir, f"{name}.gds")
         
         parameters = context["parameters"]
