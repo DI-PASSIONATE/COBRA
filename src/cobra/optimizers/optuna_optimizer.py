@@ -8,15 +8,16 @@ class OptunaOptimizer(BaseOptimizer):
     """
     OptunaOptimizer - An implementation of the BaseOptimizer using Optuna for optimization.
     """
+    def initialize(self, num_goals: int):
+        if self.multi_objective:
+            directions = ["minimize"] * num_goals
+        else:
+            directions = ["minimize"]
+        self.study = optuna.create_study(directions=directions)
 
-    def __init__(self):
-        super().__init__()
-        self.study = optuna.create_study(direction="minimize")
-
-    def tell(self, context, loss):
-        parameters = context["parameters"]
+    def tell(self, context, penalty: list[float] | float):
         trial = context["trial"]
-        self.study.tell(trial, loss)
+        self.study.tell(trial, penalty)
 
     def step(self, context, input_parameter_range: Dict[str, tuple | list | np.ndarray]) -> Dict:
         trial = self.study.ask()

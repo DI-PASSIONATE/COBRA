@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Dict
+from typing import Dict, Optional
 import numpy as np
 import skrf as rf
 import matplotlib.pyplot as plt
@@ -25,9 +25,18 @@ class DesignGoalChecker:
                 raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
             
             # Check if the parameter value meets the goal range for any frequency point in the specified frequency range
-            if np.any((parameter_value < goal.min_value) | (parameter_value > goal.max_value)):
-                context["goal_achieved"] = False
-                return context
+            if goal.min_value is not None and goal.max_value is not None:
+                if np.any((parameter_value < goal.min_value) | (parameter_value > goal.max_value)):
+                    context["goal_achieved"] = False
+                    return context
+            elif goal.min_value is not None:
+                if np.any(parameter_value < goal.min_value):
+                    context["goal_achieved"] = False
+                    return context
+            elif goal.max_value is not None:
+                if np.any(parameter_value > goal.max_value):
+                    context["goal_achieved"] = False
+                    return context
         context["goal_achieved"] = True
         return context
 
@@ -39,48 +48,107 @@ class DesignGoalChecker:
             goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {self.frequency_range if self.frequency_range else 'full range'}")
         return "Design Goals:" + " | ".join(goal_strs)
     
-    def loss(self, ntwk: rf.Network) -> float:
+    def loss(self, ntwk: rf.Network) -> list[float]:
         """
-        Computes a loss value based on how far the design state is from meeting the design goals. This can be used for optimization purposes.
+        Computes a list of penalties for each design goal based on the current design state. 
+        The loss is calculated based on how much the current design state deviates from the defined design goals.
         """
         design_state = calculate_electrical_parameters(ntwk, frequency_range=self.frequency_range)  # Use the instance's frequency range
 
-        total_loss = 0.0
+        penalties = []
         for goal in self.design_goals:
             parameter_values = design_state.get(goal.parameter.value)
             if parameter_values is None:
                 raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
-            
-            # Loss = sum of normalized distance from the goal range for each frequency point in the specified frequency range
-            for value in parameter_values:
-                if value < goal.min_value:
-                    total_loss += (goal.min_value - value) / (abs(goal.min_value) + 1e-6)  # Normalize by the magnitude of the goal value
-                    #print(f"Value {value} is below the minimum goal {goal.min_value} for parameter {goal.parameter.value}, adding {(goal.min_value - value) / (abs(goal.min_value) + 1e-6)} to loss.")
-                elif value > goal.max_value:
-                    total_loss += (value - goal.max_value) / (abs(goal.max_value) + 1e-6)  # Normalize by the magnitude of the goal value
-                    #print(f"Value {value} is above the maximum goal {goal.max_value} for parameter {goal.parameter.value}, adding {(value - goal.max_value) / (abs(goal.max_value) + 1e-6)} to loss.")
-        return total_loss
+            penalties.append(goal.penalty(parameter_values))
+        return penalties
+
     
 class DesignGoal:
     """
     DesignGoal - This class represents a single design goal for the optimization process. It includes a minimum and maximum in a given frequency range
     """
 
-    def __init__(self, parameter: DesignParameter, min_value: float, max_value: float):
+    def __init__(self, parameter: DesignParameter, min_value: Optional[float] = None, max_value: Optional[float] = None):
         self.parameter = parameter
         self.min_value = min_value
         self.max_value = max_value
-    
+        self._eps = 1e-9  # Small epsilon to prevent division by zero in penalty calculation
+
+    def penalty(self, values: np.ndarray) -> float:
+        """
+        Calculates the penalty based on the provided boundaries and values.
+        """
+        loss_val = 0.0
+
+        # Case A: Both boundaries are provided
+        if self.min_value is not None and self.max_value is not None:
+            # Mask for values below min
+            below_mask = values < self.min_value
+            # Mask for values above max
+            above_mask = values > self.max_value
+            
+            # Calculate normalized squared errors
+            # Error = (Limit - Value) / Limit
+            if np.any(below_mask):
+                diff_below = (self.min_value - values[below_mask]) / (np.abs(self.min_value) + self._eps)
+                loss_val += np.sum(diff_below**2)
+            
+            if np.any(above_mask):
+                diff_above = (values[above_mask] - self.max_value) / (np.abs(self.max_value) + self._eps)
+                loss_val += np.sum(diff_above**2)
+            
+            return loss_val
+
+        # Case B: Only Minimum value provided
+        elif self.min_value is not None:
+            # Denominator for normalization
+            denom = np.abs(self.min_value) + self._eps
+            
+            # Check for violations
+            if np.any(values < self.min_value):
+                # Penalize only violating values
+                violating_values = values[values < self.min_value]
+                # (Min - Value) / Min
+                return np.sum(((self.min_value - violating_values) / denom)**2)
+            else:
+                # Reward (negative loss) for exceeding min
+                # (Value - Min) / Min
+                return -np.sum(((values - self.min_value) / denom)**2)
+
+        # Case C: Only Maximum value provided
+        elif self.max_value is not None:
+            # Denominator for normalization
+            denom = np.abs(self.max_value) + self._eps
+            
+            if np.any(values > self.max_value):
+                # Penalize only violating values
+                violating_values = values[values > self.max_value]
+                # (Value - Max) / Max
+                return np.sum(((violating_values - self.max_value) / denom)**2)
+            else:
+                # Reward (negative loss) for being below max
+                # (Max - Value) / Max
+                return -np.sum(((self.max_value - values) / denom)**2)
+        raise ValueError("At least one of min_value or max_value must be provided for a DesignGoal.")
 
 class DesignParameter(Enum):
     S11 = "S11"
     S21 = "S21"
+    S31 = "S31"
+    S41 = "S41"
     S12 = "S12"
     S22 = "S22"
-    k = "k"
-    R = "R"
-    L = "L"
-    Q = "Q"
+    S32 = "S32"
+    S42 = "S42"
+    S13 = "S13"
+    S23 = "S23"
+    S33 = "S33"
+    S43 = "S43"
+    S14 = "S14"
+    S24 = "S24"
+    S34 = "S34"
+    S44 = "S44"
 
 def calculate_electrical_parameters(ntwk: rf.Network, frequency_range: str | None = None) -> Dict:
     """
@@ -229,3 +297,8 @@ def plot_rfic_transformer_metrics(ntwk):
 
     plt.tight_layout()
     plt.show()
+
+if __name__ == "__main__":
+    # Example usage
+    dg1 = DesignGoal(parameter=DesignParameter.S21, min_value=-3, max_value=-0.5)
+    dg2 = DesignGoal(parameter=DesignParameter.S11, max_value=-10)

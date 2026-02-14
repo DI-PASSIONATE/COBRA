@@ -48,6 +48,7 @@ class COBRA:
         - The optimized parameters that meet the design goals.
         """
         design_goal_checker = DesignGoalChecker(design_goals, frequency_range=frequency_range)
+        self.optimizer_stage.optimizer.initialize(len(design_goals))
 
         context = {
             "netlist": netlist,

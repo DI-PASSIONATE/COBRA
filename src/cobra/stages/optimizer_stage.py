@@ -21,10 +21,11 @@ class OptimizerStage(COBRABaseStage):
     def tell(self, context):
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
         ntwk = context["simulated_network"]
-        loss = design_goal_checker.loss(ntwk)
+        loss_values = design_goal_checker.loss(ntwk)
         context["iterations"].append({
             "parameters": context["parameters"],
-            "loss": loss,
+            "loss": loss_values,
         })
-        self.optimizer.tell(context, loss)
+        # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False
+        self.optimizer._tell(context, loss_values)
 

@@ -1,17 +1,19 @@
 # Example usage
 from cobra import COBRA, DesignGoal, DesignParameter
+from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
 
 frequency_range = "125-135ghz"  # Define the frequency range of interest for the design goals
 
 design_goals = [
-    DesignGoal(DesignParameter.S11, min_value=-90, max_value=-11), # 
-    DesignGoal(DesignParameter.S21, min_value=-5, max_value=0),
+    DesignGoal(DesignParameter.S11, min_value=90, max_value=-11), # 
+    DesignGoal(DesignParameter.S21, min_value=-3, max_value=0), #
 ]
 
 cobra = COBRA(
+    optimizer=OptunaOptimizer(multi_objective=False),
     em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
-    palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"
+    #palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"
 )
 
 netlist = "netlist_xyce_vector.cir"
