@@ -26,7 +26,8 @@ class OptimizerStage(COBRABaseStage):
         ntwk = context["simulated_network"]
         loss_values = design_goal_checker.loss(ntwk)
         context["iterations"].append({
-            "parameters": context["parameters"],
+            "model_parameters": context["model_parameters"],
+            "netlist_parameters": context["netlist_parameters"],
             "loss": loss_values,
         })
         # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False
