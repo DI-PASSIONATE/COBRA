@@ -2,7 +2,7 @@ from typing import List, Dict, Optional
 import json
 from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, plot_rfic_transformer_metrics
+from cobra.optimizers.design_goal import DesignGoal, plot_rfic_transformer_metrics, calculate_electrical_parameters
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages import (
@@ -34,7 +34,7 @@ class COBRA:
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
@@ -44,6 +44,7 @@ class COBRA:
         - frequency_range: A string representing the frequency range of interest. Example: "110-130ghz" for 110 GHz to 130 GHz.
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
+        - callback: An optional callback function that takes the current context as an argument. If the callback returns False, the optimization is stopped.
 
         Returns:
         - The optimized parameters that meet the design goals.
@@ -108,6 +109,13 @@ class COBRA:
             context["times"]["circuit_simulation"] += t4 - t3
             context["times"]["design_goal_checking"] += t5 - t4
             context["times"]["total_time"] += t5 - t1
+
+            # Callback
+            if callback:
+                should_continue = callback(context)
+                if should_continue is False:
+                    print("Optimization stopped by callback.")
+                    break
 
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
