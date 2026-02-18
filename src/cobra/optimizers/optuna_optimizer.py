@@ -32,7 +32,8 @@ class OptunaOptimizer(BaseOptimizer):
 
         netlist_parameters = {}
         for param in netlist_property_ranges:
-            netlist_parameters[param.name] = trial.suggest_float(param.name, low=param.min_value, high=param.max_value, step=param.step)
+            unit = param.unit if param.unit else ""
+            netlist_parameters[param.name] = f"{trial.suggest_float(param.name, low=param.min_value, high=param.max_value, step=param.step)}{unit}"
 
         # Update context
         context["model_parameters"] = model_parameters

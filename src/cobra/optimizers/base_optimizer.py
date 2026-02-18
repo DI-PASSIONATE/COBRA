@@ -15,6 +15,7 @@ class OptimizationProperty:
     min_value: float
     max_value: float
     step: Optional[float] = None
+    unit: Optional[str] = None
 
 class BaseOptimizer(ABC):
     """

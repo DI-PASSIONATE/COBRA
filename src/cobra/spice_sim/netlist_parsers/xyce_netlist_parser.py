@@ -174,8 +174,6 @@ class XyceNetlistParser(BaseNetlistParser):
                 model=model,
                 params=params,
             )
-        for e in self._elements.values():
-            print(f"Parsed element: {e}")
 
     def _parse_instance(self, tokens: List[str], etype: str) -> Tuple[List[str], Optional[str], Optional[str], Dict[str, str], Optional[str]]:
         nodes: List[str] = []

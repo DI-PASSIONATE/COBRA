@@ -32,8 +32,9 @@ parameters = [
     OptimizationProperty(name="center_displacement", type=OptimizationType.MODEL_INPUT, min_value=0.0, max_value=20.0, step=0.1),
     OptimizationProperty(name="bottom_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
     OptimizationProperty(name="upper_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
-    OptimizationProperty(name="C1", type=OptimizationType.NETLIST_VARIABLE, min_value=1.0, max_value=100.0, step=0.1),
-    OptimizationProperty(name="C2", type=OptimizationType.NETLIST_VARIABLE, min_value=1.0, max_value=100.0, step=0.1),
+    # Optimize C3 and C4 from 0 to 20 fF with a step of 1 fF
+    OptimizationProperty(name="C3", type=OptimizationType.NETLIST_VARIABLE, unit="F", min_value=0.0, max_value=20.0, step=1.0),
+    OptimizationProperty(name="C4", type=OptimizationType.NETLIST_VARIABLE, unit="F", min_value=0.0, max_value=20.0, step=1.0),
 ]
 
 context = cobra.run(
