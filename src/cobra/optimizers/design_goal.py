@@ -133,22 +133,12 @@ class DesignGoal:
         raise ValueError("At least one of min_value or max_value must be provided for a DesignGoal.")
 
 class DesignParameter(Enum):
-    S11 = "S11"
-    S21 = "S21"
-    S31 = "S31"
-    S41 = "S41"
-    S12 = "S12"
-    S22 = "S22"
-    S32 = "S32"
-    S42 = "S42"
-    S13 = "S13"
-    S23 = "S23"
-    S33 = "S33"
-    S43 = "S43"
-    S14 = "S14"
-    S24 = "S24"
-    S34 = "S34"
-    S44 = "S44"
+    S11_dB = "S11_dB"
+    S21_dB = "S21_dB"
+    S31_dB = "S31_dB"
+    S41_dB = "S41_dB"
+    S12_dB = "S12_dB"
+    S22_dB = "S22_dB"
 
 def calculate_electrical_parameters(ntwk: rf.Network, frequency_range: str | None = None) -> Dict:
     """
@@ -199,7 +189,8 @@ def calculate_electrical_parameters(ntwk: rf.Network, frequency_range: str | Non
     for i in range(mm_ntwk.nports):
         for j in range(mm_ntwk.nports):
             # Store s-parameters in dB for easier interpretation in the design goals
-            s_param_dict[f"S{i + 1}{j + 1}"] = np.array(mm_ntwk.s_db[:, i, j])
+            s_param_dict[f"S{i + 1}{j + 1}_dB"] = np.array(mm_ntwk.s_db[:, i, j])
+            s_param_dict[f"S{i + 1}{j + 1}"] = np.array(mm_ntwk.s[:, i, j])
 
     return {
         "mm_ntwk": mm_ntwk,
