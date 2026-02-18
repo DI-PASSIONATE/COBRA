@@ -8,7 +8,7 @@ import skrf as rf
 import glob, os
 
 class XyceSimulator(BaseSimulator):
-    netlist_parser: BaseNetlistParser = XyceNetlistParser
+    netlist_parser: BaseNetlistParser = None
 
     def __init__(self, xyce_command="Xyce", parallel=False):
         self.xyce_command = xyce_command

@@ -1,8 +1,10 @@
-from typing import Dict
+from typing import Any, Dict
 from cobra.optimizers import BaseOptimizer
 from typing import Callable, Dict
 import numpy as np
 import optuna
+
+from cobra.optimizers.base_optimizer import OptimizationProperty
 
 class OptunaOptimizer(BaseOptimizer):
     """
@@ -19,22 +21,19 @@ class OptunaOptimizer(BaseOptimizer):
         trial = context["trial"]
         self.study.tell(trial, penalty)
 
-    def step(self, context, input_parameter_range: Dict[str, tuple | list | np.ndarray]) -> Dict:
+    def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         trial = self.study.ask()
         context["trial"] = trial
 
         # Suggest parameters for the current trial
-        suggested_parameters = {}
-        for param_name, param_range in input_parameter_range.items():
-            if isinstance(param_range, tuple) and len(param_range) == 2:
-                suggested_parameters[param_name] = trial.suggest_float(param_name, low=param_range[0], high=param_range[1], step=0.1)
-            elif isinstance(param_range, list):
-                suggested_parameters[param_name] = trial.suggest_categorical(param_name, param_range)
-            elif isinstance(param_range, np.ndarray):
-                suggested_parameters[param_name] = trial.suggest_float(param_name, low=np.min(param_range), high=np.max(param_range), step=0.1)
-            else:
-                raise ValueError(f"Unsupported parameter range type {type(param_range)} for {param_name}")
+        model_parameters = {}
+        for param in model_input_ranges:
+            model_parameters[param.name] = trial.suggest_float(param.name, low=param.min_value, high=param.max_value, step=param.step)
 
-        context["parameters"] = suggested_parameters
-        #print(f"Optuna suggested parameters for trial {trial.number}: {suggested_parameters}")
-        return suggested_parameters
+        netlist_parameters = {}
+        for param in netlist_property_ranges:
+            netlist_parameters[param.name] = trial.suggest_float(param.name, low=param.min_value, high=param.max_value, step=param.step)
+
+        # Update context
+        context["model_parameters"] = model_parameters
+        context["netlist_parameters"] = netlist_parameters

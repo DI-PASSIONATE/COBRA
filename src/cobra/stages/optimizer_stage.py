@@ -1,5 +1,5 @@
 from typing import Dict
-from cobra.optimizers.base_optimizer import BaseOptimizer
+from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationType
 from cobra.optimizers.design_goal import DesignGoalChecker
 from cobra.stages.base_stage import COBRABaseStage
 import numpy as np
@@ -14,8 +14,11 @@ class OptimizerStage(COBRABaseStage):
         self.optimizer = optimizer
 
     def run(self, context: Dict) -> Dict:
-        parameter_range = context["parameter_range"]
-        self.optimizer.step(context, parameter_range)
+        optimization_parameters = context["optimization_parameters"]
+        model_input_parameters = [p for p in optimization_parameters if p.type == OptimizationType.MODEL_INPUT]
+        netlist_variable_parameters = [p for p in optimization_parameters if p.type == OptimizationType.NETLIST_VARIABLE]
+
+        self.optimizer.step(context, model_input_parameters, netlist_variable_parameters)
         return context
     
     def tell(self, context):

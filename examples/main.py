@@ -1,5 +1,5 @@
 # Example usage
-from cobra import COBRA, DesignGoal, DesignParameter
+from cobra import COBRA, DesignGoal, DesignParameter, OptimizationProperty, OptimizationType
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
 
@@ -25,6 +25,16 @@ parameters = {
     "bottom_linewidth": (2.0, 8.0),
     "upper_linewidth": (2.0, 8.0),
 }
+
+parameters = [
+    OptimizationProperty(name="input_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
+    OptimizationProperty(name="output_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
+    OptimizationProperty(name="center_displacement", type=OptimizationType.MODEL_INPUT, min_value=0.0, max_value=20.0, step=0.1),
+    OptimizationProperty(name="bottom_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
+    OptimizationProperty(name="upper_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
+    OptimizationProperty(name="R1", type=OptimizationType.NETLIST_VARIABLE, min_value=1.0, max_value=100.0, step=0.1),
+]
+
 context = cobra.run(
     netlist, 
     design_goals, 

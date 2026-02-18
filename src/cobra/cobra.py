@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 import json
 from cobra.optimizers import OptunaOptimizer
-from cobra.optimizers.base_optimizer import BaseOptimizer
+from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, plot_rfic_transformer_metrics
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
@@ -34,7 +34,7 @@ class COBRA:
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, parameter_range: dict, max_iterations: int = 500, orca_geometry=None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
@@ -42,7 +42,8 @@ class COBRA:
         - netlist: A string representation of the circuit netlist.
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
         - frequency_range: A string representing the frequency range of interest. Example: "110-130ghz" for 110 GHz to 130 GHz.
-        - parameter_range: A dictionary of input parameters and their ranges.
+        - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
+        - max_iterations: The maximum number of optimization iterations to perform.
 
         Returns:
         - The optimized parameters that meet the design goals.
@@ -53,7 +54,7 @@ class COBRA:
         context = {
             "netlist": netlist,
             "design_goal_checker": design_goal_checker,
-            "parameter_range": parameter_range,
+            "optimization_parameters": optimization_parameters,
             "output": None,
             "goal_achieved": False,
             "iterations": [],

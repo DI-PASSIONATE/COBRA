@@ -1,6 +1,20 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Callable
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+from enum import Enum
 import numpy as np
+
+class OptimizationType(Enum):
+    NETLIST_VARIABLE = "netlist_variable"
+    MODEL_INPUT = "model_input"
+
+@dataclass
+class OptimizationProperty:
+    name: str
+    type: OptimizationType
+    min_value: float
+    max_value: float
+    step: Optional[float] = None
 
 class BaseOptimizer(ABC):
     """
@@ -27,16 +41,14 @@ class BaseOptimizer(ABC):
         pass
 
     @abstractmethod
-    def step(self, context: Dict[str, Any], input_parameter_range: Dict[str, tuple | list | np.ndarray]) -> Dict:
+    def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         """
         Optimize the parameters based on the given input parameter range and constraints.
 
         Args:
             context: A dictionary containing the current design state, including the netlist, design goals, and any other relevant information.
-            input_parameter_range: A dictionary of parameter names and their corresponding ranges.
-
-        Returns:
-            A dictionary of optimized parameters that meet the design goals and constraints.
+            model_input_ranges: A list of OptimizationProperty objects representing the parameters to be optimized
+            netlist_property_ranges: A list of OptimizationProperty objects representing the netlist parameters to be optimized
         """
 
     @abstractmethod
