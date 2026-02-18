@@ -1,8 +1,14 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import math
 import skrf as rf
 
+from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+
+@dataclass
 class BaseSimulator(ABC):
+    netlist_parser: BaseNetlistParser
+    
     @abstractmethod
     def run_simulation(self, netlist_name: str) -> rf.Network:
         """
