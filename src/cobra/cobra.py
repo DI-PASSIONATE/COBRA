@@ -41,7 +41,7 @@ class COBRA:
         Parameters:
         - netlist: A path to the netlist
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
-        - frequency_range: A string representing the frequency range of interest. Example: "110-130ghz" for 110 GHz to 130 GHz.
+        - frequency_range: A string representing the frequency range of interest. Example: "125-135ghz" for 125 GHz to 135 GHz.
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
         - callback: An optional callback function that takes the current context as an argument. If the callback returns False, the optimization is stopped.

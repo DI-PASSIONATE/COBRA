@@ -281,7 +281,7 @@ class MainWindow(QMainWindow):
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
         form_layout.addRow("Simulator:", self.simulator_combo)
         
-        self.freq_edit = QLineEdit("110-130ghz")
+        self.freq_edit = QLineEdit("125-135ghz")
         form_layout.addRow("Freq Range:", self.freq_edit)
         
         self.max_iter_spin = QSpinBox()
