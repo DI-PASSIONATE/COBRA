@@ -36,7 +36,7 @@ class XyceNetlistParser(BaseNetlistParser):
             raise ValueError(f"set_value is intended for R/C/L (and simple V/I). Use set_param or set_model for {e.etype}.")
 
         self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
-        self._parse()
+        self.parse_netlist()
 
     def set_model(self, name: str, new_model: str) -> None:
         e = self.get_element(name)
@@ -77,7 +77,7 @@ class XyceNetlistParser(BaseNetlistParser):
             raise ValueError(f"set_model not supported for type '{e.etype}'")
 
         self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
-        self._parse()
+        self.parse_netlist()
 
     def set_param(self, name: str, key: str, value: str) -> None:
         e = self.get_element(name)
@@ -100,13 +100,13 @@ class XyceNetlistParser(BaseNetlistParser):
             tokens.append(f"{key}={value}")
 
         self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
-        self._parse()
+        self.parse_netlist()
 
     # -----------------------------
     # Parsing helpers
     # -----------------------------
 
-    def _parse(self) -> None:
+    def parse_netlist(self) -> None:
         self._elements.clear()
 
         for idx, raw in enumerate(self._lines):
@@ -174,6 +174,8 @@ class XyceNetlistParser(BaseNetlistParser):
                 model=model,
                 params=params,
             )
+        for e in self._elements.values():
+            print(f"Parsed element: {e}")
 
     def _parse_instance(self, tokens: List[str], etype: str) -> Tuple[List[str], Optional[str], Optional[str], Dict[str, str], Optional[str]]:
         nodes: List[str] = []
@@ -280,3 +282,10 @@ class XyceNetlistParser(BaseNetlistParser):
         if had_newline and not rebuilt.endswith("\n"):
             rebuilt += "\n"
         self._lines[line_index] = rebuilt
+
+    def update_parameters(self, parameters: Dict[str, float]) -> None:
+        for name, value in parameters.items():
+            if name in self._elements:
+                self.set_value(name, str(value))
+            else:
+                print(f"Warning: Parameter '{name}' not found in netlist elements.")

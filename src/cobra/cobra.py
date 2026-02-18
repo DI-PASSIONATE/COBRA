@@ -39,7 +39,7 @@ class COBRA:
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
         Parameters:
-        - netlist: A string representation of the circuit netlist.
+        - netlist: A path to the netlist
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
         - frequency_range: A string representing the frequency range of interest. Example: "110-130ghz" for 110 GHz to 130 GHz.
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
@@ -50,6 +50,7 @@ class COBRA:
         """
         design_goal_checker = DesignGoalChecker(design_goals, frequency_range=frequency_range)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
+        netlist_parser = self.circuit_simulation_stage.simulator.netlist_parser.from_file(netlist)
 
         context = {
             "netlist": netlist,
@@ -69,6 +70,11 @@ class COBRA:
             }
         }
 
+        # Backup netlist before optimization
+        with open(netlist, "r") as f:
+            original_netlist_content = f.read()
+        with open(f"{netlist}.backup", "w") as f:
+            f.write(original_netlist_content)
 
         # Perform optimizer step
         for iteration in tqdm.tqdm(range(max_iterations), desc="COBRA Optimization Progress"):
@@ -76,6 +82,12 @@ class COBRA:
             # Generate new parameters using the optimizer stage
             t1 = time.time()
             context = self.optimizer_stage.run(context)
+
+            # Update netlist with possibly new netlist parameters from the optimizer
+            params = context["netlist_parameters"]
+            netlist_parser.update_parameters(params)
+            netlist_parser.save(netlist)  # Save the updated netlist back to disk for the circuit simulator to use
+
             # Perform EM simulations / s parameter prediction using surrogate model from ORCA
             t2 = time.time()
             context = self.em_surrogate_stage.run(context)
@@ -105,7 +117,7 @@ class COBRA:
                 
         
         ntwk = context["predicted_network"]
-        ntwk.write_touchstone("surrogate_s_params.s6p")
+        ntwk.write_touchstone(f"surrogate_s_params.s{ntwk.nports}p")
         
         if not context["goal_achieved"]:
             print("Maximum iterations reached without achieving design goals.")

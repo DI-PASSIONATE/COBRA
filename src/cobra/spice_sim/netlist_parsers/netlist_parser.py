@@ -21,21 +21,17 @@ class NetlistElement:
         
 
 @dataclass
-class BaseNetlistParser(ABC):
-
-    def __init__(self, lines: List[str]) -> None:
+class BaseNetlistParser(ABC): 
+    def from_lines(self, lines: List[str]) -> "BaseNetlistParser":
         self._lines = lines[:]
         self._elements: Dict[str, NetlistElement] = {}  # includes MODEL entries too
         self.parse_netlist()
+        return self
 
-    @classmethod
-    def from_file(cls, path: Union[str, Path], encoding: str = "utf-8") -> "BaseNetlistParser":
+    def from_file(self, path: Union[str, Path], encoding: str = "utf-8") -> "BaseNetlistParser":
         text = Path(path).read_text(encoding=encoding, errors="replace")
-        return cls(text.splitlines(keepends=True))
-
-    @classmethod
-    def from_string(cls, text: str) -> "BaseNetlistParser":
-        return cls(text.splitlines(keepends=True))
+        self.netlist_path = path
+        return self.from_lines(text.splitlines(keepends=True))
 
     def to_string(self) -> str:
         return "".join(self._lines)
@@ -64,5 +60,16 @@ class BaseNetlistParser(ABC):
             netlist_file (str): The path to the netlist file to be parsed.
         Returns:
             dict: A dictionary containing the extracted design parameters.
+        """
+        pass
+
+    @abstractmethod
+    def update_parameters(self, parameters: Dict[str, float]) -> None:
+        """
+        Update the netlist with new design parameters.
+        Args:
+            parameters (dict): A dictionary containing the design parameters to be updated, where keys are parameter names and values are the new parameter values.
+        Returns:
+            None
         """
         pass
