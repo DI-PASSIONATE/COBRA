@@ -133,29 +133,22 @@ class COBRA:
             print(f"Design goals achieved at iteration {context['iteration']}.")
 
         if self.em_fine_tuning_stage is not None:
-            context = self.fine_tuning(context)
+            context = self.fine_tuning(context, callback)
 
         # Save final context to a JSON file for analysis            
         with open("cobra_optimization_context.json", "w") as f:
             # Save context as txt file
             json.dump(context, f, indent=4, default=str)
 
-        # Plot final results
-        print("Plotting final results...")
-        ntwk = context["predicted_network"]
-        ntwk2 = context["simulated_network"]
-        
-        plot_rfic_transformer_metrics(ntwk)
-        ntwk2.name = "Simulated Network"
-        ntwk2.plot_s_db()
-        plt.show()
         return context
         
 
-    def fine_tuning(self, context: Dict) -> Dict:
+    def fine_tuning(self, context: Dict, callback=None) -> Dict:
         """ Perform EM fine-tuning using the EM fine-tuning stage. """
         if self.em_fine_tuning_stage is None:
             raise ValueError("EM fine-tuning stage is not defined. Cannot perform fine-tuning.")
+        elif context.get("orca_geometry", None) is None:
+            raise ValueError("ORCA geometry is not provided in the context. Cannot perform EM fine-tuning without geometry information.")
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
 
@@ -169,6 +162,12 @@ class COBRA:
 
             # Check design goals
             context = design_goal_checker.check_goals(context)
+
+            if callback:
+                should_continue = callback(context)
+                if should_continue is False:
+                    print("Fine Tuning stopped by callback.")
+                    break
 
             # If design goals are achieved, break the loop and don't tell the optimizer about the results → fine-tune
             if context["goal_achieved"]:
