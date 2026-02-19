@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QLineEdit, 
@@ -135,18 +136,17 @@ class OptimizationParamDialog(QDialog):
         self.form_layout.addRow(self.buttons)
 
     def _update_onnx_metadata(self, name):
-        min_key = f"{name}_min"
-        max_key = f"{name}_max"
-        if min_key in self.metadata:
+        if "input_parameter_ranges" in self.metadata:
             try:
-                self.min_spin.setValue(float(self.metadata[min_key]))
-            except (ValueError, TypeError):
-                pass
-        if max_key in self.metadata:
-            try:
-                self.max_spin.setValue(float(self.metadata[max_key]))
-            except (ValueError, TypeError):
-                pass
+                meta_data = json.loads(self.metadata["input_parameter_ranges"])
+                if name in meta_data:
+                    params = meta_data[name]
+                    if "min" in params:
+                        self.min_spin.setValue(float(params["min"]))
+                    if "max" in params:
+                        self.max_spin.setValue(float(params["max"]))
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                print(f"Error parsing ONNX metadata: {e}")
 
     def get_data(self):
         name = self.name_combo.currentText() if self.use_combo_name else self.name_edit.text()
