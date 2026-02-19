@@ -74,6 +74,9 @@ class MainWindow(QMainWindow):
         self.max_iter_spin.setValue(500)
         form_layout.addRow("Max Iterations:", self.max_iter_spin)
 
+        # self.moo_cb = QCheckBox("Multi-Objective Optimization")
+        # form_layout.addRow("", self.moo_cb)
+
         #### OPTIONAL - Fine-tuning with palace ####
         self.finetune_cb = QCheckBox("Perform finetuning")
         self.finetune_cb.setToolTip("Runs a few iterations of palace simulations instead of the surrogate model at the end to ensure correct predictions")
@@ -344,6 +347,9 @@ class MainWindow(QMainWindow):
             # Only support float inputs which are typically the params
             all_inputs = [clean_name(i.name) for i in sess.get_inputs()]
             
+            # Get metadata for min/max values
+            metadata = sess.get_modelmeta().custom_metadata_map
+            
             # Filter out already added parameters
             current_param_names = {p.name for p in self.opt_params}
             available_inputs = [name for name in all_inputs if name not in current_param_names]
@@ -352,7 +358,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Info", "All ONNX parameters have already been added.")
                 return
 
-            dlg = OptimizationParamDialog("ONNX", available_inputs, self)
+            dlg = OptimizationParamDialog("ONNX", available_inputs, self, metadata=metadata)
             if dlg.exec():
                 self._add_param_to_table(dlg.get_data())
         except Exception as e:
@@ -492,7 +498,7 @@ class MainWindow(QMainWindow):
         
         cobra = COBRA(
             em_surrogate_model=onnx,
-            optimizer=optimizer_cls(),
+            optimizer=optimizer_cls(),# multi_objective=self.moo_cb.isChecked()),
             circuit_simulator=simulator_cls(),
             palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None
         )

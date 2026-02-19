@@ -1,4 +1,6 @@
 from typing import Any, Dict
+
+from optuna import study, trial
 from cobra.optimizers import BaseOptimizer
 from typing import Callable, Dict
 import numpy as np
@@ -38,3 +40,16 @@ class OptunaOptimizer(BaseOptimizer):
         # Update context
         context["model_parameters"] = model_parameters
         context["netlist_parameters"] = netlist_parameters
+
+    def get_best_parameters(self) -> Dict[str, Any]:
+        if self.multi_objective:
+            raise ValueError("get_best_parameters is not available for multi-objective optimization. Use get_moo_results instead.")
+        return self.study.best_params
+    
+    def get_moo_results(self) -> Any:
+        if self.multi_objective:
+            return self.study.best_trials
+        else:
+            raise ValueError("Multi-objective optimization is not enabled for this optimizer.")
+
+    

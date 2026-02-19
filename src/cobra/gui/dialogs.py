@@ -65,8 +65,9 @@ class DesignGoalDialog(QDialog):
         return DesignGoal(param, min_val, max_val)
 
 class OptimizationParamDialog(QDialog):
-    def __init__(self, from_source=None, source_data=None, parent=None, param: Optional[OptimizationProperty] = None):
+    def __init__(self, from_source=None, source_data=None, parent=None, param: Optional[OptimizationProperty] = None, metadata: Optional[dict] = None):
         super().__init__(parent)
+        self.metadata = metadata or {}
         self.setWindowTitle("Optimization Parameter")
         self.form_layout = QFormLayout(self)
         
@@ -106,12 +107,17 @@ class OptimizationParamDialog(QDialog):
             self.type_combo.setCurrentText(OptimizationType.MODEL_INPUT.value)
             self.type_combo.setEnabled(False)
             self.use_combo_name = True
+            
+            self.step_spin.setValue(0.1)
+            self.name_combo.currentTextChanged.connect(self._update_onnx_metadata)
+            self._update_onnx_metadata(self.name_combo.currentText())
         elif from_source == "NETLIST" and source_data:
             self.name_combo = QComboBox()
             self.name_combo.addItems(source_data)
             self.form_layout.addRow("Name:", self.name_combo)
             self.type_combo.setCurrentText(OptimizationType.NETLIST_VARIABLE.value)
             self.type_combo.setEnabled(False)
+            self.step_spin.setValue(1.0)
             self.use_combo_name = True
         else:
             self.form_layout.addRow("Name:", self.name_edit)
@@ -127,6 +133,20 @@ class OptimizationParamDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.form_layout.addRow(self.buttons)
+
+    def _update_onnx_metadata(self, name):
+        min_key = f"{name}_min"
+        max_key = f"{name}_max"
+        if min_key in self.metadata:
+            try:
+                self.min_spin.setValue(float(self.metadata[min_key]))
+            except (ValueError, TypeError):
+                pass
+        if max_key in self.metadata:
+            try:
+                self.max_spin.setValue(float(self.metadata[max_key]))
+            except (ValueError, TypeError):
+                pass
 
     def get_data(self):
         name = self.name_combo.currentText() if self.use_combo_name else self.name_edit.text()

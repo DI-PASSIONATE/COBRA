@@ -63,6 +63,27 @@ class BaseOptimizer(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_moo_results(self) -> Any:
+        """
+        Get the results of the multi-objective optimization process. This method should return a 
+        list (i.e. a pareto front) of the best trials run.
+        
+        Returns:
+            A list of the best trials from the multi-objective optimization process, representing the Pareto front of optimal solutions.
+        """
+        pass
+
+    @abstractmethod
+    def get_best_parameters(self) -> Dict[str, float]:#
+        """
+        Get the best parameters found by the optimizer. This method should return a dictionary of parameter names and their corresponding optimized values.
+
+        Returns:
+            A dictionary containing the best parameters found by the optimizer, where the keys are parameter names and the values are the optimized parameter values.
+        """
+        pass
+
     def _tell(self, context, loss: list[float]):
         """
         Internal method that converts the list of loss values into a single penalty value if multi_objective is False, and then calls the tell method with the appropriate penalty.

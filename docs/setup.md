@@ -17,7 +17,7 @@ Required tools:
 git clone https://github.com/DavidL-11/COBRA && cd COBRA
 ```
 
-- (Install UV (https://docs.astral.sh/uv/getting-started/installation/))
+- (Install UV (![https://docs.astral.sh/uv/getting-started/installation/]))
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh

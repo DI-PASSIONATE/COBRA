@@ -122,15 +122,15 @@ class COBRA:
                 break
 
             self.optimizer_stage.tell(context)
-                
         
-        ntwk = context["predicted_network"]
-        ntwk.write_touchstone(f"surrogate_s_params.s{ntwk.nports}p")
-        
+        # If goals not achieved, try to retrieve best parameters from optimizer and use those for final context
         if not context["goal_achieved"]:
-            print("Maximum iterations reached without achieving design goals.")
+            context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, netlist_parser, context)
         else:
             print(f"Design goals achieved at iteration {context['iteration']}.")
+                
+        ntwk = context["predicted_network"]
+        ntwk.write_touchstone(f"surrogate_s_params.s{ntwk.nports}p")
 
         if self.em_fine_tuning_stage is not None:
             context = self.fine_tuning(context, callback)
@@ -141,7 +141,43 @@ class COBRA:
             json.dump(context, f, indent=4, default=str)
 
         return context
+
+    def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, netlist_parser, context):
+        print("Maximum iterations reached without achieving design goals.")
+            
+            # If not MOO, retrieve best parameters and update context to reflect them
+        if not self.optimizer_stage.optimizer.multi_objective:
+            best_params_flat = self.optimizer_stage.optimizer.get_best_parameters()
+
+            # Split best_params_flat into model parameters and netlist parameters based on optimization_parameters list
+            model_params = {}
+            netlist_params = {}
+                
+            for prop in optimization_parameters:
+                if prop.name in best_params_flat:
+                    val = best_params_flat[prop.name]
+                    if prop.type == OptimizationType.NETLIST_VARIABLE:
+                        unit = prop.unit if prop.unit else ""
+                        netlist_params[prop.name] = f"{val}{unit}"
+                    elif prop.type == OptimizationType.MODEL_INPUT:
+                        model_params[prop.name] = val
+                
+            context["netlist_parameters"] = netlist_params
+            context["model_parameters"] = model_params
+                
+            # Update netlist
+            netlist_parser.update_parameters(netlist_params)
+            netlist_parser.save(netlist)
+                
+            # Rerun simulation to update context with best result
+            print("Re-simulating with best parameters...")
+            context = self.em_surrogate_stage.run(context)
+            context = self.circuit_simulation_stage.run(context)
+            context = design_goal_checker.check_goals(context)
         
+        return context
+
+
 
     def fine_tuning(self, context: Dict, callback=None) -> Dict:
         """ Perform EM fine-tuning using the EM fine-tuning stage. """
