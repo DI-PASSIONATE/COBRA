@@ -65,10 +65,6 @@ class MainWindow(QMainWindow):
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
         form_layout.addRow("Simulator:", self.simulator_combo)
         
-        self.freq_edit = QLineEdit("125-135ghz")
-        self.freq_edit.setToolTip("Enter frequency range where the goals below should apply, e.g. '125-135ghz'")
-        form_layout.addRow("Goal Freq Range:", self.freq_edit)
-        
         self.max_iter_spin = QSpinBox()
         self.max_iter_spin.setRange(1, 99999)
         self.max_iter_spin.setValue(500)
@@ -229,16 +225,38 @@ class MainWindow(QMainWindow):
         self.draw_overlays()
 
     def zoom_to_range(self):
-        try:
-            freq_str = self.freq_edit.text().lower().replace("ghz", "").strip()
-            if "-" in freq_str:
-                f_start, f_end = map(float, freq_str.split("-"))
-                # Convert to Hz for plotting if needed
-                f_start_hz = f_start * 1e9
-                f_end_hz = f_end * 1e9
-                self.s_param_plot.setXRange(f_start_hz, f_end_hz)
-        except Exception as e:
-            QMessageBox.warning(self, "Invalid Frequency Range", str(e))
+        # Range = min and max frequency from the goals if specified
+        min_f = float('inf')
+        max_f = float('-inf')
+        found_any = False
+
+        for goal in self.goals:
+            try:
+                if not goal.frequency_range:
+                    continue
+                
+                freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
+                if "-" in freq_str:
+                    f_start, f_end = map(float, freq_str.split("-"))
+                    # Convert to Hz
+                    f_start_hz = f_start * 1e9
+                    f_end_hz = f_end * 1e9
+                    
+                    if f_start_hz < min_f: min_f = f_start_hz
+                    if f_end_hz > max_f: max_f = f_end_hz
+                    found_any = True
+            except:
+                pass
+
+        if found_any:
+            # Add some padding (e.g. 5%)
+            span = max_f - min_f
+            if span > 0:
+                self.s_param_plot.setXRange(min_f - span*0.05, max_f + span*0.05)
+            else:
+                self.s_param_plot.setXRange(min_f * 0.95, max_f * 1.05)
+        else:
+            QMessageBox.information(self, "Info", "No valid frequency ranges found in goals.")
 
     def draw_overlays(self):
         # Remove previously tracked overlay items
@@ -254,34 +272,60 @@ class MainWindow(QMainWindow):
         if not self.show_goals_cb.isChecked():
             return
 
-        # Draw Frequency Range Lines
-        try:
-            freq_str = self.freq_edit.text().lower().replace("ghz", "").strip()
-            if "-" in freq_str:
+        # Draw Goal Lines
+        for goal in self.goals:
+            try:
+                if not goal.frequency_range:
+                    continue
+                
+                freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
+                if "-" not in freq_str:
+                    continue
+                    
                 f_start, f_end = map(float, freq_str.split("-"))
                 f_start_hz = f_start * 1e9
                 f_end_hz = f_end * 1e9
                 
-                v_line_start = pg.InfiniteLine(pos=f_start_hz, angle=90, pen=pg.mkPen('y', width=1, style=Qt.PenStyle.DashLine), label=f"{f_start} GHz")
-                v_line_end = pg.InfiniteLine(pos=f_end_hz, angle=90, pen=pg.mkPen('y', width=1, style=Qt.PenStyle.DashLine), label=f"{f_end} GHz")
-                self.s_param_plot.addItem(v_line_start)
-                self.s_param_plot.addItem(v_line_end)
-                self.overlay_items.extend([v_line_start, v_line_end])
-        except Exception:
-            pass # Ignore parsing errors here
+                p_name = goal.parameter.value
+                if p_name.startswith("S") and "_dB" in p_name:
+                    if goal.min_value is not None:
+                        # Draw line segment
+                        min_y = goal.min_value
+                        line = pg.PlotCurveItem(
+                            x=[f_start_hz, f_end_hz], 
+                            y=[min_y, min_y],
+                            pen=pg.mkPen('g', width=3, style=Qt.PenStyle.SolidLine)
+                        )
+                        self.s_param_plot.addItem(line)
+                        self.overlay_items.append(line)
+                        
+                        # Add label for min
+                        text = pg.TextItem(f"{p_name} > {goal.min_value}", color='g', anchor=(0, 1))
+                        text.setPos(f_start_hz, min_y)
+                        self.s_param_plot.addItem(text)
+                        self.overlay_items.append(text)
 
-        # Draw Goal Lines
-        for goal in self.goals:
-            p_name = goal.parameter.value
-            if p_name.startswith("S") and "_dB" in p_name:
-                if goal.min_value is not None:
-                     line = pg.InfiniteLine(pos=goal.min_value, angle=0, pen=pg.mkPen('g', width=1, style=Qt.PenStyle.DashLine), label=f"{p_name} > {goal.min_value}")
-                     self.s_param_plot.addItem(line)
-                     self.overlay_items.append(line)
-                if goal.max_value is not None:
-                     line = pg.InfiniteLine(pos=goal.max_value, angle=0, pen=pg.mkPen('r', width=1, style=Qt.PenStyle.DashLine), label=f"{p_name} < {goal.max_value}")
-                     self.s_param_plot.addItem(line)
-                     self.overlay_items.append(line)
+                    if goal.max_value is not None:
+                        # Draw line segment
+                        max_y = goal.max_value
+                        line = pg.PlotCurveItem(
+                            x=[f_start_hz, f_end_hz], 
+                            y=[max_y, max_y],
+                            pen=pg.mkPen('r', width=3, style=Qt.PenStyle.SolidLine)
+                        )
+                        self.s_param_plot.addItem(line)
+                        self.overlay_items.append(line)
+                        
+                        # Add label for max
+                        text = pg.TextItem(f"{p_name} < {goal.max_value}", color='r', anchor=(0, 0))
+                        text.setPos(f_start_hz, max_y)
+                        self.s_param_plot.addItem(text)
+                        self.overlay_items.append(text)
+
+
+            except Exception as e:
+                print(f"Error drawing overlay for goal: {e}")
+
 
     def browse_file(self, line_edit, filter):
         fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", filter)
@@ -479,6 +523,8 @@ class MainWindow(QMainWindow):
         label = f"{goal.parameter.value} "
         if goal.min_value is not None: label += f"> {goal.min_value} "
         if goal.max_value is not None: label += f"< {goal.max_value}"
+        if goal.frequency_range: label += f" @ {goal.frequency_range}"
+        if goal.weight != 1.0: label += f" (w={goal.weight})"
         return label
 
     def start_optimization(self):
@@ -518,7 +564,7 @@ class MainWindow(QMainWindow):
         self.draw_overlays()
         
         self.worker = OptimizationWorker(
-            cobra, netlist, self.goals, self.freq_edit.text(), 
+            cobra, netlist, self.goals, 
             self.opt_params, self.max_iter_spin.value(),
             self.orca_edit.text() or None
         )
@@ -536,8 +582,13 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def on_progress(self, context: dict):
         self.progress_bar.setValue(context.get("iteration", 0))
-        if "elapsed_time" in context:
-            self.elapsed_label.setText(f"Time: {context['elapsed_time']:.1f}s")
+        
+        elapsed = context.get("elapsed_time")
+        if elapsed is None and "times" in context:
+             elapsed = context["times"].get("total_time")
+        
+        if elapsed is not None:
+            self.elapsed_label.setText(f"Time: {elapsed:.1f}s")
         
         # 1. Update Parameters Table (Current Values)
         net_params = context.get("netlist_parameters", {})
@@ -559,15 +610,15 @@ class MainWindow(QMainWindow):
                     item.setText(display_val)
 
         # Update Goal Status Table
-        # We need to calculate current values for each goal
-        # The context has 'simulated_network'
         ntwk_n = context.get("simulated_network")
         if ntwk_n:
             # Metrics are now pre-calculated in COBRA.run and stored in context
             metrics = context.get("electrical_parameters", {})
             
             self.goal_table.setRowCount(0)
-            losses = context.get("current_losses", [])
+            losses = context.get("penalties", [])
+
+            # print(f"Updating Goal Table with metrics: {metrics} and losses: {losses}")
             
             for i, goal in enumerate(self.goals):
                 p_name = goal.parameter.value
@@ -650,7 +701,7 @@ class MainWindow(QMainWindow):
         self.draw_overlays()
 
         # 3. Update Loss Plot
-        losses = context.get("current_losses", [])
+        losses = context.get("penalties", [])
         if self.loss_history: # Ensure loss history is initialized
              for i, loss in enumerate(losses):
                 if i in self.loss_history:

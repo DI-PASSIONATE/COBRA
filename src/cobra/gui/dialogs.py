@@ -30,16 +30,29 @@ class DesignGoalDialog(QDialog):
         self.min_edit.setPlaceholderText("Optional")
         self.max_edit.setPlaceholderText("Optional")
         
+        self.freq_range_edit = QLineEdit()
+        self.freq_range_edit.setPlaceholderText("Optional (e.g. 125-135ghz)")
+
+        self.weight_edit = QLineEdit()
+        self.weight_edit.setPlaceholderText("Default: 1.0")
+        self.weight_edit.setText("1.0")
+        
         if goal:
             self.param_combo.setCurrentText(goal.parameter.value)
             if goal.min_value is not None:
                 self.min_edit.setText(str(goal.min_value))
             if goal.max_value is not None:
                 self.max_edit.setText(str(goal.max_value))
+            if goal.frequency_range:
+                self.freq_range_edit.setText(goal.frequency_range)
+            if goal.weight is not None:
+                self.weight_edit.setText(str(goal.weight))
         
         self.form_layout.addRow("Parameter:", self.param_combo)
         self.form_layout.addRow("Min Value:", self.min_edit)
         self.form_layout.addRow("Max Value:", self.max_edit)
+        self.form_layout.addRow("Frequency Range:", self.freq_range_edit)
+        self.form_layout.addRow("Weight:", self.weight_edit)
         
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.accepted.connect(self.accept)
@@ -55,15 +68,20 @@ class DesignGoalDialog(QDialog):
                 break
         
         if param is None:
-             # Create a dynamic object mimicking the Enum
-             class SimulatedParameter:
-                 def __init__(self, value):
-                     self.value = value
-             param = SimulatedParameter(p_name)  # type: ignore
+            raise ValueError(f"Selected parameter '{p_name}' is not a valid DesignParameter.")
+            
 
         min_val = float(self.min_edit.text()) if self.min_edit.text() else None
         max_val = float(self.max_edit.text()) if self.max_edit.text() else None
-        return DesignGoal(param, min_val, max_val)
+        
+        freq_range = self.freq_range_edit.text().strip() or None
+        
+        try:
+            weight = float(self.weight_edit.text())
+        except ValueError:
+            weight = 1.0
+
+        return DesignGoal(parameter=param, frequency_range=freq_range, min_value=min_val, max_value=max_val, weight=weight)
 
 class OptimizationParamDialog(QDialog):
     def __init__(self, from_source=None, source_data=None, parent=None, param: Optional[OptimizationProperty] = None, metadata: Optional[dict] = None):

@@ -12,13 +12,12 @@ class OptimizationWorker(QThread):
     error = Signal(str)
 
     def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
-                 frequency_range: str, optimization_parameters: List[OptimizationProperty], 
+                 optimization_parameters: List[OptimizationProperty], 
                  max_iterations: int, orca_geometry: Optional[str] = None):
         super().__init__()
         self.cobra = cobra_instance
         self.netlist = netlist
         self.design_goals = design_goals
-        self.frequency_range = frequency_range
         self.optimization_parameters = optimization_parameters
         self.max_iterations = max_iterations
         self.orca_geometry = orca_geometry
@@ -41,11 +40,6 @@ class OptimizationWorker(QThread):
                 
                 # Calculate elapsed time
                 context["elapsed_time"] = time.time() - self.start_time
-
-                # Calculate loss for display (similar to how it was done before)
-                design_goal_checker = context["design_goal_checker"]
-                current_losses = design_goal_checker.loss(context["simulated_network"])
-                context["current_losses"] = current_losses
                 
                 # Handle prev_network logic for plotting
                 context["prev_network"] = self.prev_network
@@ -62,7 +56,6 @@ class OptimizationWorker(QThread):
             self.cobra.run(
                 netlist=self.netlist,
                 design_goals=self.design_goals,
-                frequency_range=self.frequency_range,
                 optimization_parameters=self.optimization_parameters,
                 max_iterations=self.max_iterations,
                 orca_geometry=self.orca_geometry,

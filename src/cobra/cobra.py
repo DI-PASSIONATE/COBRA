@@ -2,7 +2,7 @@ from typing import List, Dict, Optional
 import json
 from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, plot_rfic_transformer_metrics, calculate_electrical_parameters
+from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages import (
@@ -34,14 +34,13 @@ class COBRA:
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], frequency_range: str, optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
         Parameters:
         - netlist: A path to the netlist
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
-        - frequency_range: A string representing the frequency range of interest. Example: "125-135ghz" for 125 GHz to 135 GHz.
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
         - callback: An optional callback function that takes the current context as an argument. If the callback returns False, the optimization is stopped.
@@ -49,7 +48,7 @@ class COBRA:
         Returns:
         - The optimized parameters that meet the design goals.
         """
-        design_goal_checker = DesignGoalChecker(design_goals, frequency_range=frequency_range)
+        design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
         netlist_parser = self.circuit_simulation_stage.simulator.netlist_parser.from_file(netlist)
 

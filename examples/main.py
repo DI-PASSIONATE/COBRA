@@ -3,11 +3,9 @@ from cobra import COBRA, DesignGoal, DesignParameter, OptimizationProperty, Opti
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
 
-frequency_range = "125-135ghz"  # Define the frequency range of interest for the design goals
-
 design_goals = [
-    DesignGoal(DesignParameter.S11_dB, max_value=-11), # 
-    DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0), #
+    DesignGoal(DesignParameter.S11_dB, max_value=-11, frequency_range="125-135ghz"),
+    DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
 ]
 
 cobra = COBRA(
@@ -39,8 +37,7 @@ parameters = [
 
 context = cobra.run(
     netlist, 
-    design_goals, 
-    frequency_range, 
+    design_goals,
     parameters, 
     orca_geometry=TransformerOcta()
 )

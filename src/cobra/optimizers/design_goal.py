@@ -9,36 +9,20 @@ class DesignGoalChecker:
     DesignGoalChecker - This class checks if the design goals are met based on the current design state and the defined design goals.
     """
 
-    def __init__(self, design_goals: list[DesignGoal], frequency_range: str | None = None):
-        self.design_goals = design_goals
-        self.frequency_range = frequency_range
+    def __init__(self, design_goals: list[DesignGoal]):
+        self.design_goals: list[DesignGoal] = design_goals
 
     def check_goals(self, context) -> Dict:
         """
         Checks if the design goals are met based on the current design state.
         """
-        design_state = calculate_electrical_parameters(context["simulated_network"], frequency_range=self.frequency_range)  # Use the instance's frequency range
-        context["electrical_parameters"] = design_state
-
-        for goal in self.design_goals:
-            parameter_value = design_state.get(goal.parameter.value)
-            if parameter_value is None:
-                raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
-            
-            # Check if the parameter value meets the goal range for any frequency point in the specified frequency range
-            if goal.min_value is not None and goal.max_value is not None:
-                if np.any((parameter_value < goal.min_value) | (parameter_value > goal.max_value)):
-                    context["goal_achieved"] = False
-                    return context
-            elif goal.min_value is not None:
-                if np.any(parameter_value < goal.min_value):
-                    context["goal_achieved"] = False
-                    return context
-            elif goal.max_value is not None:
-                if np.any(parameter_value > goal.max_value):
-                    context["goal_achieved"] = False
-                    return context
-        context["goal_achieved"] = True
+        ntwk = context["simulated_network"]
+        params, penalties = self.loss(ntwk)  # Calculate penalties based on the current design state
+        
+        # Check if any penalty is greater than zero, which indicates a violation of at least one design goal
+        context["goal_achieved"] = all(penalty <= 0.0 for penalty in penalties)
+        context["electrical_parameters"] = params  # Store calculated electrical parameters in context for later use (e.g., optimization feedback)
+        context["penalties"] = penalties  # Store penalties in context for later use (e.g., optimization feedback)
         return context
 
 
@@ -46,23 +30,30 @@ class DesignGoalChecker:
     def __str__(self):
         goal_strs = []
         for goal in self.design_goals:
-            goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {self.frequency_range if self.frequency_range else 'full range'}")
+            goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {goal.frequency_range if goal.frequency_range else 'full range'} (weight: {goal.weight})")
         return "Design Goals:" + " | ".join(goal_strs)
     
-    def loss(self, ntwk: rf.Network) -> list[float]:
+    def loss(self, ntwk: rf.Network) -> tuple[Dict, list[float]]:
         """
         Computes a list of penalties for each design goal based on the current design state. 
         The loss is calculated based on how much the current design state deviates from the defined design goals.
+        
+        Args:
+            ntwk: The skrf Network object
+        Returns:
+            A tuple containing the design state (a dictionary of calculated parameters) and a list of penalties
         """
-        design_state = calculate_electrical_parameters(ntwk, frequency_range=self.frequency_range)  # Use the instance's frequency range
-
+        
         penalties = []
+        design_state = {}
+
         for goal in self.design_goals:
-            parameter_values = design_state.get(goal.parameter.value)
+            parameter_values = calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
+            design_state[goal.parameter.value] = parameter_values
             if parameter_values is None:
                 raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
-            penalties.append(goal.penalty(parameter_values))
-        return penalties
+            penalties.append(goal.penalty(parameter_values) * goal.weight)
+        return design_state, penalties
 
     
 class DesignGoal:
@@ -70,10 +61,12 @@ class DesignGoal:
     DesignGoal - This class represents a single design goal for the optimization process. It includes a minimum and maximum in a given frequency range
     """
 
-    def __init__(self, parameter: DesignParameter, min_value: Optional[float] = None, max_value: Optional[float] = None):
+    def __init__(self, parameter: DesignParameter, frequency_range: Optional[str] = None, min_value: Optional[float] = None, max_value: Optional[float] = None, weight: float = 1.0):
         self.parameter = parameter
+        self.frequency_range = frequency_range
         self.min_value = min_value
         self.max_value = max_value
+        self.weight = weight
         self._eps = 1e-9  # Small epsilon to prevent division by zero in penalty calculation
 
     def penalty(self, values: np.ndarray) -> float:
@@ -140,157 +133,121 @@ class DesignParameter(Enum):
     S41_dB = "S41_dB"
     S12_dB = "S12_dB"
     S22_dB = "S22_dB"
+    Lp = "Lp"
+    Ls = "Ls"
+    Rp = "Rp"
+    Rs = "Rs"
+    Qp = "Qp"
+    Qs = "Qs"
+    k = "k"
+    SRF = "SRF"
+    COMING_SOON = "CUSTOM"  # Placeholder for future custom metrics that may be added
 
-def calculate_electrical_parameters(ntwk: rf.Network, frequency_range: str | None = None) -> Dict:
+def calculate_parameter(ntwk: rf.Network, parameter: DesignParameter, frequency_range: str | None = None, custom_func_coming_soon=None) -> np.ndarray:
     """
-    Calculates electrical parameters such as inductance (L), resistance (R), quality factor (Q), and coupling coefficient (k) from the S-parameters of the given network within the specified frequency range.
+    Calculates a specific electrical parameter from the S-parameters of the given network within the specified frequency range.
     """
-
-    # 1. Single-ended to Mixed-Mode Conversion
-    mm_ntwk = ntwk.copy()
     if frequency_range is not None:
-        mm_ntwk = mm_ntwk[frequency_range]
-    if ntwk.nports >= 4:
-         mm_ntwk.se2gmm(p=2)
-    # print(ntwk.frequency.unit)
-    # print(ntwk.frequency.unit == "GHz")
-    freq_ghz = ntwk.f / 1e9  # Convert to GHz if not already in GHz
-    omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians per second
+        ntwk = ntwk[frequency_range]
+    if parameter.value.startswith("S") and parameter.value.endswith("_dB"):
+        # Extract port indices from parameter name, e.g., S21_dB -> i=2, j=1
+        i, j = int(parameter.value[1]), int(parameter.value[2])
+        return ntwk.s_db[:, i-1, j-1]  # Convert to 0-based index
+    else:
+        # For lumped parameters, we need to calculate them from the Z-parameters
+        mm_ntwk = ntwk.copy()
+        if mm_ntwk.nports >= 4:
+            mm_ntwk.se2gmm(p=2)
 
-    # 2. Extract the relevant frequency range
-        # print(freq_ghz)
-    # print(f"Freq Mask: {freq_mask}")
+        z_d11 = mm_ntwk.z[:, 0, 0]
+        z_d22 = mm_ntwk.z[:, 1, 1]
+        z_d21 = mm_ntwk.z[:, 1, 0]
+        freq_ghz = ntwk.f / 1e9  # Convert to GHz
+        omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians
 
-    # print(f"Freq mask applied: {frequency_range[0]} GHz to {frequency_range[1]} GHz, resulting in {len(freq_ghz)} frequency points.")
+        if parameter == DesignParameter.Lp:
+            return np.imag(z_d11) / omega * 1e9
+        elif parameter == DesignParameter.Ls:
+            return np.imag(z_d22) / omega * 1e9
+        elif parameter == DesignParameter.Rp:
+            return np.real(z_d11)
+        elif parameter == DesignParameter.Rs:
+            return np.real(z_d22)
+        elif parameter == DesignParameter.Qp:
+            return np.imag(z_d11) / np.real(z_d11)
+        elif parameter == DesignParameter.Qs:
+            return np.imag(z_d22) / np.real(z_d22)
+        elif parameter == DesignParameter.k:
+            return np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
+        elif parameter == DesignParameter.SRF:
+            srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
+            return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
+        elif parameter == DesignParameter.COMING_SOON:
+            return custom_func_coming_soon(ntwk) if custom_func_coming_soon is not None else None
 
-    # mm_ntwk.plot_s_db()
-    # plt.show()
+# def calculate_electrical_parameters(ntwk: rf.Network, frequency_range: str | None = None) -> Dict:
+#     """
+#     Calculates electrical parameters such as inductance (L), resistance (R), quality factor (Q), and coupling coefficient (k) from the S-parameters of the given network within the specified frequency range.
+#     """
 
-
-    # Extract Differential Z-parameters for lumped metrics
-    # Index 0 = Primary Diff (d1), Index 1 = Secondary Diff (d2)
-    z_d11 = mm_ntwk.z[:, 0, 0]
-    z_d22 = mm_ntwk.z[:, 1, 1]
-    z_d21 = mm_ntwk.z[:, 1, 0]
-
-    # Calculate Parameters
-    with np.errstate(divide="ignore", invalid="ignore"):
-        Lp = np.imag(z_d11) / omega * 1e9
-        Ls = np.imag(z_d22) / omega * 1e9
-        Rp, Rs = np.real(z_d11), np.real(z_d22)
-        Qp = np.imag(z_d11) / np.real(z_d11)
-        Qs = np.imag(z_d22) / np.real(z_d22)
-        k = np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
-
-    srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
-    srf_f = freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
-
-    # Extract s-parameters
-    s_param_dict = {}
-    for i in range(mm_ntwk.nports):
-        for j in range(mm_ntwk.nports):
-            # Store s-parameters in dB for easier interpretation in the design goals
-            s_param_dict[f"S{i + 1}{j + 1}_dB"] = np.array(mm_ntwk.s_db[:, i, j])
-            s_param_dict[f"S{i + 1}{j + 1}"] = np.array(mm_ntwk.s[:, i, j])
-
-    return {
-        "mm_ntwk": mm_ntwk,
-        "freq_ghz": freq_ghz,
-        "Lp": np.array(Lp),
-        "Ls": np.array(Ls),
-        "Rp": np.array(Rp),
-        "Rs": np.array(Rs),
-        "Qp": np.array(Qp),
-        "Qs": np.array(Qs),
-        "k": np.array(k),
-        "z_d11": np.array(z_d11),
-        "srf_f": srf_f,
-        **s_param_dict
-    }
+#     # 1. Single-ended to Mixed-Mode Conversion
+#     mm_ntwk = ntwk.copy()
+#     if frequency_range is not None:
+#         mm_ntwk = mm_ntwk[frequency_range]
+#     if ntwk.nports >= 4:
+#          mm_ntwk.se2gmm(p=2)
 
 
-def plot_rfic_transformer_metrics(ntwk):
-    metrics = calculate_electrical_parameters(ntwk)  # Use a wide frequency range for plotting
-    mm_ntwk = metrics["mm_ntwk"]
-    freq = metrics["freq_ghz"]
-    Lp, Ls = metrics["Lp"], metrics["Ls"]
-    Rp, Rs = metrics["Rp"], metrics["Rs"]
-    Qp, Qs = metrics["Qp"], metrics["Qs"]
-    k = metrics["k"]
-    z_d11 = metrics["z_d11"]
+#     freq_ghz = ntwk.f / 1e9  # Convert to GHz if not already in GHz
+#     omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians per second
 
-    # Setup Plot
-    fig, axes = plt.subplots(3, 2, figsize=(14, 10))
-    fig.suptitle(
-        f"RFIC Transformer Report: {ntwk.name}", fontsize=16, fontweight="bold"
-    )
+#     # 2. Extract the relevant frequency range
+#         # print(freq_ghz)
+#     # print(f"Freq Mask: {freq_mask}")
 
-    # Subplot 1: S-Parameters (S11 & S21 Mixed-Mode)
-    axes[0, 0].plot(
-        freq,
-        mm_ntwk.s_db[:, 1, 0],
-        label="Sdd21 (Insertion Loss)",
-        color="teal",
-        lw=2.5,
-    )
-    axes[0, 0].plot(
-        freq,
-        mm_ntwk.s_db[:, 0, 0],
-        label="Sdd11 (Return Loss)",
-        color="darkorange",
-        ls="--",
-    )
-    axes[0, 0].set_title("Mixed-Mode S-Parameters", fontsize=14)
-    axes[0, 0].set_ylabel("Magnitude [dB]")
-    axes[0, 0].legend()
+#     # print(f"Freq mask applied: {frequency_range[0]} GHz to {frequency_range[1]} GHz, resulting in {len(freq_ghz)} frequency points.")
 
-    # Subplot 2: Inductance (Lp & Ls)
-    axes[0, 1].plot(freq, Lp, label="Lp (Primary)", color="blue")
-    axes[0, 1].plot(freq, Ls, label="Ls (Secondary)", color="cyan")
-    axes[0, 1].set_title("Inductance [nH]", fontsize=14)
-    axes[0, 1].set_ylabel("L [nH]")
-    axes[0, 1].legend()
+#     # mm_ntwk.plot_s_db()
+#     # plt.show()
 
-    # Subplot 3: Quality Factor (Qp & Qs)
-    axes[1, 0].plot(freq, Qp, label="Qp (Primary)", color="red")
-    axes[1, 0].plot(freq, Qs, label="Qs (Secondary)", color="magenta")
-    axes[1, 0].set_title("Quality Factor (Q)", fontsize=14)
-    axes[1, 0].set_ylabel("Q")
-    axes[1, 0].legend()
 
-    # Subplot 4: Resistance (Rp & Rs)
-    axes[1, 1].plot(freq, Rp, label="Rp (Primary)", color="darkgreen")
-    axes[1, 1].plot(freq, Rs, label="Rs (Secondary)", color="lime")
-    axes[1, 1].set_title("Loss / Resistance [Ω]", fontsize=14)
-    axes[1, 1].set_ylabel("R [Ω]")
-    axes[1, 1].legend()
+#     # Extract Differential Z-parameters for lumped metrics
+#     # Index 0 = Primary Diff (d1), Index 1 = Secondary Diff (d2)
+#     z_d11 = mm_ntwk.z[:, 0, 0]
+#     z_d22 = mm_ntwk.z[:, 1, 1]
+#     z_d21 = mm_ntwk.z[:, 1, 0]
 
-    # Subplot 5: Coupling Coefficient (k)
-    axes[2, 0].plot(freq, k, color="purple", lw=2)
-    axes[2, 0].set_title("Coupling Coefficient (k)", fontsize=14)
-    axes[2, 0].set_ylabel("k")
-    axes[2, 0].set_ylim(0, 1.1)
+#     # Calculate Parameters
+#     with np.errstate(divide="ignore", invalid="ignore"):
+#         Lp = np.imag(z_d11) / omega * 1e9
+#         Ls = np.imag(z_d22) / omega * 1e9
+#         Rp, Rs = np.real(z_d11), np.real(z_d22)
+#         Qp = np.imag(z_d11) / np.real(z_d11)
+#         Qs = np.imag(z_d22) / np.real(z_d22)
+#         k = np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
 
-    # Subplot 6: Reactance & SRF Identification
-    axes[2, 1].plot(freq, np.imag(z_d11), label="Im(Zdd11)", color="brown")
-    axes[2, 1].axhline(0, color="black", lw=1)  # y=0 line to find zero-crossing
-    srf_f = metrics["srf_f"]
-    if srf_f is not None:
-        axes[2, 1].axvline(
-            srf_f, color="red", linestyle=":", label=f"SRF: {srf_f:.2f} GHz"
-        )
-    axes[2, 1].set_title("Primary Reactance & SRF", fontsize=14)
-    axes[2, 1].set_ylabel("Im(Z) [Ω]")
-    axes[2, 1].legend()
+#     srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
+#     srf_f = freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
 
-    for ax in axes.flat:
-        ax.set_xlabel("Frequency [GHz]")
-        ax.grid(True, alpha=0.3)
+#     result = {
+#         "mm_ntwk": mm_ntwk,
+#         "freq_ghz": freq_ghz,
+#         "Lp": np.array(Lp),
+#         "Ls": np.array(Ls),
+#         "Rp": np.array(Rp),
+#         "Rs": np.array(Rs),
+#         "Qp": np.array(Qp),
+#         "Qs": np.array(Qs),
+#         "k": np.array(k),
+#         "z_d11": np.array(z_d11),
+#         "SRF": srf_f,
+#     }
 
-    plt.tight_layout()
-    plt.show()
+#     # Extract s-parameters
+#     for i in range(mm_ntwk.nports):
+#         for j in range(mm_ntwk.nports):
+#             result[f"S{i + 1}{j + 1}_dB"] = np.array(mm_ntwk.s_db[:, i, j])
 
-if __name__ == "__main__":
-    # Example usage
-    dg1 = DesignGoal(parameter=DesignParameter.S21, min_value=-3, max_value=-0.5)
-    dg2 = DesignGoal(parameter=DesignParameter.S11, max_value=-10)
+#     return result
+
+    

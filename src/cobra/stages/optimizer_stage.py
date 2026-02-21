@@ -22,9 +22,7 @@ class OptimizerStage(COBRABaseStage):
         return context
     
     def tell(self, context):
-        design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
-        ntwk = context["simulated_network"]
-        loss_values = design_goal_checker.loss(ntwk)
+        loss_values = context["penalties"]
         context["iterations"].append({
             "model_parameters": context["model_parameters"],
             "netlist_parameters": context["netlist_parameters"],
