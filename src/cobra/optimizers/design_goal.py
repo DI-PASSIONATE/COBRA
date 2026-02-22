@@ -148,7 +148,13 @@ def calculate_parameter(ntwk: rf.Network, parameter: DesignParameter, frequency_
     Calculates a specific electrical parameter from the S-parameters of the given network within the specified frequency range.
     """
     if frequency_range is not None:
-        ntwk = ntwk[frequency_range]
+        try:
+            ntwk = ntwk[frequency_range]
+        except ValueError:
+            # skrf might fail with "could not convert string to float: ''" for malformed ranges like "10-"
+            # Or invalid frequency strings. We re-raise with context.
+            raise ValueError(f"Invalid frequency range format: '{frequency_range}'. Expected format e.g. '10-20ghz'.")
+            
     if parameter.value.startswith("S") and parameter.value.endswith("_dB"):
         # Extract port indices from parameter name, e.g., S21_dB -> i=2, j=1
         i, j = int(parameter.value[1]), int(parameter.value[2])

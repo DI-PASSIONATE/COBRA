@@ -143,10 +143,21 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(param_group)
         config_layout.addWidget(goal_group)
         
-        self.run_btn = QPushButton("START OPTIMIZATION")
-        self.run_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
-        self.run_btn.clicked.connect(self.start_optimization)
-        config_layout.addWidget(self.run_btn)
+        self.action_btn = QPushButton("START OPTIMIZATION")
+        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self.action_btn.clicked.connect(self.on_action_clicked)
+        
+        self.stop_btn = QPushButton("⬛")  # Square stop symbol
+        self.stop_btn.setToolTip("Stop Optimization")
+        self.stop_btn.setFixedSize(40, 40) # Small square
+        self.stop_btn.setStyleSheet("font-weight: bold; font-size: 20px; background-color: #F44336; color: white;")
+        self.stop_btn.clicked.connect(self.stop_optimization)
+        self.stop_btn.setEnabled(False)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.action_btn)
+        btn_layout.addWidget(self.stop_btn)
+        config_layout.addLayout(btn_layout)
         
         progress_layout = QHBoxLayout()
         self.progress_bar = QProgressBar()
@@ -237,14 +248,17 @@ class MainWindow(QMainWindow):
                 
                 freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
                 if "-" in freq_str:
-                    f_start, f_end = map(float, freq_str.split("-"))
-                    # Convert to Hz
-                    f_start_hz = f_start * 1e9
-                    f_end_hz = f_end * 1e9
-                    
-                    if f_start_hz < min_f: min_f = f_start_hz
-                    if f_end_hz > max_f: max_f = f_end_hz
-                    found_any = True
+                    parts = freq_str.split("-")
+                    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                        f_start = float(parts[0])
+                        f_end = float(parts[1])
+                        # Convert to Hz
+                        f_start_hz = f_start * 1e9
+                        f_end_hz = f_end * 1e9
+                        
+                        if f_start_hz < min_f: min_f = f_start_hz
+                        if f_end_hz > max_f: max_f = f_end_hz
+                        found_any = True
             except:
                 pass
 
@@ -281,8 +295,13 @@ class MainWindow(QMainWindow):
                 freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
                 if "-" not in freq_str:
                     continue
-                    
-                f_start, f_end = map(float, freq_str.split("-"))
+                
+                parts = freq_str.split("-")
+                if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                    continue
+
+                f_start = float(parts[0])
+                f_end = float(parts[1])
                 f_start_hz = f_start * 1e9
                 f_end_hz = f_end * 1e9
                 
@@ -527,16 +546,27 @@ class MainWindow(QMainWindow):
         if goal.weight != 1.0: label += f" (w={goal.weight})"
         return label
 
+    def on_action_clicked(self):
+        # If not running, start
+        if not self.worker or not self.worker.isRunning():
+            self.start_optimization()
+            return
+        
+        # If running, toggle pause
+        if self.worker.paused:
+            self.worker.resume()
+            self.action_btn.setText("PAUSE")
+            self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;") # Orange
+        else:
+            self.worker.pause()
+            self.action_btn.setText("RESUME")
+            self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #2196F3; color: white;") # Blue
+
     def start_optimization(self):
         onnx = self.onnx_edit.text()
         netlist = self.netlist_edit.text()
         if not onnx or not netlist:
             QMessageBox.warning(self, "Missing Files", "Please select ONNX and Netlist files.")
-            return
-
-        # Toggle button state if already running
-        if self.worker and self.worker.isRunning():
-            self.stop_optimization()
             return
 
         optimizer_cls = self.optimizer_combo.currentData()
@@ -549,9 +579,10 @@ class MainWindow(QMainWindow):
             palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None
         )
         
-        # Change button to STOP
-        self.run_btn.setText("STOP OPTIMIZATION")
-        self.run_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #F44336; color: white;")
+        # Change button to PAUSE (running state)
+        self.action_btn.setText("PAUSE")
+        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;")
+        self.stop_btn.setEnabled(True)
         self.progress_bar.setRange(0, self.max_iter_spin.value())
         self.progress_bar.setValue(0)
         
@@ -576,8 +607,9 @@ class MainWindow(QMainWindow):
     def stop_optimization(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.run_btn.setText("STOPPING...")
-            self.run_btn.setEnabled(False)
+            self.action_btn.setText("STOPPING...")
+            self.action_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
 
     @Slot(dict)
     def on_progress(self, context: dict):
@@ -706,9 +738,6 @@ class MainWindow(QMainWindow):
              for i, loss in enumerate(losses):
                 if i in self.loss_history:
                     self.loss_history[i].append(loss)
-                    # Clear and replot full history? Alternatively optimize by just appending data if using setData
-                    # But for now, simple clear/plot is fine for <1000 iter
-                    pass
              
              self.loss_plot.clear()
              for i, hist in self.loss_history.items():
@@ -718,15 +747,21 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_finished(self):
-        self.run_btn.setEnabled(True)
-        self.run_btn.setText("START OPTIMIZATION")
-        self.run_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self.action_btn.setEnabled(True)
+        self.action_btn.setText("START OPTIMIZATION")
+        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        
+        self.stop_btn.setEnabled(False)
+
         QMessageBox.information(self, "Done", "Optimization Finished!")
 
     @Slot(str)
     def on_error(self, msg):
-        self.run_btn.setEnabled(True)
-        self.run_btn.setText("START OPTIMIZATION")
-        self.run_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self.action_btn.setEnabled(True)
+        self.action_btn.setText("START OPTIMIZATION")
+        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        
+        self.stop_btn.setEnabled(False)
+
         QMessageBox.critical(self, "Error", msg)
 

@@ -22,6 +22,7 @@ class OptimizationWorker(QThread):
         self.max_iterations = max_iterations
         self.orca_geometry = orca_geometry
         self.stop_requested = False
+        self.paused = False
 
     def run(self):
         try:
@@ -35,6 +36,11 @@ class OptimizationWorker(QThread):
             self.start_time = time.time()
 
             def optimization_callback(context):
+                while self.paused:
+                    if self.stop_requested:
+                        return False
+                    time.sleep(0.1)
+
                 if self.stop_requested:
                     return False
                 
@@ -71,3 +77,9 @@ class OptimizationWorker(QThread):
 
     def stop(self):
         self.stop_requested = True
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
