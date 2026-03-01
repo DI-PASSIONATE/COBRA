@@ -3,7 +3,25 @@ from typing import Dict, Optional
 import numpy as np
 import skrf as rf
 import matplotlib.pyplot as plt
-    
+
+
+class DesignParameter(Enum):
+    S11_dB = "S11_dB"
+    S21_dB = "S21_dB"
+    S31_dB = "S31_dB"
+    S41_dB = "S41_dB"
+    S12_dB = "S12_dB"
+    S22_dB = "S22_dB"
+    Lp = "Lp"
+    Ls = "Ls"
+    Rp = "Rp"
+    Rs = "Rs"
+    Qp = "Qp"
+    Qs = "Qs"
+    k = "k"
+    SRF = "SRF"
+    COMING_SOON = "CUSTOM"  # Placeholder for future custom metrics that may be added
+
 class DesignGoal:
     """
     DesignGoal - This class represents a single design goal for the optimization process. It includes a minimum and maximum in a given frequency range
@@ -118,141 +136,59 @@ class DesignGoalChecker:
         design_state = {}
 
         for goal in self.design_goals:
-            parameter_values = calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
+            parameter_values = self.calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
             design_state[goal.parameter.value] = parameter_values
             if parameter_values is None:
                 raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
             penalties.append(goal.penalty(parameter_values) * goal.weight)
         return design_state, penalties
 
-class DesignParameter(Enum):
-    S11_dB = "S11_dB"
-    S21_dB = "S21_dB"
-    S31_dB = "S31_dB"
-    S41_dB = "S41_dB"
-    S12_dB = "S12_dB"
-    S22_dB = "S22_dB"
-    Lp = "Lp"
-    Ls = "Ls"
-    Rp = "Rp"
-    Rs = "Rs"
-    Qp = "Qp"
-    Qs = "Qs"
-    k = "k"
-    SRF = "SRF"
-    COMING_SOON = "CUSTOM"  # Placeholder for future custom metrics that may be added
+    def calculate_parameter(self, ntwk: rf.Network, parameter: DesignParameter, frequency_range: str | None = None, custom_func_coming_soon=None) -> np.ndarray:
+        """
+        Calculates a specific electrical parameter from the S-parameters of the given network within the specified frequency range.
+        """
+        if frequency_range is not None:
+            try:
+                ntwk = ntwk[frequency_range]
+            except ValueError:
+                # skrf might fail with "could not convert string to float: ''" for malformed ranges like "10-"
+                # Or invalid frequency strings. We re-raise with context.
+                raise ValueError(f"Invalid frequency range format: '{frequency_range}'. Expected format e.g. '10-20ghz'.")
+                
+        if parameter.value.startswith("S") and parameter.value.endswith("_dB"):
+            # Extract port indices from parameter name, e.g., S21_dB -> i=2, j=1
+            i, j = int(parameter.value[1]), int(parameter.value[2])
+            return ntwk.s_db[:, i-1, j-1]  # Convert to 0-based index
+        else:
+            # For lumped parameters, we need to calculate them from the Z-parameters
+            mm_ntwk = ntwk.copy()
+            if mm_ntwk.nports >= 4:
+                mm_ntwk.se2gmm(p=2)
 
-def calculate_parameter(ntwk: rf.Network, parameter: DesignParameter, frequency_range: str | None = None, custom_func_coming_soon=None) -> np.ndarray:
-    """
-    Calculates a specific electrical parameter from the S-parameters of the given network within the specified frequency range.
-    """
-    if frequency_range is not None:
-        try:
-            ntwk = ntwk[frequency_range]
-        except ValueError:
-            # skrf might fail with "could not convert string to float: ''" for malformed ranges like "10-"
-            # Or invalid frequency strings. We re-raise with context.
-            raise ValueError(f"Invalid frequency range format: '{frequency_range}'. Expected format e.g. '10-20ghz'.")
-            
-    if parameter.value.startswith("S") and parameter.value.endswith("_dB"):
-        # Extract port indices from parameter name, e.g., S21_dB -> i=2, j=1
-        i, j = int(parameter.value[1]), int(parameter.value[2])
-        return ntwk.s_db[:, i-1, j-1]  # Convert to 0-based index
-    else:
-        # For lumped parameters, we need to calculate them from the Z-parameters
-        mm_ntwk = ntwk.copy()
-        if mm_ntwk.nports >= 4:
-            mm_ntwk.se2gmm(p=2)
+            z_d11 = mm_ntwk.z[:, 0, 0]
+            z_d22 = mm_ntwk.z[:, 1, 1]
+            z_d21 = mm_ntwk.z[:, 1, 0]
+            freq_ghz = ntwk.f / 1e9  # Convert to GHz
+            omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians
 
-        z_d11 = mm_ntwk.z[:, 0, 0]
-        z_d22 = mm_ntwk.z[:, 1, 1]
-        z_d21 = mm_ntwk.z[:, 1, 0]
-        freq_ghz = ntwk.f / 1e9  # Convert to GHz
-        omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians
-
-        if parameter == DesignParameter.Lp:
-            return np.imag(z_d11) / omega * 1e9
-        elif parameter == DesignParameter.Ls:
-            return np.imag(z_d22) / omega * 1e9
-        elif parameter == DesignParameter.Rp:
-            return np.real(z_d11)
-        elif parameter == DesignParameter.Rs:
-            return np.real(z_d22)
-        elif parameter == DesignParameter.Qp:
-            return np.imag(z_d11) / np.real(z_d11)
-        elif parameter == DesignParameter.Qs:
-            return np.imag(z_d22) / np.real(z_d22)
-        elif parameter == DesignParameter.k:
-            return np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
-        elif parameter == DesignParameter.SRF:
-            srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
-            return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
-        elif parameter == DesignParameter.COMING_SOON:
-            return custom_func_coming_soon(ntwk) if custom_func_coming_soon is not None else None
-
-# def calculate_electrical_parameters(ntwk: rf.Network, frequency_range: str | None = None) -> Dict:
-#     """
-#     Calculates electrical parameters such as inductance (L), resistance (R), quality factor (Q), and coupling coefficient (k) from the S-parameters of the given network within the specified frequency range.
-#     """
-
-#     # 1. Single-ended to Mixed-Mode Conversion
-#     mm_ntwk = ntwk.copy()
-#     if frequency_range is not None:
-#         mm_ntwk = mm_ntwk[frequency_range]
-#     if ntwk.nports >= 4:
-#          mm_ntwk.se2gmm(p=2)
-
-
-#     freq_ghz = ntwk.f / 1e9  # Convert to GHz if not already in GHz
-#     omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians per second
-
-#     # 2. Extract the relevant frequency range
-#         # print(freq_ghz)
-#     # print(f"Freq Mask: {freq_mask}")
-
-#     # print(f"Freq mask applied: {frequency_range[0]} GHz to {frequency_range[1]} GHz, resulting in {len(freq_ghz)} frequency points.")
-
-#     # mm_ntwk.plot_s_db()
-#     # plt.show()
-
-
-#     # Extract Differential Z-parameters for lumped metrics
-#     # Index 0 = Primary Diff (d1), Index 1 = Secondary Diff (d2)
-#     z_d11 = mm_ntwk.z[:, 0, 0]
-#     z_d22 = mm_ntwk.z[:, 1, 1]
-#     z_d21 = mm_ntwk.z[:, 1, 0]
-
-#     # Calculate Parameters
-#     with np.errstate(divide="ignore", invalid="ignore"):
-#         Lp = np.imag(z_d11) / omega * 1e9
-#         Ls = np.imag(z_d22) / omega * 1e9
-#         Rp, Rs = np.real(z_d11), np.real(z_d22)
-#         Qp = np.imag(z_d11) / np.real(z_d11)
-#         Qs = np.imag(z_d22) / np.real(z_d22)
-#         k = np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
-
-#     srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
-#     srf_f = freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
-
-#     result = {
-#         "mm_ntwk": mm_ntwk,
-#         "freq_ghz": freq_ghz,
-#         "Lp": np.array(Lp),
-#         "Ls": np.array(Ls),
-#         "Rp": np.array(Rp),
-#         "Rs": np.array(Rs),
-#         "Qp": np.array(Qp),
-#         "Qs": np.array(Qs),
-#         "k": np.array(k),
-#         "z_d11": np.array(z_d11),
-#         "SRF": srf_f,
-#     }
-
-#     # Extract s-parameters
-#     for i in range(mm_ntwk.nports):
-#         for j in range(mm_ntwk.nports):
-#             result[f"S{i + 1}{j + 1}_dB"] = np.array(mm_ntwk.s_db[:, i, j])
-
-#     return result
-
-    
+            if parameter == DesignParameter.Lp:
+                return np.imag(z_d11) / omega * 1e9
+            elif parameter == DesignParameter.Ls:
+                return np.imag(z_d22) / omega * 1e9
+            elif parameter == DesignParameter.Rp:
+                return np.real(z_d11)
+            elif parameter == DesignParameter.Rs:
+                return np.real(z_d22)
+            elif parameter == DesignParameter.Qp:
+                return np.imag(z_d11) / np.real(z_d11)
+            elif parameter == DesignParameter.Qs:
+                return np.imag(z_d22) / np.real(z_d22)
+            elif parameter == DesignParameter.k:
+                return np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
+            elif parameter == DesignParameter.SRF:
+                srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
+                return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
+            elif parameter == DesignParameter.COMING_SOON:
+                return custom_func_coming_soon(ntwk)
+            else:
+                raise ValueError(f"Unsupported design parameter: {parameter.value}")
