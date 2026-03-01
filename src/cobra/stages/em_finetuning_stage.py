@@ -2,8 +2,6 @@ from cobra.stages.base_stage import COBRABaseStage
 from typing import Dict
 import os
 import skrf as rf
-from orca.simulation.gds_converter import create_palace_model_from_gds
-from orca.simulation.simulate import run_palace
 
 class EMFineTuningStage(COBRABaseStage):
     """
@@ -20,8 +18,11 @@ class EMFineTuningStage(COBRABaseStage):
         Creates a GDS file based on the current parameters, meshes it 
         """
         from ihp import PDK
-        PDK.activate()
         from orca.geometry.base_geometry import BaseGeometry
+        from orca.simulation.gds_converter import create_palace_model_from_gds
+        from orca.simulation.simulate import run_palace
+        
+        PDK.activate()
         if not isinstance(orca_geometry, BaseGeometry):
             raise ValueError("orca_geometry must be an instance of BaseGeometry")
         
