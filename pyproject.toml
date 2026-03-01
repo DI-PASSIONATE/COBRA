@@ -38,6 +38,7 @@ dependencies = [
     "optuna",
     "pillow",
     "matplotlib",
+    "pyqtgraph",
 ]
 
 [project.scripts]
