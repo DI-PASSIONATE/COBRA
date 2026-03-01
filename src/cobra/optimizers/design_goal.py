@@ -3,58 +3,6 @@ from typing import Dict, Optional
 import numpy as np
 import skrf as rf
 import matplotlib.pyplot as plt
-
-class DesignGoalChecker:
-    """
-    DesignGoalChecker - This class checks if the design goals are met based on the current design state and the defined design goals.
-    """
-
-    def __init__(self, design_goals: list[DesignGoal]):
-        self.design_goals: list[DesignGoal] = design_goals
-
-    def check_goals(self, context) -> Dict:
-        """
-        Checks if the design goals are met based on the current design state.
-        """
-        ntwk = context["simulated_network"]
-        params, penalties = self.loss(ntwk)  # Calculate penalties based on the current design state
-        
-        # Check if any penalty is greater than zero, which indicates a violation of at least one design goal
-        context["goal_achieved"] = all(penalty <= 0.0 for penalty in penalties)
-        context["electrical_parameters"] = params  # Store calculated electrical parameters in context for later use (e.g., optimization feedback)
-        context["penalties"] = penalties  # Store penalties in context for later use (e.g., optimization feedback)
-        return context
-
-
-    # Override function when called print(DesignGoalChecker) to print the design goals in a readable format
-    def __str__(self):
-        goal_strs = []
-        for goal in self.design_goals:
-            goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {goal.frequency_range if goal.frequency_range else 'full range'} (weight: {goal.weight})")
-        return "Design Goals:" + " | ".join(goal_strs)
-    
-    def loss(self, ntwk: rf.Network) -> tuple[Dict, list[float]]:
-        """
-        Computes a list of penalties for each design goal based on the current design state. 
-        The loss is calculated based on how much the current design state deviates from the defined design goals.
-        
-        Args:
-            ntwk: The skrf Network object
-        Returns:
-            A tuple containing the design state (a dictionary of calculated parameters) and a list of penalties
-        """
-        
-        penalties = []
-        design_state = {}
-
-        for goal in self.design_goals:
-            parameter_values = calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
-            design_state[goal.parameter.value] = parameter_values
-            if parameter_values is None:
-                raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
-            penalties.append(goal.penalty(parameter_values) * goal.weight)
-        return design_state, penalties
-
     
 class DesignGoal:
     """
@@ -125,6 +73,57 @@ class DesignGoal:
                 # (Max - Value) / Max
                 return -np.sum(((self.max_value - values) / denom)**2)
         raise ValueError("At least one of min_value or max_value must be provided for a DesignGoal.")
+
+class DesignGoalChecker:
+    """
+    DesignGoalChecker - This class checks if the design goals are met based on the current design state and the defined design goals.
+    """
+
+    def __init__(self, design_goals: list[DesignGoal]):
+        self.design_goals: list[DesignGoal] = design_goals
+
+    def check_goals(self, context) -> Dict:
+        """
+        Checks if the design goals are met based on the current design state.
+        """
+        ntwk = context["simulated_network"]
+        params, penalties = self.loss(ntwk)  # Calculate penalties based on the current design state
+        
+        # Check if any penalty is greater than zero, which indicates a violation of at least one design goal
+        context["goal_achieved"] = all(penalty <= 0.0 for penalty in penalties)
+        context["electrical_parameters"] = params  # Store calculated electrical parameters in context for later use (e.g., optimization feedback)
+        context["penalties"] = penalties  # Store penalties in context for later use (e.g., optimization feedback)
+        return context
+
+
+    # Override function when called print(DesignGoalChecker) to print the design goals in a readable format
+    def __str__(self):
+        goal_strs = []
+        for goal in self.design_goals:
+            goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {goal.frequency_range if goal.frequency_range else 'full range'} (weight: {goal.weight})")
+        return "Design Goals:" + " | ".join(goal_strs)
+    
+    def loss(self, ntwk: rf.Network) -> tuple[Dict, list[float]]:
+        """
+        Computes a list of penalties for each design goal based on the current design state. 
+        The loss is calculated based on how much the current design state deviates from the defined design goals.
+        
+        Args:
+            ntwk: The skrf Network object
+        Returns:
+            A tuple containing the design state (a dictionary of calculated parameters) and a list of penalties
+        """
+        
+        penalties = []
+        design_state = {}
+
+        for goal in self.design_goals:
+            parameter_values = calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
+            design_state[goal.parameter.value] = parameter_values
+            if parameter_values is None:
+                raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
+            penalties.append(goal.penalty(parameter_values) * goal.weight)
+        return design_state, penalties
 
 class DesignParameter(Enum):
     S11_dB = "S11_dB"

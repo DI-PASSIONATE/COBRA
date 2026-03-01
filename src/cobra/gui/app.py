@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from .main_window import MainWindow
+from cobra.gui.main_window import MainWindow
 
 def run_gui():
     app = QApplication(sys.argv)
