@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 import time
 from PySide6.QtCore import QThread, Signal
 
@@ -13,7 +13,7 @@ class OptimizationWorker(QThread):
 
     def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
                  optimization_parameters: List[OptimizationProperty], 
-                 max_iterations: int, orca_geometry: Optional[str] = None):
+                 max_iterations: int, orca_geometry: Optional[Any] = None):
         super().__init__()
         self.cobra = cobra_instance
         self.netlist = netlist
