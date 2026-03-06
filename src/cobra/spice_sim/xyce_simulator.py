@@ -10,16 +10,16 @@ import glob, os
 class XyceSimulator(BaseSimulator):
     netlist_parser: BaseNetlistParser = XyceNetlistParser()
 
-    def __init__(self, xyce_command="Xyce", parallel=False):
+    def __init__(self, xyce_command:str ="Xyce", parallel_xyce:bool=False):
         self.xyce_command = xyce_command
-        self.parallel = parallel
+        self.parallel = parallel_xyce
         #self.netlist_parser.from_file("TODO")
 
     def preprocess_ntwk(self, ntwk):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
         return vector_fit(ntwk, name="cobra_output")
 
-    def run_simulation(self, netlist_name) -> rf.Network:
+    def run_simulation(self, netlist_name: str) -> rf.Network:
         output_name = "xyce_output"
         parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
         command = parallel_command + [self.xyce_command, netlist_name, "-o", output_name]

@@ -1,4 +1,5 @@
-from typing import List, Optional
+from typing import List
+import inspect
 import numpy as np
 import onnxruntime
 
@@ -7,7 +8,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog, 
     QListWidget, QTableWidget, QTableWidgetItem, 
     QSpinBox, QGroupBox, QFormLayout,
-    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu
+    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, Slot
 import pyqtgraph as pg
@@ -39,7 +40,7 @@ class MainWindow(QMainWindow):
         config_layout = QVBoxLayout(config_group)
         
         # 1. File Selection
-        form_layout = QFormLayout()
+        self.config_form_layout = QFormLayout()
         
         self.onnx_edit = QLineEdit()
         self.onnx_btn = QPushButton("Browse")
@@ -47,7 +48,7 @@ class MainWindow(QMainWindow):
         h_onnx = QHBoxLayout()
         h_onnx.addWidget(self.onnx_edit)
         h_onnx.addWidget(self.onnx_btn)
-        form_layout.addRow("ONNX Model:", h_onnx)
+        self.config_form_layout.addRow("ONNX Model:", h_onnx)
         
         self.netlist_edit = QLineEdit()
         self.netlist_btn = QPushButton("Browse")
@@ -55,20 +56,26 @@ class MainWindow(QMainWindow):
         h_net = QHBoxLayout()
         h_net.addWidget(self.netlist_edit)
         h_net.addWidget(self.netlist_btn)
-        form_layout.addRow("Netlist:", h_net)
+        self.config_form_layout.addRow("Netlist:", h_net)
         
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
-        form_layout.addRow("Optimizer:", self.optimizer_combo)
+        self.config_form_layout.addRow("Optimizer:", self.optimizer_combo)
         
         self.simulator_combo = QComboBox()
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
-        form_layout.addRow("Simulator:", self.simulator_combo)
+        self.config_form_layout.addRow("Simulator:", self.simulator_combo)
+        
+        # Track position for inserting dynamic simulator options
+        self.sim_options_insert_pos = self.config_form_layout.rowCount()
+        self.sim_options_count = 0
+        self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
+        self.simulator_widgets = {}
         
         self.max_iter_spin = QSpinBox()
         self.max_iter_spin.setRange(1, 99999)
         self.max_iter_spin.setValue(500)
-        form_layout.addRow("Max Iterations:", self.max_iter_spin)
+        self.config_form_layout.addRow("Max Iterations:", self.max_iter_spin)
 
         # self.moo_cb = QCheckBox("Multi-Objective Optimization")
         # form_layout.addRow("", self.moo_cb)
@@ -76,11 +83,17 @@ class MainWindow(QMainWindow):
         #### OPTIONAL - Fine-tuning with palace ####
         self.finetune_cb = QCheckBox("Perform finetuning")
         self.finetune_cb.setToolTip("Runs a few iterations of palace simulations instead of the surrogate model at the end to ensure correct predictions")
-        form_layout.addRow("", self.finetune_cb)
+        self.config_form_layout.addRow("", self.finetune_cb)
 
         self.palace_label = QLabel("Palace Command:")
         self.palace_edit = QLineEdit("palace")
-        form_layout.addRow(self.palace_label, self.palace_edit)
+        self.config_form_layout.addRow(self.palace_label, self.palace_edit)
+
+        self.ft_iter_label = QLabel("Finetuning Iterations:")
+        self.ft_iter_spin = QSpinBox()
+        self.ft_iter_spin.setRange(1, 100)
+        self.ft_iter_spin.setValue(3)
+        self.config_form_layout.addRow(self.ft_iter_label, self.ft_iter_spin)
 
         self.orca_edit = QLineEdit()
         self.orca_btn = QPushButton("Browse")
@@ -88,21 +101,25 @@ class MainWindow(QMainWindow):
         h_orca = QHBoxLayout()
         h_orca.addWidget(self.orca_edit)
         h_orca.addWidget(self.orca_btn)
-        form_layout.addRow("ORCA Geometry:", h_orca)
+        self.config_form_layout.addRow("ORCA Geometry:", h_orca)
         
         # Disable fine-tuning fields by default
         self.palace_label.setVisible(False)
         self.palace_edit.setVisible(False)
+        self.ft_iter_label.setVisible(False)
+        self.ft_iter_spin.setVisible(False)
         self.orca_edit.setVisible(False)
         self.orca_btn.setVisible(False)
         
         # If fine-tuning is toggled, show palace command and ORCA geometry fields
         self.finetune_cb.toggled.connect(self.palace_label.setVisible)
         self.finetune_cb.toggled.connect(self.palace_edit.setVisible)
+        self.finetune_cb.toggled.connect(self.ft_iter_label.setVisible)
+        self.finetune_cb.toggled.connect(self.ft_iter_spin.setVisible)
         self.finetune_cb.toggled.connect(self.orca_edit.setVisible)
         self.finetune_cb.toggled.connect(self.orca_btn.setVisible)
         
-        config_layout.addLayout(form_layout)
+        config_layout.addLayout(self.config_form_layout)
         
         # 2. Optimization Parameters
         param_group = QGroupBox("Optimization Parameters")
@@ -231,6 +248,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.loss_history = {} # key: goal index, value: list of losses
         self.overlay_items = []
+        
+        self.update_simulator_options()
 
     def refresh_overlays(self, state):
         self.draw_overlays()
@@ -345,6 +364,77 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error drawing overlay for goal: {e}")
 
+
+    def update_simulator_options(self):
+        # Clear existing dynamic options using takeRow + deleteLater
+        for _ in range(self.sim_options_count):
+            result = self.config_form_layout.takeRow(self.sim_options_insert_pos)
+            if result.labelItem: 
+                w = result.labelItem.widget()
+                if w: w.deleteLater()
+            if result.fieldItem:
+                w = result.fieldItem.widget()
+                if w: w.deleteLater()
+        
+        self.sim_options_count = 0
+        self.simulator_widgets = {}
+        
+        # Get selected simulator class
+        sim_cls = self.simulator_combo.currentData()
+        if not sim_cls:
+            return
+        
+        # Inspect __init__ to find arguments
+        try:
+            sig = inspect.signature(sim_cls.__init__)
+        except ValueError:
+            return
+
+        idx = self.sim_options_insert_pos
+        count = 0
+
+        for name, param in sig.parameters.items():
+            if name == 'self': continue
+            if name == 'args' or name == 'kwargs': continue
+            
+            annotation = param.annotation
+            default = param.default
+            
+            widget = None
+            
+            # Create appropriate widget based on type annotation or default value type
+            if annotation == bool or isinstance(default, bool):
+                widget = QCheckBox()
+                if isinstance(default, bool):
+                    widget.setChecked(default)
+                
+            elif annotation == int or isinstance(default, int):
+                widget = QSpinBox()
+                widget.setRange(-1000000, 1000000)
+                if isinstance(default, int):
+                    widget.setValue(default)
+                    
+            elif annotation == float or isinstance(default, float):
+                widget = QDoubleSpinBox()
+                widget.setRange(-1e9, 1e9)
+                if isinstance(default, float):
+                    widget.setValue(default)
+                    
+            else:
+                # Default to line edit for strings or unknown types
+                widget = QLineEdit()
+                if default != inspect.Parameter.empty:
+                    widget.setText(str(default))
+            
+            # Improve label readability
+            label_text = name.replace("_", " ").title()
+            self.config_form_layout.insertRow(idx, label_text + ":", widget)
+            self.simulator_widgets[name] = widget
+            
+            idx += 1
+            count += 1
+            
+        self.sim_options_count = count
 
     def browse_file(self, line_edit, filter):
         fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", filter)
@@ -572,11 +662,22 @@ class MainWindow(QMainWindow):
         optimizer_cls = self.optimizer_combo.currentData()
         simulator_cls = self.simulator_combo.currentData()
         
+        # Gather simulator kwargs
+        sim_kwargs = {}
+        for name, widget in self.simulator_widgets.items():
+             if isinstance(widget, QCheckBox):
+                 sim_kwargs[name] = widget.isChecked()
+             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                 sim_kwargs[name] = widget.value()
+             elif isinstance(widget, QLineEdit):
+                 sim_kwargs[name] = widget.text()
+        
         cobra = COBRA(
             em_surrogate_model=onnx,
             optimizer=optimizer_cls(),# multi_objective=self.moo_cb.isChecked()),
-            circuit_simulator=simulator_cls(),
-            palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None
+            circuit_simulator=simulator_cls(**sim_kwargs),
+            palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None,
+            fine_tuning_iterations=self.ft_iter_spin.value()
         )
         
         # Change button to PAUSE (running state)

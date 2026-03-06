@@ -28,11 +28,13 @@ class COBRA:
         optimizer: BaseOptimizer = OptunaOptimizer(),
         circuit_simulator: BaseSimulator = XyceSimulator(),
         palace_fine_tuning_command: Optional[str] = None,
+        fine_tuning_iterations: int = 3,
     ):
         self.optimizer_stage = OptimizerStage(optimizer)
         self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model)
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
+        self.fine_tuning_iterations = fine_tuning_iterations
 
     def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
         """
@@ -187,7 +189,7 @@ class COBRA:
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
 
-        for iteration in tqdm.tqdm(range(3), desc="COBRA EM Fine-Tuning Progress"):
+        for iteration in tqdm.tqdm(range(self.fine_tuning_iterations), desc="COBRA EM Fine-Tuning Progress"):
             context["iteration"] = iteration + 1
             # Perform EM simulation INSTEAD OF surrogate model prediction
             context = self.em_fine_tuning_stage.run(context, orca_geometry=context.get("orca_geometry", None))

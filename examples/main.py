@@ -1,17 +1,17 @@
 # Example usage
-from cobra import COBRA, DesignGoal, DesignParameter, OptimizationProperty, OptimizationType
-from cobra.optimizers.optuna_optimizer import OptunaOptimizer
+from cobra import COBRA, DesignGoal, DesignParameter, OptimizationProperty, OptimizationType, XyceSimulator, OptunaOptimizer
 from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
 
 design_goals = [
-    DesignGoal(DesignParameter.S11_dB, max_value=-11, frequency_range="125-135ghz"),
+    DesignGoal(DesignParameter.S11_dB, max_value=-8, frequency_range="125-135ghz"),
     DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
 ]
 
 cobra = COBRA(
     optimizer=OptunaOptimizer(multi_objective=False),
+    circuit_simulator=XyceSimulator(),
     em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
-    #palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"
+    palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"
 )
 
 netlist = "netlist_xyce_vector.cir"
@@ -41,4 +41,5 @@ context = cobra.run(
     parameters, 
     orca_geometry=TransformerOcta()
 )
-print("Optimized Parameters:", context["parameters"])
+
+print(context)

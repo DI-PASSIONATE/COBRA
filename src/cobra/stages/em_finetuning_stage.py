@@ -30,7 +30,7 @@ class EMFineTuningStage(COBRABaseStage):
         name = f"cobra_result_{context['iteration']}"
         gds_output_path = os.path.join(base_dir, f"{name}.gds")
         
-        parameters = context["parameters"]
+        parameters = context["model_parameters"]
         orca_geometry.create_gds_file(name=name, output_path=gds_output_path, params=parameters)
         create_palace_model_from_gds(
             geometry_name=name,

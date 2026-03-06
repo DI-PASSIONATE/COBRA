@@ -2,9 +2,10 @@ import os
 import skrf 
 import argparse
 import numpy as np
+from skrf.vectorFitting import VectorFitting
 
 def vector_fit(nw: skrf.Network, name: str):
-    vf = skrf.VectorFitting(nw)
+    vf = VectorFitting(nw)
     vf.auto_fit()
 
     # # check if input data is passive
