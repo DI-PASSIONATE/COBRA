@@ -8,7 +8,11 @@ design_goals = [
 ]
 
 cobra = COBRA(
-    optimizer=OptunaOptimizer(multi_objective=False),
+    optimizer=OptunaOptimizer(
+        multi_objective=False,
+        sampler="tpe",  # Options: "tpe", "random", "auto", "simulated_annealing"
+        pruner="median",  # Options: None, "median", "successive_halving", "hyperband"
+    ),
     circuit_simulator=XyceSimulator(),
     em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
     palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"

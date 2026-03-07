@@ -1,30 +1,124 @@
+import importlib
 from typing import Any, Dict
 
-from optuna import study, trial
-from cobra.optimizers import BaseOptimizer
-from typing import Callable, Dict
-import numpy as np
 import optuna
 
-from cobra.optimizers.base_optimizer import OptimizationProperty
+from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
 
 class OptunaOptimizer(BaseOptimizer):
     """
     OptunaOptimizer - An implementation of the BaseOptimizer using Optuna for optimization.
     """
+    def __init__(
+        self,
+        multi_objective: bool = False,
+        sampler: str | optuna.samplers.BaseSampler | None = "tpe",
+        pruner: str | optuna.pruners.BasePruner | None = None,
+        sampler_kwargs: dict[str, Any] | None = None,
+        pruner_kwargs: dict[str, Any] | None = None,
+    ):
+        super().__init__(multi_objective=multi_objective)
+        self.sampler = sampler
+        self.pruner = pruner
+        self.sampler_kwargs = sampler_kwargs or {}
+        self.pruner_kwargs = pruner_kwargs or {}
+        self.study: optuna.study.Study | None = None
+
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        return name.replace("_", "").replace("-", "").lower()
+
+    def _get_study(self) -> optuna.study.Study:
+        if self.study is None:
+            raise RuntimeError("The Optuna study has not been initialized yet. Call initialize() first.")
+        return self.study
+
+    def _load_optunahub_sampler(self, package_name: str, class_name: str) -> optuna.samplers.BaseSampler:
+        try:
+            optunahub = importlib.import_module("optunahub")
+        except ImportError as exc:
+            raise ImportError(
+                "optunahub is required to use the requested sampler. Install it with `pip install optunahub`."
+            ) from exc
+
+        module = optunahub.load_module(package_name)
+        sampler_cls = getattr(module, class_name)
+
+        try:
+            return sampler_cls(**self.sampler_kwargs)
+        except Exception as exc:
+            if class_name == "AutoSampler":
+                raise RuntimeError(
+                    "Failed to initialize AutoSampler. Install its optional dependencies, e.g. `pip install optunahub cmaes scipy torch`."
+                ) from exc
+            raise
+
+    def _create_sampler(self) -> optuna.samplers.BaseSampler:
+        if isinstance(self.sampler, optuna.samplers.BaseSampler):
+            return self.sampler
+
+        if self.sampler is None:
+            sampler_name = "tpe"
+        elif isinstance(self.sampler, str):
+            sampler_name = self._normalize_name(self.sampler)
+        else:
+            raise TypeError("sampler must be a string, an Optuna sampler instance, or None.")
+
+        if sampler_name in {"tpe", "tpesampler"}:
+            return optuna.samplers.TPESampler(**self.sampler_kwargs)
+        if sampler_name in {"random", "randomsampler"}:
+            return optuna.samplers.RandomSampler(**self.sampler_kwargs)
+        if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
+            return self._load_optunahub_sampler("samplers/simulated_annealing", "SimulatedAnnealingSampler")
+
+        raise ValueError(
+            "Unsupported sampler. Choose one of: AutoSampler, RandomSampler, TPESampler, SimulatedAnnealingSampler."
+        )
+
+    def _create_pruner(self) -> optuna.pruners.BasePruner | None:
+        if isinstance(self.pruner, optuna.pruners.BasePruner):
+            return self.pruner
+
+        if self.pruner is None:
+            return None
+        if not isinstance(self.pruner, str):
+            raise TypeError("pruner must be a string, an Optuna pruner instance, or None.")
+
+        pruner_name = self._normalize_name(self.pruner)
+
+        if pruner_name in {"median", "medianpruner"}:
+            return optuna.pruners.MedianPruner(**self.pruner_kwargs)
+        if pruner_name in {
+            "successivehalving",
+            "successivehalvingpruner",
+            "sucessivehalving",
+            "sucessivehalvingpruner",
+        }:
+            return optuna.pruners.SuccessiveHalvingPruner(**self.pruner_kwargs)
+        if pruner_name in {"hyperband", "hyperbandpruner"}:
+            return optuna.pruners.HyperbandPruner(**self.pruner_kwargs)
+
+        raise ValueError(
+            "Unsupported pruner. Choose one of: MedianPruner, SuccessiveHalvingPruner, HyperbandPruner."
+        )
+
     def initialize(self, num_goals: int):
         if self.multi_objective:
             directions = ["minimize"] * num_goals
         else:
             directions = ["minimize"]
-        self.study = optuna.create_study(directions=directions)
+        self.study = optuna.create_study(
+            directions=directions,
+            sampler=self._create_sampler(),
+            pruner=self._create_pruner(),
+        )
 
     def tell(self, context, penalty: list[float] | float):
         trial = context["trial"]
-        self.study.tell(trial, penalty)
+        self._get_study().tell(trial, penalty)
 
     def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
-        trial = self.study.ask()
+        trial = self._get_study().ask()
         context["trial"] = trial
 
         # Suggest parameters for the current trial
@@ -44,11 +138,11 @@ class OptunaOptimizer(BaseOptimizer):
     def get_best_parameters(self) -> Dict[str, Any]:
         if self.multi_objective:
             raise ValueError("get_best_parameters is not available for multi-objective optimization. Use get_moo_results instead.")
-        return self.study.best_params
+        return self._get_study().best_params
     
     def get_moo_results(self) -> Any:
         if self.multi_objective:
-            return self.study.best_trials
+            return self._get_study().best_trials
         else:
             raise ValueError("Multi-objective optimization is not enabled for this optimizer.")
 

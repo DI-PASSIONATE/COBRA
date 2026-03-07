@@ -68,6 +68,23 @@ class MainWindow(QMainWindow):
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
         self.config_form_layout.addRow("Optimizer:", self.optimizer_combo)
+
+        self.optuna_sampler_combo = QComboBox()
+        self.optuna_sampler_combo.addItem("TPESampler (default)", "tpe")
+        self.optuna_sampler_combo.addItem("RandomSampler", "random")
+        self.optuna_sampler_combo.addItem("SimulatedAnnealingSampler (optunahub)", "simulated_annealing")
+        self.optuna_sampler_combo.setToolTip(
+            "Select the Optuna sampler strategy. SimulatedAnnealingSampler requires optunahub."
+        )
+        self.config_form_layout.addRow("Optuna Sampler:", self.optuna_sampler_combo)
+
+        self.optuna_pruner_combo = QComboBox()
+        self.optuna_pruner_combo.addItem("None", None)
+        self.optuna_pruner_combo.addItem("MedianPruner", "median")
+        self.optuna_pruner_combo.addItem("SuccessiveHalvingPruner", "successive_halving")
+        self.optuna_pruner_combo.addItem("HyperbandPruner", "hyperband")
+        self.optuna_pruner_combo.setToolTip("Select an optional Optuna pruner.")
+        self.config_form_layout.addRow("Optuna Pruner:", self.optuna_pruner_combo)
         
         self.simulator_combo = QComboBox()
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
@@ -981,6 +998,11 @@ class MainWindow(QMainWindow):
 
         optimizer_cls = self.optimizer_combo.currentData()
         simulator_cls = self.simulator_combo.currentData()
+        optimizer_kwargs = {}
+
+        if optimizer_cls is OptunaOptimizer:
+            optimizer_kwargs["sampler"] = self.optuna_sampler_combo.currentData()
+            optimizer_kwargs["pruner"] = self.optuna_pruner_combo.currentData()
         
         # Gather simulator kwargs
         sim_kwargs = {}
@@ -994,7 +1016,7 @@ class MainWindow(QMainWindow):
         
         cobra = COBRA(
             em_surrogate_model=onnx,
-            optimizer=optimizer_cls(),# multi_objective=self.moo_cb.isChecked()),
+            optimizer=optimizer_cls(**optimizer_kwargs),# multi_objective=self.moo_cb.isChecked()),
             circuit_simulator=simulator_cls(**sim_kwargs),
             palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None,
             fine_tuning_iterations=self.ft_iter_spin.value()

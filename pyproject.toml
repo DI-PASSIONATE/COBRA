@@ -36,6 +36,7 @@ dependencies = [
     "colorlog",
     "tqdm",
     "optuna",
+    "optunahub",
     "pillow",
     "matplotlib",
     "pyqtgraph",
