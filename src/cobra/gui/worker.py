@@ -10,6 +10,7 @@ class OptimizationWorker(QThread):
     progress = Signal(dict)
     finished = Signal()
     error = Signal(str)
+    ask_continue = Signal(int)
 
     def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
                  optimization_parameters: List[OptimizationProperty], 
@@ -53,6 +54,11 @@ class OptimizationWorker(QThread):
                 # Emit progress
                 self.progress.emit(context)
                 
+                # Check if we reached max iterations and ask to continue
+                if context["iteration"] >= context["max_iterations"] and not context["goal_achieved"]:
+                    self.ask_continue.emit(context["max_iterations"])
+                    context["max_iterations"] = self.max_iterations
+
                 # Update prev_network for next iteration
                 self.prev_network = context["simulated_network"]
                 

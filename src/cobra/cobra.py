@@ -60,6 +60,7 @@ class COBRA:
             "optimization_parameters": optimization_parameters,
             "output": None,
             "goal_achieved": False,
+            "max_iterations": max_iterations,
             "iterations": [],
             "orca_geometry": orca_geometry,
             "times": {
@@ -79,8 +80,12 @@ class COBRA:
             f.write(original_netlist_content)
 
         # Perform optimizer step
-        for iteration in tqdm.tqdm(range(max_iterations), desc="COBRA Optimization Progress"):
-            context["iteration"] = iteration + 1
+        pbar = tqdm.tqdm(total=context["max_iterations"], desc="COBRA Optimization Progress")
+        
+        iteration = 0
+        while iteration < context["max_iterations"]:
+            iteration += 1
+            context["iteration"] = iteration
             # Generate new parameters using the optimizer stage
             t1 = time.time()
             context = self.optimizer_stage.run(context)
@@ -117,12 +122,19 @@ class COBRA:
                 if should_continue is False:
                     print("Optimization stopped by callback.")
                     break
+            
+            pbar.update(1)
+            if pbar.total != context["max_iterations"]:
+                pbar.total = context["max_iterations"]
+                pbar.refresh()
 
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
                 break
 
             self.optimizer_stage.tell(context)
+            
+        pbar.close()
         
         # If goals not achieved, try to retrieve best parameters from optimizer and use those for final context
         if not context["goal_achieved"]:

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog, 
     QListWidget, QTableWidget, QTableWidgetItem, 
     QSpinBox, QGroupBox, QFormLayout, QScrollArea,
-    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox
+    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog
 )
 from PySide6.QtCore import Qt, Slot
 import pyqtgraph as pg
@@ -1021,6 +1021,7 @@ class MainWindow(QMainWindow):
             orca_geometry
         )
         self.worker.progress.connect(self.on_progress)
+        self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
         self.worker.start()
@@ -1031,6 +1032,23 @@ class MainWindow(QMainWindow):
             self.action_btn.setText("STOPPING...")
             self.action_btn.setEnabled(False)
             self.stop_btn.setEnabled(False)
+
+    @Slot(int)
+    def on_ask_continue(self, current_max: int):
+        # Ask user for new max iterations
+        new_max, ok = QInputDialog.getInt(
+            self,
+            "Target Not Reached",
+            f"Maximum iterations ({current_max}) reached without hitting the design goals.\n\nEnter a new maximum to continue, or cancel to stop:",
+            value=current_max,
+            minValue=current_max,
+            maxValue=99999
+        )
+        if ok and new_max > current_max:
+            if self.worker:
+                self.worker.max_iterations = new_max
+            self.max_iter_spin.setValue(new_max)
+            self.progress_bar.setMaximum(new_max)
 
     @Slot(dict)
     def on_progress(self, context: dict):
