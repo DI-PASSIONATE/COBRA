@@ -23,6 +23,7 @@ class OptunaOptimizer(BaseOptimizer):
         self.sampler_kwargs = sampler_kwargs or {}
         self.pruner_kwargs = pruner_kwargs or {}
         self.study: optuna.study.Study | None = None
+        self._param_to_trial_name: dict[str, str] = {}
 
     @staticmethod
     def _normalize_name(name: str) -> str:
@@ -120,16 +121,51 @@ class OptunaOptimizer(BaseOptimizer):
     def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         trial = self._get_study().ask()
         context["trial"] = trial
+        self._param_to_trial_name = {}
 
-        # Suggest parameters for the current trial
-        model_parameters = {}
-        for param in model_input_ranges:
-            model_parameters[param.name] = trial.suggest_float(param.name, low=param.min_value, high=param.max_value, step=param.step)
+        def _suggest(params: list[OptimizationProperty], with_unit: bool) -> dict[str, Any]:
+            by_name = {p.name: p for p in params}
+            sampled: dict[str, Any] = {}
+            values: dict[str, Any] = {}
 
-        netlist_parameters = {}
-        for param in netlist_property_ranges:
-            unit = param.unit if param.unit else ""
-            netlist_parameters[param.name] = f"{trial.suggest_float(param.name, low=param.min_value, high=param.max_value, step=param.step)}{unit}"
+            def _resolve_master(param: OptimizationProperty) -> OptimizationProperty:
+                current = param
+                seen = {param.name}
+                while current.linked_to:
+                    target_name = current.linked_to
+                    target = by_name.get(target_name)
+                    if target is None:
+                        raise ValueError(f"Parameter '{current.name}' links to unknown parameter '{target_name}'.")
+                    if target.name in seen:
+                        raise ValueError(f"Circular link detected for parameter '{param.name}'.")
+                    seen.add(target.name)
+                    current = target
+                return current
+
+            for param in params:
+                master = _resolve_master(param)
+                trial_name = master.name
+
+                if trial_name not in sampled:
+                    sampled[trial_name] = trial.suggest_float(
+                        trial_name,
+                        low=master.min_value,
+                        high=master.max_value,
+                        step=master.step,
+                    )
+                value = sampled[trial_name]
+
+                self._param_to_trial_name[param.name] = trial_name
+                if with_unit:
+                    unit = param.unit if param.unit else (master.unit if master.unit else "")
+                    values[param.name] = f"{value}{unit}"
+                else:
+                    values[param.name] = value
+            return values
+
+        # Suggest parameters for the current trial (linked params share a sampled value)
+        model_parameters = _suggest(model_input_ranges, with_unit=False)
+        netlist_parameters = _suggest(netlist_property_ranges, with_unit=True)
 
         # Update context
         context["model_parameters"] = model_parameters
@@ -138,7 +174,11 @@ class OptunaOptimizer(BaseOptimizer):
     def get_best_parameters(self) -> Dict[str, Any]:
         if self.multi_objective:
             raise ValueError("get_best_parameters is not available for multi-objective optimization. Use get_moo_results instead.")
-        return self._get_study().best_params
+        best = dict(self._get_study().best_params)
+        for param_name, trial_name in self._param_to_trial_name.items():
+            if trial_name in best:
+                best[param_name] = best[trial_name]
+        return best
     
     def get_moo_results(self) -> Any:
         if self.multi_objective:

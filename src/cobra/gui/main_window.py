@@ -185,8 +185,8 @@ class MainWindow(QMainWindow):
         # 2. Optimization Parameters
         param_group = QGroupBox("Optimization Parameters")
         param_layout = QVBoxLayout(param_group)
-        self.param_table = QTableWidget(0, 6)
-        self.param_table.setHorizontalHeaderLabels(["Name", "Type", "Min", "Current", "Max", "Unit"])
+        self.param_table = QTableWidget(0, 7)
+        self.param_table.setHorizontalHeaderLabels(["Name", "Type", "Min", "Current", "Max", "Unit", "Linked To"])
         self.param_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.param_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.param_table.customContextMenuRequested.connect(self.param_context_menu)
@@ -771,7 +771,7 @@ class MainWindow(QMainWindow):
             line_edit.setText(fname)
 
     def add_manual_param(self):
-        dlg = OptimizationParamDialog(parent=self)
+        dlg = OptimizationParamDialog(parent=self, link_candidates=[p.name for p in self.opt_params])
         if dlg.exec():
             self._add_param_to_table(dlg.get_data())
 
@@ -790,7 +790,11 @@ class MainWindow(QMainWindow):
     def edit_param(self, row):
         if row < 0 or row >= len(self.opt_params): return
         param = self.opt_params[row]
-        dlg = OptimizationParamDialog(parent=self, param=param)
+        dlg = OptimizationParamDialog(
+            parent=self,
+            param=param,
+            link_candidates=[p.name for i, p in enumerate(self.opt_params) if i != row],
+        )
         if dlg.exec():
             new_param = dlg.get_data()
             self.opt_params[row] = new_param
@@ -818,6 +822,7 @@ class MainWindow(QMainWindow):
         
         self.param_table.setItem(row, 4, QTableWidgetItem(str(param.max_value)))
         self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
+        self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
 
     def add_onnx_param(self):
         path = self.onnx_edit.text()
@@ -840,7 +845,13 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Info", "All ONNX parameters have already been added.")
                 return
 
-            dlg = OptimizationParamDialog("ONNX", available_inputs, self, metadata=metadata)
+            dlg = OptimizationParamDialog(
+                "ONNX",
+                available_inputs,
+                self,
+                metadata=metadata,
+                link_candidates=[p.name for p in self.opt_params],
+            )
             if dlg.exec():
                 self._add_param_to_table(dlg.get_data())
         except Exception as e:
@@ -868,7 +879,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Info", "All valid netlist parameters have already been added.")
                 return
             
-            dlg = OptimizationParamDialog("NETLIST", available_prospects, self)
+            dlg = OptimizationParamDialog(
+                "NETLIST",
+                available_prospects,
+                self,
+                link_candidates=[p.name for p in self.opt_params],
+            )
             if dlg.exec():
                 self._add_param_to_table(dlg.get_data())
         except Exception as e:
@@ -901,6 +917,7 @@ class MainWindow(QMainWindow):
         
         self.param_table.setItem(row, 4, QTableWidgetItem(str(param.max_value)))
         self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
+        self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
 
     def add_design_goal(self):
         dlg = DesignGoalDialog(self)
