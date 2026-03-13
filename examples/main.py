@@ -20,24 +20,15 @@ cobra = COBRA(
 
 netlist = "netlist_xyce_vector.cir"
 
-parameters = {
-    "input_winding_diameter": (20.0, 100.0),
-    "output_winding_diameter": (20.0, 100.0),
-    "center_displacement": (0.0, 20.0),
-    "bottom_linewidth": (2.0, 8.0),
-    "upper_linewidth": (2.0, 8.0),
-}
-
 parameters = [
-    OptimizationProperty(name="input_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
-    OptimizationProperty(name="output_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
+    OptimizationProperty(name="bottom_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
+    OptimizationProperty(name="top_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
     OptimizationProperty(name="center_displacement", type=OptimizationType.MODEL_INPUT, min_value=0.0, max_value=20.0, step=0.1),
     OptimizationProperty(name="bottom_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
-    OptimizationProperty(name="upper_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
-    # Optimize C3 from 0 to 20 fF with a step of 1 fF
+    OptimizationProperty(name="top_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
+    # Optimize C3 (+ linked C4) from 0 to 20 fF with a step of 1 fF
     OptimizationProperty(name="C3", type=OptimizationType.NETLIST_VARIABLE, unit="F", min_value=0.0, max_value=20.0, step=1.0),
-    # C4 is linked to C3 and will always use the same value
-    OptimizationProperty(name="C4", type=OptimizationType.NETLIST_VARIABLE, min_value=0.0, max_value=0.0, step=0.0, linked_to="C3"),
+    OptimizationProperty(name="C4", type=OptimizationType.NETLIST_VARIABLE, linked_to="C3", min_value=0.0, max_value=0.0, step=0.0)
 ]
 
 context = cobra.run(
