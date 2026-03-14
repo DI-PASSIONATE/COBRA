@@ -17,7 +17,7 @@ class EMSurrogateStage(COBRABaseStage):
         self.session = InferenceSession(em_surrogate_model)
 
     def run(self, context: Dict) -> Dict:
-        params = context["parameters"]
+        params = context["model_parameters"]
         ntwk = self.inference_snp(params)
         context["predicted_network"] = ntwk
         ntwk.write_touchstone("predicted_s_parameters.s2p")

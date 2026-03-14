@@ -1,39 +1,189 @@
-from typing import Dict
-from cobra.optimizers import BaseOptimizer
-from typing import Callable, Dict
-import numpy as np
+import importlib
+from typing import Any, Dict
+
 import optuna
+
+from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
 
 class OptunaOptimizer(BaseOptimizer):
     """
     OptunaOptimizer - An implementation of the BaseOptimizer using Optuna for optimization.
     """
+    def __init__(
+        self,
+        multi_objective: bool = False,
+        sampler: str | optuna.samplers.BaseSampler | None = "tpe",
+        pruner: str | optuna.pruners.BasePruner | None = None,
+        sampler_kwargs: dict[str, Any] | None = None,
+        pruner_kwargs: dict[str, Any] | None = None,
+    ):
+        super().__init__(multi_objective=multi_objective)
+        self.sampler = sampler
+        self.pruner = pruner
+        self.sampler_kwargs = sampler_kwargs or {}
+        self.pruner_kwargs = pruner_kwargs or {}
+        self.study: optuna.study.Study | None = None
+        self._param_to_trial_name: dict[str, str] = {}
 
-    def __init__(self):
-        super().__init__()
-        self.study = optuna.create_study(direction="minimize")
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        return name.replace("_", "").replace("-", "").lower()
 
-    def tell(self, context, loss):
-        parameters = context["parameters"]
+    def _get_study(self) -> optuna.study.Study:
+        if self.study is None:
+            raise RuntimeError("The Optuna study has not been initialized yet. Call initialize() first.")
+        return self.study
+
+    def _load_optunahub_sampler(self, package_name: str, class_name: str) -> optuna.samplers.BaseSampler:
+        try:
+            optunahub = importlib.import_module("optunahub")
+        except ImportError as exc:
+            raise ImportError(
+                "optunahub is required to use the requested sampler. Install it with `pip install optunahub`."
+            ) from exc
+
+        module = optunahub.load_module(package_name)
+        sampler_cls = getattr(module, class_name)
+
+        try:
+            return sampler_cls(**self.sampler_kwargs)
+        except Exception as exc:
+            if class_name == "AutoSampler":
+                raise RuntimeError(
+                    "Failed to initialize AutoSampler. Install its optional dependencies, e.g. `pip install optunahub cmaes scipy torch`."
+                ) from exc
+            raise
+
+    def _create_sampler(self) -> optuna.samplers.BaseSampler:
+        if isinstance(self.sampler, optuna.samplers.BaseSampler):
+            return self.sampler
+
+        if self.sampler is None:
+            sampler_name = "tpe"
+        elif isinstance(self.sampler, str):
+            sampler_name = self._normalize_name(self.sampler)
+        else:
+            raise TypeError("sampler must be a string, an Optuna sampler instance, or None.")
+
+        if sampler_name in {"tpe", "tpesampler"}:
+            return optuna.samplers.TPESampler(**self.sampler_kwargs)
+        if sampler_name in {"random", "randomsampler"}:
+            return optuna.samplers.RandomSampler(**self.sampler_kwargs)
+        if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
+            return self._load_optunahub_sampler("samplers/simulated_annealing", "SimulatedAnnealingSampler")
+
+        raise ValueError(
+            "Unsupported sampler. Choose one of: AutoSampler, RandomSampler, TPESampler, SimulatedAnnealingSampler."
+        )
+
+    def _create_pruner(self) -> optuna.pruners.BasePruner | None:
+        if isinstance(self.pruner, optuna.pruners.BasePruner):
+            return self.pruner
+
+        if self.pruner is None:
+            return None
+        if not isinstance(self.pruner, str):
+            raise TypeError("pruner must be a string, an Optuna pruner instance, or None.")
+
+        pruner_name = self._normalize_name(self.pruner)
+
+        if pruner_name in {"median", "medianpruner"}:
+            return optuna.pruners.MedianPruner(**self.pruner_kwargs)
+        if pruner_name in {
+            "successivehalving",
+            "successivehalvingpruner",
+            "sucessivehalving",
+            "sucessivehalvingpruner",
+        }:
+            return optuna.pruners.SuccessiveHalvingPruner(**self.pruner_kwargs)
+        if pruner_name in {"hyperband", "hyperbandpruner"}:
+            return optuna.pruners.HyperbandPruner(**self.pruner_kwargs)
+
+        raise ValueError(
+            "Unsupported pruner. Choose one of: MedianPruner, SuccessiveHalvingPruner, HyperbandPruner."
+        )
+
+    def initialize(self, num_goals: int):
+        if self.multi_objective:
+            directions = ["minimize"] * num_goals
+        else:
+            directions = ["minimize"]
+        self.study = optuna.create_study(
+            directions=directions,
+            sampler=self._create_sampler(),
+            pruner=self._create_pruner(),
+        )
+
+    def tell(self, context, penalty: list[float] | float):
         trial = context["trial"]
-        self.study.tell(trial, loss)
+        self._get_study().tell(trial, penalty)
 
-    def step(self, context, input_parameter_range: Dict[str, tuple | list | np.ndarray]) -> Dict:
-        trial = self.study.ask()
+    def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+        trial = self._get_study().ask()
         context["trial"] = trial
+        self._param_to_trial_name = {}
 
-        # Suggest parameters for the current trial
-        suggested_parameters = {}
-        for param_name, param_range in input_parameter_range.items():
-            if isinstance(param_range, tuple) and len(param_range) == 2:
-                suggested_parameters[param_name] = trial.suggest_float(param_name, low=param_range[0], high=param_range[1], step=0.1)
-            elif isinstance(param_range, list):
-                suggested_parameters[param_name] = trial.suggest_categorical(param_name, param_range)
-            elif isinstance(param_range, np.ndarray):
-                suggested_parameters[param_name] = trial.suggest_float(param_name, low=np.min(param_range), high=np.max(param_range), step=0.1)
-            else:
-                raise ValueError(f"Unsupported parameter range type {type(param_range)} for {param_name}")
+        def _suggest(params: list[OptimizationProperty], with_unit: bool) -> dict[str, Any]:
+            by_name = {p.name: p for p in params}
+            sampled: dict[str, Any] = {}
+            values: dict[str, Any] = {}
 
-        context["parameters"] = suggested_parameters
-        #print(f"Optuna suggested parameters for trial {trial.number}: {suggested_parameters}")
-        return suggested_parameters
+            def _resolve_master(param: OptimizationProperty) -> OptimizationProperty:
+                current = param
+                seen = {param.name}
+                while current.linked_to:
+                    target_name = current.linked_to
+                    target = by_name.get(target_name)
+                    if target is None:
+                        raise ValueError(f"Parameter '{current.name}' links to unknown parameter '{target_name}'.")
+                    if target.name in seen:
+                        raise ValueError(f"Circular link detected for parameter '{param.name}'.")
+                    seen.add(target.name)
+                    current = target
+                return current
+
+            for param in params:
+                master = _resolve_master(param)
+                trial_name = master.name
+
+                if trial_name not in sampled:
+                    sampled[trial_name] = trial.suggest_float(
+                        trial_name,
+                        low=master.min_value,
+                        high=master.max_value,
+                        step=master.step,
+                    )
+                value = sampled[trial_name]
+
+                self._param_to_trial_name[param.name] = trial_name
+                if with_unit:
+                    unit = param.unit if param.unit else (master.unit if master.unit else "")
+                    values[param.name] = f"{value}{unit}"
+                else:
+                    values[param.name] = value
+            return values
+
+        # Suggest parameters for the current trial (linked params share a sampled value)
+        model_parameters = _suggest(model_input_ranges, with_unit=False)
+        netlist_parameters = _suggest(netlist_property_ranges, with_unit=True)
+
+        # Update context
+        context["model_parameters"] = model_parameters
+        context["netlist_parameters"] = netlist_parameters
+
+    def get_best_parameters(self) -> Dict[str, Any]:
+        if self.multi_objective:
+            raise ValueError("get_best_parameters is not available for multi-objective optimization. Use get_moo_results instead.")
+        best = dict(self._get_study().best_params)
+        for param_name, trial_name in self._param_to_trial_name.items():
+            if trial_name in best:
+                best[param_name] = best[trial_name]
+        return best
+    
+    def get_moo_results(self) -> Any:
+        if self.multi_objective:
+            return self._get_study().best_trials
+        else:
+            raise ValueError("Multi-objective optimization is not enabled for this optimizer.")
+
+    
