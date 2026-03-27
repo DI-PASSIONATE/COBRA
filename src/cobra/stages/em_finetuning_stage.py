@@ -1,9 +1,50 @@
 from cobra.stages.base_stage import COBRABaseStage
 from typing import Any, Dict, cast
+from concurrent.futures import ProcessPoolExecutor
 import importlib
+import multiprocessing as mp
 import os
 import uuid
 import skrf as rf
+
+
+def _mesh_gds_and_run_palace(
+    *,
+    name: str,
+    parameters: Dict[str, Any],
+    base_dir: str,
+    gds_output_path: str,
+    stackup_xml: str,
+    simconfig_filename: str,
+    palace_executable: str,
+) -> None:
+    """Run gmsh-dependent model creation and Palace simulation in a child process."""
+    from ihp import PDK
+
+    create_palace_model_from_gds = importlib.import_module(
+        "orca.simulation.gds_converter"
+    ).create_palace_model_from_gds
+    run_palace = importlib.import_module("orca.simulation.simulate").run_palace
+
+    PDK.activate()
+    create_palace_model_from_gds(
+        geometry_name=name,
+        params=parameters,
+        output_dir=base_dir,
+        gds_filename=gds_output_path,
+        stackup_xml=stackup_xml,
+        simconfig_filename=simconfig_filename,
+        show_mesh_results=False,
+    )
+    run_palace(
+        sim_path=os.path.join(base_dir, "palace_sims", f"{name}_data"),
+        data_dir=os.path.join("output", name),
+        result_dir=os.path.join(base_dir),
+        config_name=os.path.join(base_dir, "palace_sims", f"{name}_data", "config.json"),
+        palace_executable=palace_executable,
+        cpu_cores=16,
+        touchstone_type="all",
+    )
 
 class EMFineTuningStage(COBRABaseStage):
     """
@@ -21,10 +62,6 @@ class EMFineTuningStage(COBRABaseStage):
         """
         from ihp import PDK
         BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-        create_palace_model_from_gds = importlib.import_module(
-            "orca.simulation.gds_converter"
-        ).create_palace_model_from_gds
-        run_palace = importlib.import_module("orca.simulation.simulate").run_palace
         
         PDK.activate()
         if not isinstance(orca_geometry, BaseGeometry):
@@ -40,24 +77,24 @@ class EMFineTuningStage(COBRABaseStage):
         
         parameters = context["model_parameters"]
         geometry.create_gds_file(name=name, output_path=gds_output_path, params=parameters)
-        create_palace_model_from_gds(
-            geometry_name=name,
-            params=parameters,
-            output_dir=base_dir,
-            gds_filename=gds_output_path,
-            stackup_xml=geometry.stackup_xml,
-            simconfig_filename=geometry.simconfig_filename,
-            show_mesh_results=False,
-        )
-        run_palace(
-            sim_path=os.path.join(base_dir, "palace_sims", f"{name}_data"),
-            data_dir=os.path.join("output", name),
-            result_dir=os.path.join(base_dir),
-            config_name=os.path.join(base_dir, "palace_sims", f"{name}_data", "config.json"),
-            palace_executable=self.palace_executable,
-            cpu_cores=16,
-            touchstone_type="all",
-        )
+
+        # !!!
+        # gmsh.initialize must run in a process-main thread, not in the PySide worker thread (QThread)
+        # so we use a single-worker ProcessPoolExecutor to prevent crashes due to gmsh
+        spawn_ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=1, mp_context=spawn_ctx) as executor:
+            future = executor.submit(
+                _mesh_gds_and_run_palace,
+                name=name,
+                parameters=parameters,
+                base_dir=base_dir,
+                gds_output_path=gds_output_path,
+                stackup_xml=geometry.stackup_xml,
+                simconfig_filename=geometry.simconfig_filename,
+                palace_executable=self.palace_executable,
+            )
+            future.result()
+
         ntwk = rf.Network(os.path.join(base_dir, f"{name}_dc_deembedded.s6p"))
         context["predicted_network"] = ntwk
         return context
