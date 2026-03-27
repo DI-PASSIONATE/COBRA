@@ -1,10 +1,11 @@
-from typing import Any, Dict, List, Optional, get_args, get_origin
+from typing import Any, Dict, List, Optional, Tuple, get_args, get_origin
 import ast
 import importlib
 import importlib.util
 import inspect
 import os
 import pkgutil
+import re
 import numpy as np
 import onnxruntime
 import gmsh
@@ -275,13 +276,18 @@ class MainWindow(QMainWindow):
         self.s_param_plot.addLegend()
         self.s_param_plot.setLabel('left', 'Magnitude', units='dB')
         self.s_param_plot.setLabel('bottom', 'Frequency', units='Hz')
+        self.s_param_plot.setBackground('w')
         plots_layout.addWidget(self.s_param_plot)
         
         # Loss Plot
         self.loss_plot = pg.PlotWidget(title="Goal Losses")
         self.loss_plot.addLegend()
         self.loss_plot.setLabel('left', 'Loss')
+        self.loss_plot.setBackground('w')
         plots_layout.addWidget(self.loss_plot)
+
+        self._style_plot_for_light_background(self.s_param_plot)
+        self._style_plot_for_light_background(self.loss_plot)
         
         viz_layout.addLayout(plots_layout, stretch=2)
         
@@ -318,6 +324,37 @@ class MainWindow(QMainWindow):
         self.update_simulator_options()
         self.reload_orca_preset_geometries(show_errors=False)
         self.update_geometry_source()
+
+    def _style_plot_for_light_background(self, plot_widget: pg.PlotWidget):
+        axis_pen = pg.mkPen('k')
+        for axis_name in ('left', 'bottom', 'top', 'right'):
+            axis = plot_widget.getAxis(axis_name)
+            axis.setPen(axis_pen)
+            axis.setTextPen(axis_pen)
+
+    def _goal_sparam_specs(self) -> List[tuple[str, int, int]]:
+        # Parse goal parameter names like S11 or S21_dB into (label, row_idx, col_idx).
+        specs: List[tuple[str, int, int]] = []
+        seen = set()
+        for goal in self.goals:
+            p_name = goal.parameter.value
+            match = re.match(r"^S(\d)(\d)(?:\b|_)", p_name, re.IGNORECASE)
+            if not match:
+                continue
+
+            i = int(match.group(1)) - 1
+            j = int(match.group(2)) - 1
+            if i < 0 or j < 0:
+                continue
+
+            label = f"S{i+1}{j+1}"
+            key = (label, i, j)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append(key)
+
+        return specs
 
     def refresh_overlays(self, state):
         self.draw_overlays()
@@ -1187,24 +1224,45 @@ class MainWindow(QMainWindow):
         # Plot n (Current)
         ntwk_n = context.get("simulated_network")
         ntwk_prev = context.get("prev_network")
+        requested_sparams = self._goal_sparam_specs()
+        color_map: Dict[str, Tuple[int, int, int]] = {
+            "S11": (220, 20, 60),
+            "S21": (65, 105, 225),
+            "S12": (46, 139, 87),
+            "S22": (255, 140, 0),
+        }
+
+        if not requested_sparams and ntwk_n:
+            # If there are no S-parameter goals yet, keep the plot empty instead of forcing defaults.
+            pass
 
         if ntwk_prev and self.plot_prev_cb.isChecked():
             freq_prev = ntwk_prev.f
-            if ntwk_prev.nports >= 1:
-                s11_n1 = ntwk_prev.s_db[:, 0, 0]
-                self.s_param_plot.plot(freq_prev, s11_n1, pen=pg.mkPen((255, 100, 100, 100), width=2, style=Qt.PenStyle.DashLine), name="S11 (n-1)")
-            if ntwk_prev.nports >= 2:
-                s21_n1 = ntwk_prev.s_db[:, 1, 0]
-                self.s_param_plot.plot(freq_prev, s21_n1, pen=pg.mkPen((100, 100, 255, 100), width=2, style=Qt.PenStyle.DashLine), name="S21 (n-1)")
+            for label, i, j in requested_sparams:
+                if i < ntwk_prev.nports and j < ntwk_prev.nports:
+                    fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
+                    fallback_color: Tuple[int, int, int] = (
+                        fallback_qcolor.red(),
+                        fallback_qcolor.green(),
+                        fallback_qcolor.blue(),
+                    )
+                    base_color = color_map.get(label, fallback_color)
+                    prev_pen = pg.mkPen((base_color[0], base_color[1], base_color[2], 120), width=2, style=Qt.PenStyle.DashLine)
+                    self.s_param_plot.plot(freq_prev, ntwk_prev.s_db[:, i, j], pen=prev_pen, name=f"{label} (n-1)")
 
         if ntwk_n:
             freq = ntwk_n.f
-            if ntwk_n.nports >= 1:
-                s11_db = ntwk_n.s_db[:, 0, 0]
-                self.s_param_plot.plot(freq, s11_db, pen=pg.mkPen('r', width=3), name="S11 (n)")
-            if ntwk_n.nports >= 2:
-                s21_db = ntwk_n.s_db[:, 1, 0]
-                self.s_param_plot.plot(freq, s21_db, pen=pg.mkPen('b', width=3), name="S21 (n)")
+            for label, i, j in requested_sparams:
+                if i < ntwk_n.nports and j < ntwk_n.nports:
+                    fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
+                    fallback_color: Tuple[int, int, int] = (
+                        fallback_qcolor.red(),
+                        fallback_qcolor.green(),
+                        fallback_qcolor.blue(),
+                    )
+                    base_color = color_map.get(label, fallback_color)
+                    curr_pen = pg.mkPen(base_color, width=3)
+                    self.s_param_plot.plot(freq, ntwk_n.s_db[:, i, j], pen=curr_pen, name=f"{label} (n)")
 
         # Redraw overlays on top
         self.overlay_items = [] # clear references as plot.clear() removed them
