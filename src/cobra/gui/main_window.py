@@ -338,12 +338,17 @@ class MainWindow(QMainWindow):
         seen = set()
         for goal in self.goals:
             p_name = goal.parameter.value
-            match = re.match(r"^S(\d)(\d)(?:\b|_)", p_name, re.IGNORECASE)
+            match = re.match(r"^S\s*(?:\(\s*(\d)\s*,\s*(\d)\s*\)|(\d)(\d))(?:\b|_)", p_name, re.IGNORECASE)
             if not match:
                 continue
 
-            i = int(match.group(1)) - 1
-            j = int(match.group(2)) - 1
+            row_token = match.group(1) or match.group(3)
+            col_token = match.group(2) or match.group(4)
+            if row_token is None or col_token is None:
+                continue
+
+            i = int(row_token) - 1
+            j = int(col_token) - 1
             if i < 0 or j < 0:
                 continue
 
@@ -1158,7 +1163,7 @@ class MainWindow(QMainWindow):
 
         # Update Goal Status Table
         ntwk_n = context.get("simulated_network")
-        if ntwk_n:
+        if ntwk_n is not None:
             # Metrics are now pre-calculated in COBRA.run and stored in context
             metrics = context.get("electrical_parameters", {})
             
@@ -1219,67 +1224,70 @@ class MainWindow(QMainWindow):
                         item.setBackground(Qt.GlobalColor.green)
 
 
-        self.s_param_plot.clear()
-        
-        # Plot n (Current)
-        ntwk_n = context.get("simulated_network")
-        ntwk_prev = context.get("prev_network")
-        requested_sparams = self._goal_sparam_specs()
-        color_map: Dict[str, Tuple[int, int, int]] = {
-            "S11": (220, 20, 60),
-            "S21": (65, 105, 225),
-            "S12": (46, 139, 87),
-            "S22": (255, 140, 0),
-        }
-
-        if not requested_sparams and ntwk_n:
-            # If there are no S-parameter goals yet, keep the plot empty instead of forcing defaults.
-            pass
-
-        if ntwk_prev and self.plot_prev_cb.isChecked():
-            freq_prev = ntwk_prev.f
-            for label, i, j in requested_sparams:
-                if i < ntwk_prev.nports and j < ntwk_prev.nports:
-                    fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
-                    fallback_color: Tuple[int, int, int] = (
-                        fallback_qcolor.red(),
-                        fallback_qcolor.green(),
-                        fallback_qcolor.blue(),
-                    )
-                    base_color = color_map.get(label, fallback_color)
-                    prev_pen = pg.mkPen((base_color[0], base_color[1], base_color[2], 120), width=2, style=Qt.PenStyle.DashLine)
-                    self.s_param_plot.plot(freq_prev, ntwk_prev.s_db[:, i, j], pen=prev_pen, name=f"{label} (n-1)")
-
-        if ntwk_n:
-            freq = ntwk_n.f
-            for label, i, j in requested_sparams:
-                if i < ntwk_n.nports and j < ntwk_n.nports:
-                    fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
-                    fallback_color: Tuple[int, int, int] = (
-                        fallback_qcolor.red(),
-                        fallback_qcolor.green(),
-                        fallback_qcolor.blue(),
-                    )
-                    base_color = color_map.get(label, fallback_color)
-                    curr_pen = pg.mkPen(base_color, width=3)
-                    self.s_param_plot.plot(freq, ntwk_n.s_db[:, i, j], pen=curr_pen, name=f"{label} (n)")
-
-        # Redraw overlays on top
-        self.overlay_items = [] # clear references as plot.clear() removed them
-        self.draw_overlays()
-
         # 3. Update Loss Plot
         losses = context.get("penalties", [])
-        if self.loss_history: # Ensure loss history is initialized
-             for i, loss in enumerate(losses):
+        if self.loss_history:  # Ensure loss history is initialized
+            for i, loss in enumerate(losses):
                 if i in self.loss_history:
-                    self.loss_history[i].append(loss)
-             
-             self.loss_plot.clear()
-             for i, hist in self.loss_history.items():
-                 if hist:
-                    color = pg.intColor(i, hues=len(self.loss_history))
+                    self.loss_history[i].append(float(np.asarray(loss).reshape(-1)[0]))
+
+            self.loss_plot.clear()
+            for i, hist in self.loss_history.items():
+                if hist:
+                    color = pg.intColor(i, hues=max(len(self.loss_history), 1))
                     self.loss_plot.plot(hist, pen=pg.mkPen(color, width=2), name=f"Goal {i+1}")
+
+        # 4. Update S-parameter Plot
+        try:
+            self.s_param_plot.clear()
+
+            ntwk_n = context.get("simulated_network")
+            ntwk_prev = context.get("prev_network")
+            requested_sparams = self._goal_sparam_specs()
+            color_map: Dict[str, Tuple[int, int, int]] = {
+                "S11": (220, 20, 60),
+                "S21": (65, 105, 225),
+                "S12": (46, 139, 87),
+                "S22": (255, 140, 0),
+            }
+
+            if ntwk_prev is not None and self.plot_prev_cb.isChecked():
+                freq_prev = ntwk_prev.f
+                for label, i, j in requested_sparams:
+                    if i < ntwk_prev.nports and j < ntwk_prev.nports:
+                        fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
+                        fallback_color: Tuple[int, int, int] = (
+                            fallback_qcolor.red(),
+                            fallback_qcolor.green(),
+                            fallback_qcolor.blue(),
+                        )
+                        base_color = color_map.get(label, fallback_color)
+                        prev_pen = pg.mkPen(
+                            (base_color[0], base_color[1], base_color[2], 120),
+                            width=2,
+                            style=Qt.PenStyle.DashLine,
+                        )
+                        self.s_param_plot.plot(freq_prev, ntwk_prev.s_db[:, i, j], pen=prev_pen, name=f"{label} (n-1)")
+
+            if ntwk_n is not None:
+                freq = ntwk_n.f
+                for label, i, j in requested_sparams:
+                    if i < ntwk_n.nports and j < ntwk_n.nports:
+                        fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
+                        fallback_color: Tuple[int, int, int] = (
+                            fallback_qcolor.red(),
+                            fallback_qcolor.green(),
+                            fallback_qcolor.blue(),
+                        )
+                        base_color = color_map.get(label, fallback_color)
+                        curr_pen = pg.mkPen(base_color, width=3)
+                        self.s_param_plot.plot(freq, ntwk_n.s_db[:, i, j], pen=curr_pen, name=f"{label} (n)")
+
+            # Redraw overlays on top
+            self.overlay_items = []  # plot.clear() removed prior overlay items
+            self.draw_overlays()
+        except Exception as exc:
+            print(f"S-parameter plot update failed: {exc}")
 
     @Slot()
     def on_finished(self):
