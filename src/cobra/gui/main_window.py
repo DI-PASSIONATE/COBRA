@@ -120,6 +120,15 @@ class MainWindow(QMainWindow):
         self.ft_iter_spin.setValue(3)
         self.config_form_layout.addRow(self.ft_iter_label, self.ft_iter_spin)
 
+        self.ft_optimizer_label = QLabel("Finetuning Optimizer:")
+        self.ft_optimizer_combo = QComboBox()
+        self.ft_optimizer_combo.addItem("Reuse surrogate optimizer", "reuse")
+        self.ft_optimizer_combo.addItem("Gradient descent", "gradient_descent")
+        self.ft_optimizer_combo.setToolTip(
+            "Reuse the optimizer state from the surrogate phase or switch to a local gradient-descent refinement."
+        )
+        self.config_form_layout.addRow(self.ft_optimizer_label, self.ft_optimizer_combo)
+
         self.geometry_group = QGroupBox("ORCA Geometry")
         geometry_group_layout = QVBoxLayout(self.geometry_group)
 
@@ -162,6 +171,8 @@ class MainWindow(QMainWindow):
         self.palace_edit.setVisible(False)
         self.ft_iter_label.setVisible(False)
         self.ft_iter_spin.setVisible(False)
+        self.ft_optimizer_label.setVisible(False)
+        self.ft_optimizer_combo.setVisible(False)
         self.geometry_group.setVisible(False)
         
         # If fine-tuning is toggled, show palace command and ORCA geometry fields
@@ -551,6 +562,8 @@ class MainWindow(QMainWindow):
         self.palace_edit.setVisible(checked)
         self.ft_iter_label.setVisible(checked)
         self.ft_iter_spin.setVisible(checked)
+        self.ft_optimizer_label.setVisible(checked)
+        self.ft_optimizer_combo.setVisible(checked)
         self.geometry_group.setVisible(checked)
 
         if checked and self.geometry_source_combo.currentData() == "preset" and self.geometry_preset_combo.count() == 0:
@@ -1078,7 +1091,8 @@ class MainWindow(QMainWindow):
             optimizer=optimizer_cls(**optimizer_kwargs),# multi_objective=self.moo_cb.isChecked()),
             circuit_simulator=simulator_cls(**sim_kwargs),
             palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None,
-            fine_tuning_iterations=self.ft_iter_spin.value()
+            fine_tuning_iterations=self.ft_iter_spin.value(),
+            fine_tuning_optimizer=self.ft_optimizer_combo.currentData() if self.finetune_cb.isChecked() else "reuse",
         )
         
         # Change button to PAUSE (running state)

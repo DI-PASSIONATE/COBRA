@@ -173,6 +173,7 @@ If you enable fine-tuning:
 
 - set `palace_fine_tuning_command` in script mode or enable it in GUI,
 - provide an ORCA geometry object/class (preset or custom),
+- choose whether fine-tuning reuses the surrogate optimizer state or switches to gradient descent,
 - COBRA will run EM verification/fine-tuning iterations in addition to surrogate-based steps.
 
 ## Troubleshooting

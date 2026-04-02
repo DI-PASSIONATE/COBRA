@@ -29,12 +29,36 @@ class COBRA:
         circuit_simulator: BaseSimulator = XyceSimulator(),
         palace_fine_tuning_command: Optional[str] = None,
         fine_tuning_iterations: int = 3,
+        fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
     ):
         self.optimizer_stage = OptimizerStage(optimizer)
         self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model)
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
         self.fine_tuning_iterations = fine_tuning_iterations
+        self.fine_tuning_optimizer = fine_tuning_optimizer
+
+    def _build_fine_tuning_optimizer_stage(self) -> OptimizerStage:
+        fine_tuning_optimizer = self.fine_tuning_optimizer
+
+        if fine_tuning_optimizer is None:
+            return self.optimizer_stage
+
+        if isinstance(fine_tuning_optimizer, BaseOptimizer):
+            return OptimizerStage(fine_tuning_optimizer)
+
+        if isinstance(fine_tuning_optimizer, str):
+            normalized_mode = fine_tuning_optimizer.replace("-", "_").strip().lower()
+            if normalized_mode in {"reuse", "same", "continue", "surrogate", "surrogate_optimizer"}:
+                return self.optimizer_stage
+            if normalized_mode in {"gradient_descent", "gradientdescent", "gd"}:
+                from cobra.optimizers import GradientDescentOptimizer
+
+                return OptimizerStage(GradientDescentOptimizer())
+
+        raise ValueError(
+            "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
+        )
 
     def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
         """
@@ -200,6 +224,10 @@ class COBRA:
             raise ValueError("ORCA geometry is not provided in the context. Cannot perform EM fine-tuning without geometry information.")
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
+        fine_tuning_optimizer_stage = self._build_fine_tuning_optimizer_stage()
+
+        if fine_tuning_optimizer_stage is not self.optimizer_stage:
+            fine_tuning_optimizer_stage.optimizer.initialize(len(design_goal_checker.design_goals))
 
         for iteration in tqdm.tqdm(range(self.fine_tuning_iterations), desc="COBRA EM Fine-Tuning Progress"):
             context["iteration"] = iteration + 1
@@ -225,8 +253,8 @@ class COBRA:
             else:
                 print(f"Design goals not achieved after EM fine-tuning at iteration {iteration}. Continuing optimization...")
 
-            self.optimizer_stage.tell(context)
-            context = self.optimizer_stage.run(context)
+            fine_tuning_optimizer_stage.tell(context)
+            context = fine_tuning_optimizer_stage.run(context)
 
         if not context["goal_achieved"]:
             print("EM fine-tuning completed without achieving design goals. Returning best parameters found.")
