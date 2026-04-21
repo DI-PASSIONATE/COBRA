@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog, 
     QListWidget, QTableWidget, QTableWidgetItem, 
     QSpinBox, QGroupBox, QFormLayout, QScrollArea,
-    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog
+    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog,
+    QStackedWidget
 )
 from PySide6.QtCore import Qt, Slot
 import pyqtgraph as pg
@@ -41,7 +42,59 @@ class MainWindow(QMainWindow):
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        root_layout = QVBoxLayout(central)
+
+        # Global controls shown regardless of active panel
+        global_controls_layout = QHBoxLayout()
+        self.config_panel_btn = QPushButton("Configuration")
+        self.config_panel_btn.setMinimumHeight(48)
+        self.config_panel_btn.setMinimumWidth(220)
+        self.config_panel_btn.setStyleSheet(
+            "font-weight: bold; font-size: 18px; padding: 10px 18px;"
+        )
+        self.config_panel_btn.clicked.connect(lambda: self.set_active_panel("config"))
+        self.viz_panel_btn = QPushButton("Visualization")
+        self.viz_panel_btn.setMinimumHeight(48)
+        self.viz_panel_btn.setMinimumWidth(220)
+        self.viz_panel_btn.setStyleSheet(
+            "font-weight: bold; font-size: 18px; padding: 10px 18px;"
+        )
+        self.viz_panel_btn.clicked.connect(lambda: self.set_active_panel("viz"))
+        global_controls_layout.addWidget(self.config_panel_btn)
+        global_controls_layout.addWidget(self.viz_panel_btn)
+
+        self.action_btn = QPushButton("START OPTIMIZATION")
+        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self.action_btn.clicked.connect(self.on_action_clicked)
+
+        self.stop_btn = QPushButton("⬛")  # Square stop symbol
+        self.stop_btn.setToolTip("Stop Optimization")
+        self.stop_btn.setFixedSize(40, 40) # Small square
+        self.stop_btn.setStyleSheet("font-weight: bold; font-size: 20px; background-color: #F44336; color: white;")
+        self.stop_btn.clicked.connect(self.stop_optimization)
+        self.stop_btn.setEnabled(False)
+
+        global_controls_layout.addSpacing(16)
+        global_controls_layout.addWidget(self.action_btn)
+        global_controls_layout.addWidget(self.stop_btn)
+        global_controls_layout.addStretch()
+
+        root_layout.addLayout(global_controls_layout)
+
+        global_progress_layout = QHBoxLayout()
+        self.progress_label = QLabel("Iteration 0/0 (0.0%)")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.elapsed_label = QLabel("Time: 0.0s")
+        global_progress_layout.addWidget(self.progress_label)
+        global_progress_layout.addWidget(self.progress_bar, stretch=1)
+        global_progress_layout.addWidget(self.elapsed_label)
+
+        root_layout.addLayout(global_progress_layout)
+
+        self.panel_stack = QStackedWidget()
+        root_layout.addWidget(self.panel_stack, stretch=1)
         
         # Left Panel: Configuration
         config_group = QGroupBox("Configuration")
@@ -231,33 +284,12 @@ class MainWindow(QMainWindow):
         goal_layout.addWidget(add_goal_btn)
         
         config_layout.addWidget(self.config_scroll_area, stretch=1)
-        config_layout.addWidget(param_group)
-        config_layout.addWidget(goal_group)
+        config_bottom_layout = QHBoxLayout()
+        config_bottom_layout.addWidget(param_group, stretch=3)
+        config_bottom_layout.addWidget(goal_group, stretch=2)
+        config_layout.addLayout(config_bottom_layout, stretch=1)
         
-        self.action_btn = QPushButton("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
-        self.action_btn.clicked.connect(self.on_action_clicked)
-        
-        self.stop_btn = QPushButton("⬛")  # Square stop symbol
-        self.stop_btn.setToolTip("Stop Optimization")
-        self.stop_btn.setFixedSize(40, 40) # Small square
-        self.stop_btn.setStyleSheet("font-weight: bold; font-size: 20px; background-color: #F44336; color: white;")
-        self.stop_btn.clicked.connect(self.stop_optimization)
-        self.stop_btn.setEnabled(False)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.action_btn)
-        btn_layout.addWidget(self.stop_btn)
-        config_layout.addLayout(btn_layout)
-        
-        progress_layout = QHBoxLayout()
-        self.progress_bar = QProgressBar()
-        self.elapsed_label = QLabel("Time: 0.0s")
-        progress_layout.addWidget(self.progress_bar)
-        progress_layout.addWidget(self.elapsed_label)
-        config_layout.addLayout(progress_layout)
-
-        # Right Panel: Visualization
+        # Visualization Panel
         viz_group = QGroupBox("Visualization")
         viz_layout = QVBoxLayout(viz_group)
         
@@ -305,6 +337,15 @@ class MainWindow(QMainWindow):
         # 2. Tables Area (Horizontal split)
         tables_layout = QHBoxLayout()
 
+        # Current Parameter Table (read-only runtime values)
+        current_params_group = QGroupBox("Current Parameters")
+        current_params_layout = QVBoxLayout(current_params_group)
+        self.current_param_table = QTableWidget(0, 2)
+        self.current_param_table.setHorizontalHeaderLabels(["Name", "Current Value"])
+        self.current_param_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        current_params_layout.addWidget(self.current_param_table)
+        tables_layout.addWidget(current_params_group)
+
         # Goal Status Table (Current Goal Metrics)
         goal_group_viz = QGroupBox("Goal Status")
         goal_viz_layout = QVBoxLayout(goal_group_viz)
@@ -316,10 +357,8 @@ class MainWindow(QMainWindow):
 
         viz_layout.addLayout(tables_layout, stretch=1)
         
-        # Splitter setup
-        # For simplicity using specific ratios in layout
-        main_layout.addWidget(config_group, 1)
-        main_layout.addWidget(viz_group, 2)
+        self.panel_stack.addWidget(config_group)
+        self.panel_stack.addWidget(viz_group)
         
         # Data storage
         self.opt_params: List[OptimizationProperty] = []
@@ -335,6 +374,25 @@ class MainWindow(QMainWindow):
         self.update_simulator_options()
         self.reload_orca_preset_geometries(show_errors=False)
         self.update_geometry_source()
+        self.set_active_panel("config")
+
+    def set_active_panel(self, panel: str):
+        if panel == "viz":
+            self.panel_stack.setCurrentIndex(1)
+            self.config_panel_btn.setEnabled(True)
+            self.viz_panel_btn.setEnabled(False)
+        else:
+            self.panel_stack.setCurrentIndex(0)
+            self.config_panel_btn.setEnabled(False)
+            self.viz_panel_btn.setEnabled(True)
+
+    def _update_progress_display(self, iteration: int, max_iterations: int):
+        max_iterations = max(1, int(max_iterations))
+        iteration = max(0, min(int(iteration), max_iterations))
+        percentage = (iteration / max_iterations) * 100.0
+        self.progress_bar.setRange(0, max_iterations)
+        self.progress_bar.setValue(iteration)
+        self.progress_label.setText(f"Iteration {iteration}/{max_iterations} ({percentage:.1f}%)")
 
     def _style_plot_for_light_background(self, plot_widget: pg.PlotWidget):
         axis_pen = pg.mkPen('k')
@@ -1099,8 +1157,8 @@ class MainWindow(QMainWindow):
         self.action_btn.setText("PAUSE")
         self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;")
         self.stop_btn.setEnabled(True)
-        self.progress_bar.setRange(0, self.max_iter_spin.value())
-        self.progress_bar.setValue(0)
+        self._update_progress_display(0, self.max_iter_spin.value())
+        self.elapsed_label.setText("Time: 0.0s")
         
         # Clear plots
         self.s_param_plot.clear()
@@ -1120,6 +1178,7 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
         self.worker.start()
+        self.set_active_panel("viz")
 
     def stop_optimization(self):
         if self.worker and self.worker.isRunning():
@@ -1143,11 +1202,13 @@ class MainWindow(QMainWindow):
             if self.worker:
                 self.worker.max_iterations = new_max
             self.max_iter_spin.setValue(new_max)
-            self.progress_bar.setMaximum(new_max)
+            self._update_progress_display(self.progress_bar.value(), new_max)
 
     @Slot(dict)
     def on_progress(self, context: dict):
-        self.progress_bar.setValue(context.get("iteration", 0))
+        iteration = context.get("iteration", 0)
+        max_iterations = self.worker.max_iterations if self.worker else self.max_iter_spin.value()
+        self._update_progress_display(iteration, max_iterations)
         
         elapsed = context.get("elapsed_time")
         if elapsed is None and "times" in context:
@@ -1174,6 +1235,23 @@ class MainWindow(QMainWindow):
                 item = self.param_table.item(row, 3)
                 if item:
                     item.setText(display_val)
+
+        self.current_param_table.setRowCount(0)
+        for name in sorted(current_values.keys()):
+            value = current_values[name]
+            if isinstance(value, (float, np.floating)):
+                display_val = f"{round(float(value), 4)}"
+            else:
+                display_val = str(value)
+
+            row = self.current_param_table.rowCount()
+            self.current_param_table.insertRow(row)
+            name_item = QTableWidgetItem(name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.current_param_table.setItem(row, 0, name_item)
+            val_item = QTableWidgetItem(display_val)
+            val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.current_param_table.setItem(row, 1, val_item)
 
         # Update Goal Status Table
         ntwk_n = context.get("simulated_network")
