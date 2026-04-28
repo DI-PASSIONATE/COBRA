@@ -16,6 +16,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cobra.optimizers.design_goal import DesignGoalChecker
 import tqdm, time
+from pathlib import Path
+from datetime import datetime
+import shutil
+import os
 
 class COBRA:
     """
@@ -60,7 +64,7 @@ class COBRA:
             "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
         )
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None, results_name: Optional[str] = None) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
@@ -70,10 +74,25 @@ class COBRA:
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
         - callback: An optional callback function that takes the current context as an argument. If the callback returns False, the optimization is stopped.
+        - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
 
         Returns:
         - The optimized parameters that meet the design goals.
         """
+        # Create results folder with timestamp and name
+        if results_name is None:
+            results_name = Path(netlist).stem
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = Path("results") / f"{timestamp}_{results_name}"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy original netlist to results directory
+        original_netlist_path = Path(netlist)
+        netlist_in_results = results_dir / original_netlist_path.name
+        shutil.copy(netlist, netlist_in_results)
+        
+        # Update netlist path to point to the results directory for all operations
+        netlist = str(netlist_in_results)
         design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
         netlist_parser = self.circuit_simulation_stage.simulator.netlist_parser.from_file(netlist)
@@ -87,6 +106,7 @@ class COBRA:
             "max_iterations": max_iterations,
             "iterations": [],
             "orca_geometry": orca_geometry,
+            "results_dir": str(results_dir),
             "times": {
                 "optimizer": 0.0,
                 "em_surrogate": 0.0,
@@ -167,15 +187,19 @@ class COBRA:
             print(f"Design goals achieved at iteration {context['iteration']}.")
                 
         ntwk = context["predicted_network"]
-        ntwk.write_touchstone(f"surrogate_s_params.s{ntwk.nports}p")
+        surrogate_file = results_dir / f"surrogate_s_params.s{ntwk.nports}p"
+        ntwk.write_touchstone(str(surrogate_file))
 
         if self.em_fine_tuning_stage is not None:
             context = self.fine_tuning(context, callback)
 
-        # Save final context to a JSON file for analysis            
-        with open("cobra_optimization_context.json", "w") as f:
-            # Save context as txt file
+        # Save final context to a JSON file for analysis
+        context_file = results_dir / "cobra_optimization_context.json"
+        with open(context_file, "w") as f:
+            # Save context as json file
             json.dump(context, f, indent=4, default=str)
+
+        print(f"\nAll results saved to: {results_dir}")
 
         return context
 
