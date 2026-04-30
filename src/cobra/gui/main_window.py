@@ -46,31 +46,30 @@ class MainWindow(QMainWindow):
 
         # Global controls shown regardless of active panel
         global_controls_layout = QHBoxLayout()
+        control_btn_width = 220
+        control_btn_height = 48
+
         self.config_panel_btn = QPushButton("Configuration")
-        self.config_panel_btn.setMinimumHeight(48)
-        self.config_panel_btn.setMinimumWidth(220)
-        self.config_panel_btn.setStyleSheet(
-            "font-weight: bold; font-size: 18px; padding: 10px 18px;"
-        )
+        self.config_panel_btn.setFixedSize(control_btn_width, control_btn_height)
+        self.config_panel_btn.setProperty("tabButton", True)
         self.config_panel_btn.clicked.connect(lambda: self.set_active_panel("config"))
         self.viz_panel_btn = QPushButton("Visualization")
-        self.viz_panel_btn.setMinimumHeight(48)
-        self.viz_panel_btn.setMinimumWidth(220)
-        self.viz_panel_btn.setStyleSheet(
-            "font-weight: bold; font-size: 18px; padding: 10px 18px;"
-        )
+        self.viz_panel_btn.setFixedSize(control_btn_width, control_btn_height)
+        self.viz_panel_btn.setProperty("tabButton", True)
         self.viz_panel_btn.clicked.connect(lambda: self.set_active_panel("viz"))
         global_controls_layout.addWidget(self.config_panel_btn)
         global_controls_layout.addWidget(self.viz_panel_btn)
 
         self.action_btn = QPushButton("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self.action_btn.setFixedSize(control_btn_width, control_btn_height)
+        self.action_btn.setProperty("primaryAction", True)
+        self.action_btn.setProperty("actionState", "start")
         self.action_btn.clicked.connect(self.on_action_clicked)
 
         self.stop_btn = QPushButton("⬛")  # Square stop symbol
         self.stop_btn.setToolTip("Stop Optimization")
-        self.stop_btn.setFixedSize(40, 40) # Small square
-        self.stop_btn.setStyleSheet("font-weight: bold; font-size: 20px; background-color: #F44336; color: white;")
+        self.stop_btn.setFixedSize(control_btn_height, control_btn_height)
+        self.stop_btn.setProperty("dangerAction", True)
         self.stop_btn.clicked.connect(self.stop_optimization)
         self.stop_btn.setEnabled(False)
 
@@ -371,20 +370,156 @@ class MainWindow(QMainWindow):
         self.geometry_param_widgets: Dict[str, QWidget] = {}
         self.geometry_param_specs: Dict[str, inspect.Parameter] = {}
         
+        self._apply_theme()
+        self._set_action_button_state("start")
         self.update_simulator_options()
         self.reload_orca_preset_geometries(show_errors=False)
         self.update_geometry_source()
         self.set_active_panel("config")
 
+    def _apply_theme(self):
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background-color: #F5F7FA;
+            }
+            QWidget {
+                font-family: "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+                font-size: 13px;
+                color: #263238;
+            }
+            QGroupBox {
+                border: 1px solid #D9E0E6;
+                border-radius: 10px;
+                margin-top: 12px;
+                font-weight: 600;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #455A64;
+            }
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CFD8DC;
+                border-radius: 8px;
+                padding: 6px 8px;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                border: 1px solid #64B5F6;
+            }
+            QTableWidget {
+                background-color: #FFFFFF;
+                border: 1px solid #D9E0E6;
+                border-radius: 8px;
+            }
+            QHeaderView::section {
+                background-color: #ECEFF1;
+                border: none;
+                padding: 6px;
+                font-weight: 600;
+            }
+            QProgressBar {
+                border: 1px solid #CFD8DC;
+                border-radius: 8px;
+                text-align: center;
+                background: #FFFFFF;
+                height: 12px;
+            }
+            QProgressBar::chunk {
+                background-color: #42A5F5;
+                border-radius: 8px;
+            }
+            QPushButton {
+                border-radius: 10px;
+                padding: 8px 16px;
+                border: 1px solid #CFD8DC;
+                background-color: #ECEFF1;
+                color: #263238;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+                border: 1px solid #90CAF9;
+            }
+            QPushButton:pressed {
+                background-color: #BBDEFB;
+            }
+            QPushButton[tabButton="true"] {
+                background-color: #E0E7EF;
+            }
+            QPushButton[tabButton="true"][tabActive="true"] {
+                background-color: #FFFFFF;
+                border: 2px solid #1E88E5;
+                color: #1E88E5;
+            }
+            QPushButton[tabButton="true"]:disabled {
+                background-color: #FFFFFF;
+                border: 2px solid #1E88E5;
+                color: #1E88E5;
+            }
+            QPushButton[primaryAction="true"] {
+                border: none;
+                background-color: #1E88E5;
+                color: #FFFFFF;
+            }
+            QPushButton[primaryAction="true"][actionState="pause"] {
+                background-color: #F9A825;
+            }
+            QPushButton[primaryAction="true"][actionState="resume"] {
+                background-color: #43A047;
+            }
+            QPushButton[primaryAction="true"][actionState="stopping"] {
+                background-color: #90A4AE;
+            }
+            QPushButton[primaryAction="true"]:disabled {
+                background-color: #B0BEC5;
+                color: #ECEFF1;
+            }
+            QPushButton[dangerAction="true"] {
+                background-color: #E53935;
+                color: #FFFFFF;
+                border: none;
+            }
+            QPushButton[dangerAction="true"]:disabled {
+                background-color: #EF9A9A;
+                color: #FFFFFF;
+            }
+            """
+        )
+
+    def _refresh_widget_style(self, widget: QWidget):
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
+
+    def _set_tab_state(self, button: QPushButton, active: bool):
+        button.setProperty("tabActive", active)
+        button.setEnabled(not active)
+        self._refresh_widget_style(button)
+
+    def _set_action_button_state(self, state: str, enabled: bool = True):
+        label_map = {
+            "start": "START OPTIMIZATION",
+            "pause": "PAUSE",
+            "resume": "RESUME",
+            "stopping": "STOPPING...",
+        }
+        self.action_btn.setText(label_map.get(state, state))
+        self.action_btn.setEnabled(enabled)
+        self.action_btn.setProperty("actionState", state)
+        self._refresh_widget_style(self.action_btn)
+
     def set_active_panel(self, panel: str):
         if panel == "viz":
             self.panel_stack.setCurrentIndex(1)
-            self.config_panel_btn.setEnabled(True)
-            self.viz_panel_btn.setEnabled(False)
+            self._set_tab_state(self.config_panel_btn, False)
+            self._set_tab_state(self.viz_panel_btn, True)
         else:
             self.panel_stack.setCurrentIndex(0)
-            self.config_panel_btn.setEnabled(False)
-            self.viz_panel_btn.setEnabled(True)
+            self._set_tab_state(self.config_panel_btn, True)
+            self._set_tab_state(self.viz_panel_btn, False)
 
     def _update_progress_display(self, iteration: int, max_iterations: int):
         max_iterations = max(1, int(max_iterations))
@@ -1104,12 +1239,10 @@ class MainWindow(QMainWindow):
         # If running, toggle pause
         if self.worker.paused:
             self.worker.resume()
-            self.action_btn.setText("PAUSE")
-            self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;") # Orange
+            self._set_action_button_state("pause")
         else:
             self.worker.pause()
-            self.action_btn.setText("RESUME")
-            self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #2196F3; color: white;") # Blue
+            self._set_action_button_state("resume")
 
     def start_optimization(self):
         onnx = self.onnx_edit.text()
@@ -1154,8 +1287,7 @@ class MainWindow(QMainWindow):
         )
         
         # Change button to PAUSE (running state)
-        self.action_btn.setText("PAUSE")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;")
+        self._set_action_button_state("pause")
         self.stop_btn.setEnabled(True)
         self._update_progress_display(0, self.max_iter_spin.value())
         self.elapsed_label.setText("Time: 0.0s")
@@ -1183,8 +1315,7 @@ class MainWindow(QMainWindow):
     def stop_optimization(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.action_btn.setText("STOPPING...")
-            self.action_btn.setEnabled(False)
+            self._set_action_button_state("stopping", enabled=False)
             self.stop_btn.setEnabled(False)
 
     @Slot(int)
@@ -1383,9 +1514,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_finished(self):
-        self.action_btn.setEnabled(True)
-        self.action_btn.setText("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self._set_action_button_state("start", enabled=True)
         
         self.stop_btn.setEnabled(False)
 
@@ -1393,9 +1522,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def on_error(self, msg):
-        self.action_btn.setEnabled(True)
-        self.action_btn.setText("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self._set_action_button_state("start", enabled=True)
         
         self.stop_btn.setEnabled(False)
 
