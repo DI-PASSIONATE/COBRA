@@ -101,7 +101,6 @@ class COBRA:
             "netlist": netlist,
             "design_goal_checker": design_goal_checker,
             "optimization_parameters": optimization_parameters,
-            "output": None,
             "goal_achieved": False,
             "max_iterations": max_iterations,
             "iterations": [],
@@ -191,6 +190,18 @@ class COBRA:
         ntwk.write_touchstone(str(surrogate_file))
 
         if self.em_fine_tuning_stage is not None:
+            context["fine_tuning_active"] = True
+            context["fine_tuning_iteration"] = 0
+            context["fine_tuning_total"] = self.fine_tuning_iterations
+            if context.get("goal_achieved"):
+                context["fine_tuning_start_iteration"] = context.get("iteration", 0)
+
+            if callback:
+                should_continue = callback(context)
+                if should_continue is False:
+                    print("Fine Tuning stopped by callback.")
+                    return context
+
             context = self.fine_tuning(context, callback)
 
         # Save final context to a JSON file for analysis
@@ -255,6 +266,9 @@ class COBRA:
 
         for iteration in tqdm.tqdm(range(self.fine_tuning_iterations), desc="COBRA EM Fine-Tuning Progress"):
             context["iteration"] = iteration + 1
+            context["fine_tuning_active"] = True
+            context["fine_tuning_iteration"] = iteration + 1
+            context["fine_tuning_total"] = self.fine_tuning_iterations
             # Perform EM simulation INSTEAD OF surrogate model prediction
             context = self.em_fine_tuning_stage.run(context, orca_geometry=context.get("orca_geometry", None))
 

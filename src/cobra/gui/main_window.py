@@ -1,5 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, get_args, get_origin
-import ast
+from typing import Dict, List, Optional, Tuple
 import importlib
 import importlib.util
 import inspect
@@ -92,6 +91,8 @@ class MainWindow(QMainWindow):
         global_progress_layout.addWidget(self.elapsed_label)
 
         root_layout.addLayout(global_progress_layout)
+
+        self.statusBar()
 
         self.panel_stack = QStackedWidget()
         root_layout.addWidget(self.panel_stack, stretch=1)
@@ -213,11 +214,6 @@ class MainWindow(QMainWindow):
         self.geometry_form_layout.addRow(self.geometry_class_label, self.geometry_class_combo)
 
         geometry_group_layout.addLayout(self.geometry_form_layout)
-
-        self.geometry_params_group = QGroupBox("Geometry Parameters")
-        self.geometry_params_layout = QFormLayout()
-        self.geometry_params_group.setLayout(self.geometry_params_layout)
-        geometry_group_layout.addWidget(self.geometry_params_group)
         
         # Disable fine-tuning fields by default
         self.palace_label.setVisible(False)
@@ -231,8 +227,6 @@ class MainWindow(QMainWindow):
         # If fine-tuning is toggled, show palace command and ORCA geometry fields
         self.finetune_cb.toggled.connect(self.on_finetune_toggled)
         self.geometry_source_combo.currentIndexChanged.connect(self.update_geometry_source)
-        self.geometry_preset_combo.currentIndexChanged.connect(self.update_geometry_options)
-        self.geometry_class_combo.currentIndexChanged.connect(self.update_geometry_options)
 
         self.config_scroll_area = QScrollArea()
         self.config_scroll_area.setWidgetResizable(True)
@@ -368,8 +362,8 @@ class MainWindow(QMainWindow):
         self.overlay_items = []
         self.orca_preset_classes: Dict[str, type] = {}
         self.custom_geometry_classes: Dict[str, type] = {}
-        self.geometry_param_widgets: Dict[str, QWidget] = {}
-        self.geometry_param_specs: Dict[str, inspect.Parameter] = {}
+        self.fine_tuning_active = False
+        self.fine_tuning_notification_shown = False
         
         apply_theme(self)
         self._set_action_button_state("start")
@@ -424,6 +418,14 @@ class MainWindow(QMainWindow):
             axis = plot_widget.getAxis(axis_name)
             axis.setPen(axis_pen)
             axis.setTextPen(axis_pen)
+
+    def _update_finetuning_display(self, iteration: int, total_iterations: int):
+        total_iterations = max(1, int(total_iterations))
+        iteration = max(0, min(int(iteration), total_iterations))
+        percentage = (iteration / total_iterations) * 100.0
+        self.progress_bar.setRange(0, total_iterations)
+        self.progress_bar.setValue(iteration)
+        self.progress_label.setText(f"Finetuning {iteration}/{total_iterations} ({percentage:.1f}%)")
 
     def _goal_sparam_specs(self) -> List[tuple[str, int, int]]:
         # Parse goal parameter names like S11 or S21_dB into (label, row_idx, col_idx).
@@ -657,8 +659,7 @@ class MainWindow(QMainWindow):
             return
 
         self.geometry_file_edit.setText(fname)
-        if self.load_custom_geometry_classes(fname):
-            self.update_geometry_options()
+        self.load_custom_geometry_classes(fname)
 
     def reload_orca_preset_geometries(self, show_errors: bool = True):
         current_label = self.geometry_preset_combo.currentText()
@@ -739,7 +740,6 @@ class MainWindow(QMainWindow):
 
             return True
         except Exception as exc:
-            self.clear_geometry_parameter_widgets()
             if show_errors:
                 QMessageBox.critical(self, "ORCA Geometry", f"Failed to load custom geometry:\n{exc}")
             return False
@@ -762,126 +762,10 @@ class MainWindow(QMainWindow):
         elif not use_preset and self.geometry_class_combo.count() == 0 and self.geometry_file_edit.text().strip():
             self.load_custom_geometry_classes(self.geometry_file_edit.text().strip(), show_errors=False)
 
-        self.update_geometry_options()
-
-    def clear_geometry_parameter_widgets(self):
-        while self.geometry_params_layout.rowCount() > 0:
-            result = self.geometry_params_layout.takeRow(0)
-            if result.labelItem:
-                label_widget = result.labelItem.widget()
-                if label_widget:
-                    label_widget.deleteLater()
-            if result.fieldItem:
-                field_widget = result.fieldItem.widget()
-                if field_widget:
-                    field_widget.deleteLater()
-
-        self.geometry_param_widgets = {}
-        self.geometry_param_specs = {}
-
-    def update_geometry_options(self):
-        self.clear_geometry_parameter_widgets()
-
-        geometry_cls = self.get_selected_geometry_class()
-        if geometry_cls is None:
-            return
-
-        try:
-            sig = inspect.signature(geometry_cls.__init__)
-        except ValueError:
-            return
-
-        for name, param in sig.parameters.items():
-            if name == "self" or name in {"args", "kwargs"}:
-                continue
-
-            widget = self.create_parameter_widget(param)
-            label_text = name.replace("_", " ").title()
-            self.geometry_params_layout.addRow(f"{label_text}:", widget)
-            self.geometry_param_widgets[name] = widget
-            self.geometry_param_specs[name] = param
-
     def get_selected_geometry_class(self) -> Optional[type]:
         if self.geometry_source_combo.currentData() == "preset":
             return self.geometry_preset_combo.currentData()
         return self.geometry_class_combo.currentData()
-
-    def normalize_parameter_type(self, annotation: Any) -> Optional[type]:
-        if annotation is inspect.Parameter.empty:
-            return None
-
-        origin = get_origin(annotation)
-        if origin is None:
-            return annotation if annotation in {bool, int, float, str} else None
-
-        args = [arg for arg in get_args(annotation) if arg is not type(None)]
-        if len(args) == 1:
-            return self.normalize_parameter_type(args[0])
-
-        return None
-
-    def create_parameter_widget(self, param: inspect.Parameter) -> QWidget:
-        annotation = self.normalize_parameter_type(param.annotation)
-        default = param.default
-
-        if annotation == bool or isinstance(default, bool):
-            widget = QCheckBox()
-            if isinstance(default, bool):
-                widget.setChecked(default)
-            return widget
-
-        if annotation == int or (isinstance(default, int) and not isinstance(default, bool)):
-            widget = QSpinBox()
-            widget.setRange(-1000000, 1000000)
-            if isinstance(default, int) and not isinstance(default, bool):
-                widget.setValue(default)
-            return widget
-
-        if annotation == float or isinstance(default, float):
-            widget = QDoubleSpinBox()
-            widget.setRange(-1e9, 1e9)
-            widget.setDecimals(6)
-            if isinstance(default, float):
-                widget.setValue(default)
-            return widget
-
-        widget = QLineEdit()
-        if isinstance(default, str):
-            widget.setText(default)
-        elif default != inspect.Parameter.empty:
-            widget.setPlaceholderText(f"Default: {default}")
-            widget.setToolTip(f"Leave empty to use default: {default}")
-        return widget
-
-    def collect_parameter_value(self, widget: QWidget, param: inspect.Parameter):
-        if isinstance(widget, QCheckBox):
-            return widget.isChecked()
-
-        if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-            return widget.value()
-
-        if isinstance(widget, QLineEdit):
-            text = widget.text().strip()
-            if not text and param.default != inspect.Parameter.empty:
-                return inspect.Parameter.empty
-
-            expected_type = self.normalize_parameter_type(param.annotation)
-            if expected_type == str:
-                return text
-            if expected_type == int:
-                return int(text)
-            if expected_type == float:
-                return float(text)
-
-            if not text:
-                return text
-
-            try:
-                return ast.literal_eval(text)
-            except Exception:
-                return text
-
-        raise TypeError(f"Unsupported parameter widget type: {type(widget)}")
 
     def create_orca_geometry(self):
         if self.geometry_source_combo.currentData() == "custom":
@@ -894,13 +778,7 @@ class MainWindow(QMainWindow):
         if geometry_cls is None:
             raise ValueError("Please select an ORCA geometry class.")
 
-        geometry_kwargs = {}
-        for name, widget in self.geometry_param_widgets.items():
-            value = self.collect_parameter_value(widget, self.geometry_param_specs[name])
-            if value is not inspect.Parameter.empty:
-                geometry_kwargs[name] = value
-
-        return geometry_cls(**geometry_kwargs)
+        return geometry_cls()
 
     def browse_file(self, line_edit, filter):
         fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", filter)
@@ -1180,6 +1058,8 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(True)
         self._update_progress_display(0, self.max_iter_spin.value())
         self.elapsed_label.setText("Time: 0.0s")
+        self.fine_tuning_active = False
+        self.fine_tuning_notification_shown = False
         
         # Clear plots
         self.s_param_plot.clear()
@@ -1228,7 +1108,22 @@ class MainWindow(QMainWindow):
     def on_progress(self, context: dict):
         iteration = context.get("iteration", 0)
         max_iterations = self.worker.max_iterations if self.worker else self.max_iter_spin.value()
-        self._update_progress_display(iteration, max_iterations)
+        if context.get("fine_tuning_active"):
+            self.fine_tuning_active = True
+            ft_iteration = context.get("fine_tuning_iteration", 0)
+            ft_total = context.get("fine_tuning_total", self.ft_iter_spin.value())
+            self._update_finetuning_display(ft_iteration, ft_total)
+
+            if not self.fine_tuning_notification_shown:
+                start_iter = context.get("fine_tuning_start_iteration")
+                if start_iter is not None:
+                    self.statusBar().showMessage(
+                        f"Goals have been reached after iteration {start_iter}. Starting finetuning...",
+                        5000,
+                    )
+                    self.fine_tuning_notification_shown = True
+        else:
+            self._update_progress_display(iteration, max_iterations)
         
         elapsed = context.get("elapsed_time")
         if elapsed is None and "times" in context:
