@@ -2,8 +2,9 @@ import json
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QLineEdit, 
-    QDoubleSpinBox
+    QDoubleSpinBox, QMessageBox
 )
+from PySide6.QtGui import QDoubleValidator
 
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
@@ -16,6 +17,7 @@ class DesignGoalDialog(QDialog):
     def __init__(self, parent=None, goal=None):
         super().__init__(parent)
         self.setWindowTitle("Design Goal")
+        self.setMinimumWidth(400)
         self.form_layout = QFormLayout(self)
         
         self.param_combo = QComboBox()
@@ -25,17 +27,36 @@ class DesignGoalDialog(QDialog):
         common_params = sorted(list(set(common_params)))
         self.param_combo.addItems(common_params)
         
+        self.weight_edit = QLineEdit()
+        self.weight_edit.setPlaceholderText("Default: 1.0")
+        self.weight_edit.setText("1.0")
+        weight_validator = QDoubleValidator(0.0, 1e15, 15, self)
+        weight_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.weight_edit.setValidator(weight_validator)
+
         self.min_edit = QLineEdit()
         self.max_edit = QLineEdit()
         self.min_edit.setPlaceholderText("Optional")
         self.max_edit.setPlaceholderText("Optional")
-        
-        self.freq_range_edit = QLineEdit()
-        self.freq_range_edit.setPlaceholderText("Optional (e.g. 125-135ghz)")
+        value_validator = QDoubleValidator(-1e15, 1e15, 15, self)
+        value_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.min_edit.setValidator(value_validator)
+        self.max_edit.setValidator(value_validator)
 
-        self.weight_edit = QLineEdit()
-        self.weight_edit.setPlaceholderText("Default: 1.0")
-        self.weight_edit.setText("1.0")
+        self.freq_min_edit = QLineEdit()
+        self.freq_max_edit = QLineEdit()
+        self.freq_min_edit.setPlaceholderText("Optional")
+        self.freq_max_edit.setPlaceholderText("Optional")
+        freq_validator = QDoubleValidator(0.0, 1e15, 15, self)
+        freq_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.freq_min_edit.setValidator(freq_validator)
+        self.freq_max_edit.setValidator(freq_validator)
+        self.freq_unit_combo = QComboBox()
+        self.freq_unit_combo.addItems(["Hz", "kHz", "MHz", "GHz", "THz"])
+        self.freq_unit_combo.setCurrentText("GHz")
+        self.freq_unit_combo.setToolTip("Used when both Min and Max Frequency are set.")
+
+        self._raw_frequency_range = None
         
         if goal:
             self.param_combo.setCurrentText(goal.parameter.value)
@@ -44,15 +65,26 @@ class DesignGoalDialog(QDialog):
             if goal.max_value is not None:
                 self.max_edit.setText(str(goal.max_value))
             if goal.frequency_range:
-                self.freq_range_edit.setText(goal.frequency_range)
+                parsed = self._parse_frequency_range(goal.frequency_range)
+                if parsed is None:
+                    self._raw_frequency_range = goal.frequency_range
+                else:
+                    min_freq, max_freq, unit = parsed
+                    self.freq_min_edit.setText(min_freq)
+                    self.freq_max_edit.setText(max_freq)
+                    unit_label = self._normalize_frequency_unit(unit)
+                    if unit_label is not None:
+                        self.freq_unit_combo.setCurrentText(unit_label)
             if goal.weight is not None:
                 self.weight_edit.setText(str(goal.weight))
         
         self.form_layout.addRow("Parameter:", self.param_combo)
+        self.form_layout.addRow("Weight:", self.weight_edit)
         self.form_layout.addRow("Min Value:", self.min_edit)
         self.form_layout.addRow("Max Value:", self.max_edit)
-        self.form_layout.addRow("Frequency Range:", self.freq_range_edit)
-        self.form_layout.addRow("Weight:", self.weight_edit)
+        self.form_layout.addRow("Min Frequency:", self.freq_min_edit)
+        self.form_layout.addRow("Max Frequency:", self.freq_max_edit)
+        self.form_layout.addRow("Frequency Unit:", self.freq_unit_combo)
         
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.accepted.connect(self.accept)
@@ -74,7 +106,9 @@ class DesignGoalDialog(QDialog):
         min_val = float(self.min_edit.text()) if self.min_edit.text() else None
         max_val = float(self.max_edit.text()) if self.max_edit.text() else None
         
-        freq_range = self.freq_range_edit.text().strip() or None
+        freq_range, freq_error = self._build_frequency_range()
+        if freq_error:
+            raise ValueError(freq_error)
         
         try:
             weight = float(self.weight_edit.text())
@@ -82,6 +116,86 @@ class DesignGoalDialog(QDialog):
             weight = 1.0
 
         return DesignGoal(parameter=param, frequency_range=freq_range, min_value=min_val, max_value=max_val, weight=weight)
+
+    def accept(self):
+        min_text = self.min_edit.text().strip()
+        max_text = self.max_edit.text().strip()
+        weight_text = self.weight_edit.text().strip()
+        if min_text and not self.min_edit.hasAcceptableInput():
+            QMessageBox.warning(self, "Invalid Value", "Min Value must be numeric.")
+            return
+        if max_text and not self.max_edit.hasAcceptableInput():
+            QMessageBox.warning(self, "Invalid Value", "Max Value must be numeric.")
+            return
+        if weight_text and not self.weight_edit.hasAcceptableInput():
+            QMessageBox.warning(self, "Invalid Weight", "Weight must be numeric.")
+            return
+        if not min_text and not max_text:
+            QMessageBox.warning(
+                self,
+                "Missing Value Range",
+                "At least one of Min Value or Max Value must be set.",
+            )
+            return
+        _, freq_error = self._build_frequency_range()
+        if freq_error:
+            QMessageBox.warning(self, "Invalid Frequency Range", freq_error)
+            return
+        super().accept()
+
+    def _build_frequency_range(self):
+        freq_min_text = self.freq_min_edit.text().strip()
+        freq_max_text = self.freq_max_edit.text().strip()
+        if freq_min_text or freq_max_text:
+            if not (freq_min_text and freq_max_text):
+                return None, "Both Min Frequency and Max Frequency are required when setting a frequency range."
+            try:
+                float(freq_min_text)
+                float(freq_max_text)
+            except ValueError:
+                return None, "Frequency values must be numeric."
+            unit = self.freq_unit_combo.currentText().lower()
+            return f"{freq_min_text}-{freq_max_text}{unit}", None
+        if self._raw_frequency_range:
+            return self._raw_frequency_range, None
+        return None, None
+
+    @staticmethod
+    def _parse_frequency_range(frequency_range: str):
+        if not frequency_range:
+            return None
+        parts = frequency_range.strip().split("-")
+        if len(parts) != 2:
+            return None
+        min_part = parts[0].strip()
+        max_part = parts[1].strip()
+        if not min_part or not max_part:
+            return None
+        unit = ""
+        max_digits = []
+        for ch in max_part:
+            if ch.isdigit() or ch == ".":
+                max_digits.append(ch)
+            else:
+                unit = max_part[len(max_digits):].strip()
+                break
+        if not unit:
+            return None
+        max_value = "".join(max_digits)
+        if not max_value:
+            return None
+        return min_part, max_value, unit
+
+    @staticmethod
+    def _normalize_frequency_unit(unit: str):
+        unit_map = {
+            "hz": "Hz",
+            "khz": "kHz",
+            "mhz": "MHz",
+            "ghz": "GHz",
+            "thz": "THz",
+        }
+        return unit_map.get(unit.strip().lower())
 
 class OptimizationParamDialog(QDialog):
     def __init__(

@@ -4,7 +4,6 @@ from concurrent.futures import ProcessPoolExecutor
 import importlib
 import multiprocessing as mp
 import os
-import uuid
 import skrf as rf
 
 
@@ -36,11 +35,12 @@ def _mesh_gds_and_run_palace(
         simconfig_filename=simconfig_filename,
         show_mesh_results=False,
     )
+    sim_path = os.path.join(base_dir, "palace_sims", f"{name}_data")
     run_palace(
-        sim_path=os.path.join(base_dir, "palace_sims", f"{name}_data"),
-        data_dir=os.path.join("output", name),
+        sim_path=sim_path,
+        data_dir=os.path.join(sim_path, "output", name),
         result_dir=os.path.join(base_dir),
-        config_name=os.path.join(base_dir, "palace_sims", f"{name}_data", "config.json"),
+        config_name=os.path.join(sim_path, "config.json"),
         palace_executable=palace_executable,
         cpu_cores=16,
         touchstone_type="all",
@@ -68,11 +68,9 @@ class EMFineTuningStage(COBRABaseStage):
             raise ValueError("orca_geometry must be an instance of BaseGeometry")
         geometry = cast(Any, orca_geometry)
         
-        base_dir = os.path.join(os.getcwd(), "output")
-        fine_tuning_run = context.get("fine_tuning_run", 0) + 1
-        context["fine_tuning_run"] = fine_tuning_run
-        unique_suffix = uuid.uuid4().hex[:8]
-        name = f"cobra_result_ft_{fine_tuning_run}_{context['iteration']}_{unique_suffix}"
+        base_dir = os.path.abspath(context.get("results_dir", os.path.join(os.getcwd(), "results")))
+        fine_tuning_run = context.get("fine_tuning_iteration", 0)
+        name = f"cobra_result_ft_{fine_tuning_run}_{context['iteration']}"
         gds_output_path = os.path.join(base_dir, f"{name}.gds")
         
         parameters = context["model_parameters"]

@@ -15,7 +15,8 @@ cobra = COBRA(
     ),
     circuit_simulator=XyceSimulator(),
     em_surrogate_model="/home/david/Documents/git/COBRA/tf_octa_c_ports.onnx",
-    palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace"
+    palace_fine_tuning_command="apptainer exec ~/Documents/git/palace/palace.sif palace",
+    fine_tuning_optimizer="gradient_descent",  # Options: "reuse" or "gradient_descent"
 )
 
 netlist = "netlist_xyce_vector.cir"

@@ -23,7 +23,10 @@ class OptimizerStage(COBRABaseStage):
     
     def tell(self, context):
         loss_values = context["penalties"]
+        status = "finetuning" if context.get("fine_tuning_active") else "optimization"
         context["iterations"].append({
+            "iteration": context.get("iteration"),
+            "status": status,
             "model_parameters": context["model_parameters"],
             "netlist_parameters": context["netlist_parameters"],
             "loss": loss_values,

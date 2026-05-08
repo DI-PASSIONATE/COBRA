@@ -1,5 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, get_args, get_origin
-import ast
+from typing import Dict, List, Optional, Tuple
 import importlib
 import importlib.util
 import inspect
@@ -15,7 +14,8 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog, 
     QListWidget, QTableWidget, QTableWidgetItem, 
     QSpinBox, QGroupBox, QFormLayout, QScrollArea,
-    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog
+    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog,
+    QStackedWidget
 )
 from PySide6.QtCore import Qt, Slot
 import pyqtgraph as pg
@@ -29,6 +29,7 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog, clean_name
+from .theme import apply_theme
 from .worker import OptimizationWorker
 
 class MainWindow(QMainWindow):
@@ -41,7 +42,60 @@ class MainWindow(QMainWindow):
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        root_layout = QVBoxLayout(central)
+
+        # Global controls shown regardless of active panel
+        global_controls_layout = QHBoxLayout()
+        control_btn_width = 220
+        control_btn_height = 48
+
+        self.config_panel_btn = QPushButton("Configuration")
+        self.config_panel_btn.setFixedSize(control_btn_width, control_btn_height)
+        self.config_panel_btn.setProperty("tabButton", True)
+        self.config_panel_btn.clicked.connect(lambda: self.set_active_panel("config"))
+        self.viz_panel_btn = QPushButton("Visualization")
+        self.viz_panel_btn.setFixedSize(control_btn_width, control_btn_height)
+        self.viz_panel_btn.setProperty("tabButton", True)
+        self.viz_panel_btn.clicked.connect(lambda: self.set_active_panel("viz"))
+        global_controls_layout.addWidget(self.config_panel_btn)
+        global_controls_layout.addWidget(self.viz_panel_btn)
+
+        self.action_btn = QPushButton("START OPTIMIZATION")
+        self.action_btn.setFixedSize(control_btn_width, control_btn_height)
+        self.action_btn.setProperty("primaryAction", True)
+        self.action_btn.setProperty("actionState", "start")
+        self.action_btn.clicked.connect(self.on_action_clicked)
+
+        self.stop_btn = QPushButton("⬛")  # Square stop symbol
+        self.stop_btn.setToolTip("Stop Optimization")
+        self.stop_btn.setFixedSize(control_btn_height, control_btn_height)
+        self.stop_btn.setProperty("dangerAction", True)
+        self.stop_btn.clicked.connect(self.stop_optimization)
+        self.stop_btn.setEnabled(False)
+
+        global_controls_layout.addSpacing(16)
+        global_controls_layout.addWidget(self.action_btn)
+        global_controls_layout.addWidget(self.stop_btn)
+        global_controls_layout.addStretch()
+
+        root_layout.addLayout(global_controls_layout)
+
+        global_progress_layout = QHBoxLayout()
+        self.progress_label = QLabel("Iteration 0/0 (0.0%)")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.elapsed_label = QLabel("Time: 0.0s")
+        global_progress_layout.addWidget(self.progress_label)
+        global_progress_layout.addWidget(self.progress_bar, stretch=1)
+        global_progress_layout.addWidget(self.elapsed_label)
+
+        root_layout.addLayout(global_progress_layout)
+
+        self.statusBar()
+
+        self.panel_stack = QStackedWidget()
+        root_layout.addWidget(self.panel_stack, stretch=1)
         
         # Left Panel: Configuration
         config_group = QGroupBox("Configuration")
@@ -120,6 +174,15 @@ class MainWindow(QMainWindow):
         self.ft_iter_spin.setValue(3)
         self.config_form_layout.addRow(self.ft_iter_label, self.ft_iter_spin)
 
+        self.ft_optimizer_label = QLabel("Finetuning Optimizer:")
+        self.ft_optimizer_combo = QComboBox()
+        self.ft_optimizer_combo.addItem("Reuse surrogate optimizer", "reuse")
+        self.ft_optimizer_combo.addItem("Gradient descent", "gradient_descent")
+        self.ft_optimizer_combo.setToolTip(
+            "Reuse the optimizer state from the surrogate phase or switch to a local gradient-descent refinement."
+        )
+        self.config_form_layout.addRow(self.ft_optimizer_label, self.ft_optimizer_combo)
+
         self.geometry_group = QGroupBox("ORCA Geometry")
         geometry_group_layout = QVBoxLayout(self.geometry_group)
 
@@ -151,24 +214,19 @@ class MainWindow(QMainWindow):
         self.geometry_form_layout.addRow(self.geometry_class_label, self.geometry_class_combo)
 
         geometry_group_layout.addLayout(self.geometry_form_layout)
-
-        self.geometry_params_group = QGroupBox("Geometry Parameters")
-        self.geometry_params_layout = QFormLayout()
-        self.geometry_params_group.setLayout(self.geometry_params_layout)
-        geometry_group_layout.addWidget(self.geometry_params_group)
         
         # Disable fine-tuning fields by default
         self.palace_label.setVisible(False)
         self.palace_edit.setVisible(False)
         self.ft_iter_label.setVisible(False)
         self.ft_iter_spin.setVisible(False)
+        self.ft_optimizer_label.setVisible(False)
+        self.ft_optimizer_combo.setVisible(False)
         self.geometry_group.setVisible(False)
         
         # If fine-tuning is toggled, show palace command and ORCA geometry fields
         self.finetune_cb.toggled.connect(self.on_finetune_toggled)
         self.geometry_source_combo.currentIndexChanged.connect(self.update_geometry_source)
-        self.geometry_preset_combo.currentIndexChanged.connect(self.update_geometry_options)
-        self.geometry_class_combo.currentIndexChanged.connect(self.update_geometry_options)
 
         self.config_scroll_area = QScrollArea()
         self.config_scroll_area.setWidgetResizable(True)
@@ -220,33 +278,12 @@ class MainWindow(QMainWindow):
         goal_layout.addWidget(add_goal_btn)
         
         config_layout.addWidget(self.config_scroll_area, stretch=1)
-        config_layout.addWidget(param_group)
-        config_layout.addWidget(goal_group)
+        config_bottom_layout = QHBoxLayout()
+        config_bottom_layout.addWidget(param_group, stretch=3)
+        config_bottom_layout.addWidget(goal_group, stretch=2)
+        config_layout.addLayout(config_bottom_layout, stretch=1)
         
-        self.action_btn = QPushButton("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
-        self.action_btn.clicked.connect(self.on_action_clicked)
-        
-        self.stop_btn = QPushButton("⬛")  # Square stop symbol
-        self.stop_btn.setToolTip("Stop Optimization")
-        self.stop_btn.setFixedSize(40, 40) # Small square
-        self.stop_btn.setStyleSheet("font-weight: bold; font-size: 20px; background-color: #F44336; color: white;")
-        self.stop_btn.clicked.connect(self.stop_optimization)
-        self.stop_btn.setEnabled(False)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.action_btn)
-        btn_layout.addWidget(self.stop_btn)
-        config_layout.addLayout(btn_layout)
-        
-        progress_layout = QHBoxLayout()
-        self.progress_bar = QProgressBar()
-        self.elapsed_label = QLabel("Time: 0.0s")
-        progress_layout.addWidget(self.progress_bar)
-        progress_layout.addWidget(self.elapsed_label)
-        config_layout.addLayout(progress_layout)
-
-        # Right Panel: Visualization
+        # Visualization Panel
         viz_group = QGroupBox("Visualization")
         viz_layout = QVBoxLayout(viz_group)
         
@@ -294,6 +331,15 @@ class MainWindow(QMainWindow):
         # 2. Tables Area (Horizontal split)
         tables_layout = QHBoxLayout()
 
+        # Current Parameter Table (read-only runtime values)
+        current_params_group = QGroupBox("Current Parameters")
+        current_params_layout = QVBoxLayout(current_params_group)
+        self.current_param_table = QTableWidget(0, 2)
+        self.current_param_table.setHorizontalHeaderLabels(["Name", "Current Value"])
+        self.current_param_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        current_params_layout.addWidget(self.current_param_table)
+        tables_layout.addWidget(current_params_group)
+
         # Goal Status Table (Current Goal Metrics)
         goal_group_viz = QGroupBox("Goal Status")
         goal_viz_layout = QVBoxLayout(goal_group_viz)
@@ -305,10 +351,8 @@ class MainWindow(QMainWindow):
 
         viz_layout.addLayout(tables_layout, stretch=1)
         
-        # Splitter setup
-        # For simplicity using specific ratios in layout
-        main_layout.addWidget(config_group, 1)
-        main_layout.addWidget(viz_group, 2)
+        self.panel_stack.addWidget(config_group)
+        self.panel_stack.addWidget(viz_group)
         
         # Data storage
         self.opt_params: List[OptimizationProperty] = []
@@ -318,12 +362,55 @@ class MainWindow(QMainWindow):
         self.overlay_items = []
         self.orca_preset_classes: Dict[str, type] = {}
         self.custom_geometry_classes: Dict[str, type] = {}
-        self.geometry_param_widgets: Dict[str, QWidget] = {}
-        self.geometry_param_specs: Dict[str, inspect.Parameter] = {}
+        self.fine_tuning_active = False
+        self.fine_tuning_notification_shown = False
         
+        apply_theme(self)
+        self._set_action_button_state("start")
         self.update_simulator_options()
         self.reload_orca_preset_geometries(show_errors=False)
         self.update_geometry_source()
+        self.set_active_panel("config")
+
+    def _refresh_widget_style(self, widget: QWidget):
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
+
+    def _set_tab_state(self, button: QPushButton, active: bool):
+        button.setProperty("tabActive", active)
+        button.setEnabled(not active)
+        self._refresh_widget_style(button)
+
+    def _set_action_button_state(self, state: str, enabled: bool = True):
+        label_map = {
+            "start": "START OPTIMIZATION",
+            "pause": "PAUSE",
+            "resume": "RESUME",
+            "stopping": "STOPPING...",
+        }
+        self.action_btn.setText(label_map.get(state, state))
+        self.action_btn.setEnabled(enabled)
+        self.action_btn.setProperty("actionState", state)
+        self._refresh_widget_style(self.action_btn)
+
+    def set_active_panel(self, panel: str):
+        if panel == "viz":
+            self.panel_stack.setCurrentIndex(1)
+            self._set_tab_state(self.config_panel_btn, False)
+            self._set_tab_state(self.viz_panel_btn, True)
+        else:
+            self.panel_stack.setCurrentIndex(0)
+            self._set_tab_state(self.config_panel_btn, True)
+            self._set_tab_state(self.viz_panel_btn, False)
+
+    def _update_progress_display(self, iteration: int, max_iterations: int):
+        max_iterations = max(1, int(max_iterations))
+        iteration = max(0, min(int(iteration), max_iterations))
+        percentage = (iteration / max_iterations) * 100.0
+        self.progress_bar.setRange(0, max_iterations)
+        self.progress_bar.setValue(iteration)
+        self.progress_label.setText(f"Iteration {iteration}/{max_iterations} ({percentage:.1f}%)")
 
     def _style_plot_for_light_background(self, plot_widget: pg.PlotWidget):
         axis_pen = pg.mkPen('k')
@@ -331,6 +418,14 @@ class MainWindow(QMainWindow):
             axis = plot_widget.getAxis(axis_name)
             axis.setPen(axis_pen)
             axis.setTextPen(axis_pen)
+
+    def _update_finetuning_display(self, iteration: int, total_iterations: int):
+        total_iterations = max(1, int(total_iterations))
+        iteration = max(0, min(int(iteration), total_iterations))
+        percentage = (iteration / total_iterations) * 100.0
+        self.progress_bar.setRange(0, total_iterations)
+        self.progress_bar.setValue(iteration)
+        self.progress_label.setText(f"Finetuning {iteration}/{total_iterations} ({percentage:.1f}%)")
 
     def _goal_sparam_specs(self) -> List[tuple[str, int, int]]:
         # Parse goal parameter names like S11 or S21_dB into (label, row_idx, col_idx).
@@ -551,6 +646,8 @@ class MainWindow(QMainWindow):
         self.palace_edit.setVisible(checked)
         self.ft_iter_label.setVisible(checked)
         self.ft_iter_spin.setVisible(checked)
+        self.ft_optimizer_label.setVisible(checked)
+        self.ft_optimizer_combo.setVisible(checked)
         self.geometry_group.setVisible(checked)
 
         if checked and self.geometry_source_combo.currentData() == "preset" and self.geometry_preset_combo.count() == 0:
@@ -562,8 +659,7 @@ class MainWindow(QMainWindow):
             return
 
         self.geometry_file_edit.setText(fname)
-        if self.load_custom_geometry_classes(fname):
-            self.update_geometry_options()
+        self.load_custom_geometry_classes(fname)
 
     def reload_orca_preset_geometries(self, show_errors: bool = True):
         current_label = self.geometry_preset_combo.currentText()
@@ -644,7 +740,6 @@ class MainWindow(QMainWindow):
 
             return True
         except Exception as exc:
-            self.clear_geometry_parameter_widgets()
             if show_errors:
                 QMessageBox.critical(self, "ORCA Geometry", f"Failed to load custom geometry:\n{exc}")
             return False
@@ -667,126 +762,10 @@ class MainWindow(QMainWindow):
         elif not use_preset and self.geometry_class_combo.count() == 0 and self.geometry_file_edit.text().strip():
             self.load_custom_geometry_classes(self.geometry_file_edit.text().strip(), show_errors=False)
 
-        self.update_geometry_options()
-
-    def clear_geometry_parameter_widgets(self):
-        while self.geometry_params_layout.rowCount() > 0:
-            result = self.geometry_params_layout.takeRow(0)
-            if result.labelItem:
-                label_widget = result.labelItem.widget()
-                if label_widget:
-                    label_widget.deleteLater()
-            if result.fieldItem:
-                field_widget = result.fieldItem.widget()
-                if field_widget:
-                    field_widget.deleteLater()
-
-        self.geometry_param_widgets = {}
-        self.geometry_param_specs = {}
-
-    def update_geometry_options(self):
-        self.clear_geometry_parameter_widgets()
-
-        geometry_cls = self.get_selected_geometry_class()
-        if geometry_cls is None:
-            return
-
-        try:
-            sig = inspect.signature(geometry_cls.__init__)
-        except ValueError:
-            return
-
-        for name, param in sig.parameters.items():
-            if name == "self" or name in {"args", "kwargs"}:
-                continue
-
-            widget = self.create_parameter_widget(param)
-            label_text = name.replace("_", " ").title()
-            self.geometry_params_layout.addRow(f"{label_text}:", widget)
-            self.geometry_param_widgets[name] = widget
-            self.geometry_param_specs[name] = param
-
     def get_selected_geometry_class(self) -> Optional[type]:
         if self.geometry_source_combo.currentData() == "preset":
             return self.geometry_preset_combo.currentData()
         return self.geometry_class_combo.currentData()
-
-    def normalize_parameter_type(self, annotation: Any) -> Optional[type]:
-        if annotation is inspect.Parameter.empty:
-            return None
-
-        origin = get_origin(annotation)
-        if origin is None:
-            return annotation if annotation in {bool, int, float, str} else None
-
-        args = [arg for arg in get_args(annotation) if arg is not type(None)]
-        if len(args) == 1:
-            return self.normalize_parameter_type(args[0])
-
-        return None
-
-    def create_parameter_widget(self, param: inspect.Parameter) -> QWidget:
-        annotation = self.normalize_parameter_type(param.annotation)
-        default = param.default
-
-        if annotation == bool or isinstance(default, bool):
-            widget = QCheckBox()
-            if isinstance(default, bool):
-                widget.setChecked(default)
-            return widget
-
-        if annotation == int or (isinstance(default, int) and not isinstance(default, bool)):
-            widget = QSpinBox()
-            widget.setRange(-1000000, 1000000)
-            if isinstance(default, int) and not isinstance(default, bool):
-                widget.setValue(default)
-            return widget
-
-        if annotation == float or isinstance(default, float):
-            widget = QDoubleSpinBox()
-            widget.setRange(-1e9, 1e9)
-            widget.setDecimals(6)
-            if isinstance(default, float):
-                widget.setValue(default)
-            return widget
-
-        widget = QLineEdit()
-        if isinstance(default, str):
-            widget.setText(default)
-        elif default != inspect.Parameter.empty:
-            widget.setPlaceholderText(f"Default: {default}")
-            widget.setToolTip(f"Leave empty to use default: {default}")
-        return widget
-
-    def collect_parameter_value(self, widget: QWidget, param: inspect.Parameter):
-        if isinstance(widget, QCheckBox):
-            return widget.isChecked()
-
-        if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-            return widget.value()
-
-        if isinstance(widget, QLineEdit):
-            text = widget.text().strip()
-            if not text and param.default != inspect.Parameter.empty:
-                return inspect.Parameter.empty
-
-            expected_type = self.normalize_parameter_type(param.annotation)
-            if expected_type == str:
-                return text
-            if expected_type == int:
-                return int(text)
-            if expected_type == float:
-                return float(text)
-
-            if not text:
-                return text
-
-            try:
-                return ast.literal_eval(text)
-            except Exception:
-                return text
-
-        raise TypeError(f"Unsupported parameter widget type: {type(widget)}")
 
     def create_orca_geometry(self):
         if self.geometry_source_combo.currentData() == "custom":
@@ -799,13 +778,7 @@ class MainWindow(QMainWindow):
         if geometry_cls is None:
             raise ValueError("Please select an ORCA geometry class.")
 
-        geometry_kwargs = {}
-        for name, widget in self.geometry_param_widgets.items():
-            value = self.collect_parameter_value(widget, self.geometry_param_specs[name])
-            if value is not inspect.Parameter.empty:
-                geometry_kwargs[name] = value
-
-        return geometry_cls(**geometry_kwargs)
+        return geometry_cls()
 
     def browse_file(self, line_edit, filter):
         fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", filter)
@@ -1033,12 +1006,10 @@ class MainWindow(QMainWindow):
         # If running, toggle pause
         if self.worker.paused:
             self.worker.resume()
-            self.action_btn.setText("PAUSE")
-            self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;") # Orange
+            self._set_action_button_state("pause")
         else:
             self.worker.pause()
-            self.action_btn.setText("RESUME")
-            self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #2196F3; color: white;") # Blue
+            self._set_action_button_state("resume")
 
     def start_optimization(self):
         onnx = self.onnx_edit.text()
@@ -1078,15 +1049,17 @@ class MainWindow(QMainWindow):
             optimizer=optimizer_cls(**optimizer_kwargs),# multi_objective=self.moo_cb.isChecked()),
             circuit_simulator=simulator_cls(**sim_kwargs),
             palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None,
-            fine_tuning_iterations=self.ft_iter_spin.value()
+            fine_tuning_iterations=self.ft_iter_spin.value(),
+            fine_tuning_optimizer=self.ft_optimizer_combo.currentData() if self.finetune_cb.isChecked() else "reuse",
         )
         
         # Change button to PAUSE (running state)
-        self.action_btn.setText("PAUSE")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #FFA500; color: white;")
+        self._set_action_button_state("pause")
         self.stop_btn.setEnabled(True)
-        self.progress_bar.setRange(0, self.max_iter_spin.value())
-        self.progress_bar.setValue(0)
+        self._update_progress_display(0, self.max_iter_spin.value())
+        self.elapsed_label.setText("Time: 0.0s")
+        self.fine_tuning_active = False
+        self.fine_tuning_notification_shown = False
         
         # Clear plots
         self.s_param_plot.clear()
@@ -1106,12 +1079,12 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
         self.worker.start()
+        self.set_active_panel("viz")
 
     def stop_optimization(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.action_btn.setText("STOPPING...")
-            self.action_btn.setEnabled(False)
+            self._set_action_button_state("stopping", enabled=False)
             self.stop_btn.setEnabled(False)
 
     @Slot(int)
@@ -1129,11 +1102,28 @@ class MainWindow(QMainWindow):
             if self.worker:
                 self.worker.max_iterations = new_max
             self.max_iter_spin.setValue(new_max)
-            self.progress_bar.setMaximum(new_max)
+            self._update_progress_display(self.progress_bar.value(), new_max)
 
     @Slot(dict)
     def on_progress(self, context: dict):
-        self.progress_bar.setValue(context.get("iteration", 0))
+        iteration = context.get("iteration", 0)
+        max_iterations = self.worker.max_iterations if self.worker else self.max_iter_spin.value()
+        if context.get("fine_tuning_active"):
+            self.fine_tuning_active = True
+            ft_iteration = context.get("fine_tuning_iteration", 0)
+            ft_total = context.get("fine_tuning_total", self.ft_iter_spin.value())
+            self._update_finetuning_display(ft_iteration, ft_total)
+
+            if not self.fine_tuning_notification_shown:
+                start_iter = context.get("fine_tuning_start_iteration")
+                if start_iter is not None:
+                    self.statusBar().showMessage(
+                        f"Goals have been reached after iteration {start_iter}. Starting finetuning...",
+                        5000,
+                    )
+                    self.fine_tuning_notification_shown = True
+        else:
+            self._update_progress_display(iteration, max_iterations)
         
         elapsed = context.get("elapsed_time")
         if elapsed is None and "times" in context:
@@ -1160,6 +1150,23 @@ class MainWindow(QMainWindow):
                 item = self.param_table.item(row, 3)
                 if item:
                     item.setText(display_val)
+
+        self.current_param_table.setRowCount(0)
+        for name in sorted(current_values.keys()):
+            value = current_values[name]
+            if isinstance(value, (float, np.floating)):
+                display_val = f"{round(float(value), 4)}"
+            else:
+                display_val = str(value)
+
+            row = self.current_param_table.rowCount()
+            self.current_param_table.insertRow(row)
+            name_item = QTableWidgetItem(name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.current_param_table.setItem(row, 0, name_item)
+            val_item = QTableWidgetItem(display_val)
+            val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.current_param_table.setItem(row, 1, val_item)
 
         # Update Goal Status Table
         ntwk_n = context.get("simulated_network")
@@ -1291,9 +1298,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_finished(self):
-        self.action_btn.setEnabled(True)
-        self.action_btn.setText("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self._set_action_button_state("start", enabled=True)
         
         self.stop_btn.setEnabled(False)
 
@@ -1301,9 +1306,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def on_error(self, msg):
-        self.action_btn.setEnabled(True)
-        self.action_btn.setText("START OPTIMIZATION")
-        self.action_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #4CAF50; color: white;")
+        self._set_action_button_state("start", enabled=True)
         
         self.stop_btn.setEnabled(False)
 

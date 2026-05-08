@@ -16,6 +16,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cobra.optimizers.design_goal import DesignGoalChecker
 import tqdm, time
+from pathlib import Path
+from datetime import datetime
+import shutil
+import os
 
 class COBRA:
     """
@@ -29,14 +33,38 @@ class COBRA:
         circuit_simulator: BaseSimulator = XyceSimulator(),
         palace_fine_tuning_command: Optional[str] = None,
         fine_tuning_iterations: int = 3,
+        fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
     ):
         self.optimizer_stage = OptimizerStage(optimizer)
         self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model)
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
         self.fine_tuning_iterations = fine_tuning_iterations
+        self.fine_tuning_optimizer = fine_tuning_optimizer
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None) -> dict:
+    def _build_fine_tuning_optimizer_stage(self) -> OptimizerStage:
+        fine_tuning_optimizer = self.fine_tuning_optimizer
+
+        if fine_tuning_optimizer is None:
+            return self.optimizer_stage
+
+        if isinstance(fine_tuning_optimizer, BaseOptimizer):
+            return OptimizerStage(fine_tuning_optimizer)
+
+        if isinstance(fine_tuning_optimizer, str):
+            normalized_mode = fine_tuning_optimizer.replace("-", "_").strip().lower()
+            if normalized_mode in {"reuse", "same", "continue", "surrogate", "surrogate_optimizer"}:
+                return self.optimizer_stage
+            if normalized_mode in {"gradient_descent", "gradientdescent", "gd"}:
+                from cobra.optimizers import GradientDescentOptimizer
+
+                return OptimizerStage(GradientDescentOptimizer())
+
+        raise ValueError(
+            "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
+        )
+
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None, results_name: Optional[str] = None) -> dict:
         """
         Predict the next set of parameters based on the given netlist, design goals, and current parameters.
 
@@ -46,10 +74,25 @@ class COBRA:
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
         - callback: An optional callback function that takes the current context as an argument. If the callback returns False, the optimization is stopped.
+        - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
 
         Returns:
         - The optimized parameters that meet the design goals.
         """
+        # Create results folder with timestamp and name
+        if results_name is None:
+            results_name = Path(netlist).stem
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = Path("results") / f"{timestamp}_{results_name}"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy original netlist to results directory
+        original_netlist_path = Path(netlist)
+        netlist_in_results = results_dir / original_netlist_path.name
+        shutil.copy(netlist, netlist_in_results)
+        
+        # Update netlist path to point to the results directory for all operations
+        netlist = str(netlist_in_results)
         design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
         netlist_parser = self.circuit_simulation_stage.simulator.netlist_parser.from_file(netlist)
@@ -58,11 +101,11 @@ class COBRA:
             "netlist": netlist,
             "design_goal_checker": design_goal_checker,
             "optimization_parameters": optimization_parameters,
-            "output": None,
             "goal_achieved": False,
             "max_iterations": max_iterations,
             "iterations": [],
             "orca_geometry": orca_geometry,
+            "results_dir": str(results_dir),
             "times": {
                 "optimizer": 0.0,
                 "em_surrogate": 0.0,
@@ -143,15 +186,31 @@ class COBRA:
             print(f"Design goals achieved at iteration {context['iteration']}.")
                 
         ntwk = context["predicted_network"]
-        ntwk.write_touchstone(f"surrogate_s_params.s{ntwk.nports}p")
+        surrogate_file = results_dir / f"surrogate_s_params.s{ntwk.nports}p"
+        ntwk.write_touchstone(str(surrogate_file))
 
         if self.em_fine_tuning_stage is not None:
+            context["fine_tuning_active"] = True
+            context["fine_tuning_iteration"] = 0
+            context["fine_tuning_total"] = self.fine_tuning_iterations
+            if context.get("goal_achieved"):
+                context["fine_tuning_start_iteration"] = context.get("iteration", 0)
+
+            if callback:
+                should_continue = callback(context)
+                if should_continue is False:
+                    print("Fine Tuning stopped by callback.")
+                    return context
+
             context = self.fine_tuning(context, callback)
 
-        # Save final context to a JSON file for analysis            
-        with open("cobra_optimization_context.json", "w") as f:
-            # Save context as txt file
+        # Save final context to a JSON file for analysis
+        context_file = results_dir / "cobra_optimization_context.json"
+        with open(context_file, "w") as f:
+            # Save context as json file
             json.dump(context, f, indent=4, default=str)
+
+        print(f"\nAll results saved to: {results_dir}")
 
         return context
 
@@ -200,9 +259,16 @@ class COBRA:
             raise ValueError("ORCA geometry is not provided in the context. Cannot perform EM fine-tuning without geometry information.")
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
+        fine_tuning_optimizer_stage = self._build_fine_tuning_optimizer_stage()
+
+        if fine_tuning_optimizer_stage is not self.optimizer_stage:
+            fine_tuning_optimizer_stage.optimizer.initialize(len(design_goal_checker.design_goals))
 
         for iteration in tqdm.tqdm(range(self.fine_tuning_iterations), desc="COBRA EM Fine-Tuning Progress"):
             context["iteration"] = iteration + 1
+            context["fine_tuning_active"] = True
+            context["fine_tuning_iteration"] = iteration + 1
+            context["fine_tuning_total"] = self.fine_tuning_iterations
             # Perform EM simulation INSTEAD OF surrogate model prediction
             context = self.em_fine_tuning_stage.run(context, orca_geometry=context.get("orca_geometry", None))
 
@@ -225,8 +291,8 @@ class COBRA:
             else:
                 print(f"Design goals not achieved after EM fine-tuning at iteration {iteration}. Continuing optimization...")
 
-            self.optimizer_stage.tell(context)
-            context = self.optimizer_stage.run(context)
+            fine_tuning_optimizer_stage.tell(context)
+            context = fine_tuning_optimizer_stage.run(context)
 
         if not context["goal_achieved"]:
             print("EM fine-tuning completed without achieving design goals. Returning best parameters found.")
