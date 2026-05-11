@@ -10,12 +10,12 @@ import onnxruntime
 import gmsh
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog, 
-    QListWidget, QTableWidget, QTableWidgetItem, 
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog,
+    QListWidget, QTableWidget, QTableWidgetItem,
     QSpinBox, QGroupBox, QFormLayout, QScrollArea,
     QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog,
-    QStackedWidget
+    QStackedWidget, QDialog, QTextBrowser, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, Slot
 import pyqtgraph as pg
@@ -29,6 +29,7 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog, clean_name
+from .help_texts import TUTORIAL_HTML, tooltip
 from .theme import apply_theme
 from .worker import OptimizationWorker
 
@@ -52,31 +53,39 @@ class MainWindow(QMainWindow):
         self.config_panel_btn = QPushButton("Configuration")
         self.config_panel_btn.setFixedSize(control_btn_width, control_btn_height)
         self.config_panel_btn.setProperty("tabButton", True)
+        self.config_panel_btn.setToolTip(tooltip("config_panel_btn"))
         self.config_panel_btn.clicked.connect(lambda: self.set_active_panel("config"))
         self.viz_panel_btn = QPushButton("Visualization")
         self.viz_panel_btn.setFixedSize(control_btn_width, control_btn_height)
         self.viz_panel_btn.setProperty("tabButton", True)
+        self.viz_panel_btn.setToolTip(tooltip("viz_panel_btn"))
         self.viz_panel_btn.clicked.connect(lambda: self.set_active_panel("viz"))
         global_controls_layout.addWidget(self.config_panel_btn)
         global_controls_layout.addWidget(self.viz_panel_btn)
+
+        self.help_btn = QPushButton("?")
+        self.help_btn.setFixedSize(control_btn_height, control_btn_height)
+        self.help_btn.setToolTip(tooltip("help_btn"))
+        self.help_btn.clicked.connect(self.show_tutorial)
 
         self.action_btn = QPushButton("START OPTIMIZATION")
         self.action_btn.setFixedSize(control_btn_width, control_btn_height)
         self.action_btn.setProperty("primaryAction", True)
         self.action_btn.setProperty("actionState", "start")
+        self.action_btn.setToolTip(tooltip("action_btn"))
         self.action_btn.clicked.connect(self.on_action_clicked)
 
         self.stop_btn = QPushButton("⬛")  # Square stop symbol
-        self.stop_btn.setToolTip("Stop Optimization")
+        self.stop_btn.setToolTip(tooltip("stop_btn"))
         self.stop_btn.setFixedSize(control_btn_height, control_btn_height)
         self.stop_btn.setProperty("dangerAction", True)
         self.stop_btn.clicked.connect(self.stop_optimization)
         self.stop_btn.setEnabled(False)
 
-        global_controls_layout.addSpacing(16)
+        global_controls_layout.addStretch()
         global_controls_layout.addWidget(self.action_btn)
         global_controls_layout.addWidget(self.stop_btn)
-        global_controls_layout.addStretch()
+        global_controls_layout.addWidget(self.help_btn)
 
         root_layout.addLayout(global_controls_layout)
 
@@ -106,6 +115,7 @@ class MainWindow(QMainWindow):
         
         self.onnx_edit = QLineEdit()
         self.onnx_btn = QPushButton("Browse")
+        self.onnx_btn.setToolTip(tooltip("onnx_btn"))
         self.onnx_btn.clicked.connect(lambda: self.browse_file(self.onnx_edit, "ONNX Files (*.onnx)"))
         h_onnx = QHBoxLayout()
         h_onnx.addWidget(self.onnx_edit)
@@ -114,6 +124,7 @@ class MainWindow(QMainWindow):
         
         self.netlist_edit = QLineEdit()
         self.netlist_btn = QPushButton("Browse")
+        self.netlist_btn.setToolTip(tooltip("netlist_btn"))
         self.netlist_btn.clicked.connect(lambda: self.browse_file(self.netlist_edit, "Netlist Files (*.cir *.sp)"))
         h_net = QHBoxLayout()
         h_net.addWidget(self.netlist_edit)
@@ -128,9 +139,7 @@ class MainWindow(QMainWindow):
         self.optuna_sampler_combo.addItem("TPESampler (default)", "tpe")
         self.optuna_sampler_combo.addItem("RandomSampler", "random")
         self.optuna_sampler_combo.addItem("SimulatedAnnealingSampler (optunahub)", "simulated_annealing")
-        self.optuna_sampler_combo.setToolTip(
-            "Select the Optuna sampler strategy. SimulatedAnnealingSampler requires optunahub."
-        )
+        self.optuna_sampler_combo.setToolTip(tooltip("optuna_sampler_combo"))
         self.config_form_layout.addRow("Optuna Sampler:", self.optuna_sampler_combo)
 
         self.optuna_pruner_combo = QComboBox()
@@ -138,7 +147,7 @@ class MainWindow(QMainWindow):
         self.optuna_pruner_combo.addItem("MedianPruner", "median")
         self.optuna_pruner_combo.addItem("SuccessiveHalvingPruner", "successive_halving")
         self.optuna_pruner_combo.addItem("HyperbandPruner", "hyperband")
-        self.optuna_pruner_combo.setToolTip("Select an optional Optuna pruner.")
+        self.optuna_pruner_combo.setToolTip(tooltip("optuna_pruner_combo"))
         self.config_form_layout.addRow("Optuna Pruner:", self.optuna_pruner_combo)
         
         self.simulator_combo = QComboBox()
@@ -161,7 +170,7 @@ class MainWindow(QMainWindow):
 
         #### OPTIONAL - Fine-tuning with palace ####
         self.finetune_cb = QCheckBox("Perform finetuning")
-        self.finetune_cb.setToolTip("Runs a few iterations of palace simulations instead of the surrogate model at the end to ensure correct predictions")
+        self.finetune_cb.setToolTip(tooltip("finetune_cb"))
         self.config_form_layout.addRow("", self.finetune_cb)
 
         self.palace_label = QLabel("Palace Command:")
@@ -178,9 +187,7 @@ class MainWindow(QMainWindow):
         self.ft_optimizer_combo = QComboBox()
         self.ft_optimizer_combo.addItem("Reuse surrogate optimizer", "reuse")
         self.ft_optimizer_combo.addItem("Gradient descent", "gradient_descent")
-        self.ft_optimizer_combo.setToolTip(
-            "Reuse the optimizer state from the surrogate phase or switch to a local gradient-descent refinement."
-        )
+        self.ft_optimizer_combo.setToolTip(tooltip("ft_optimizer_combo"))
         self.config_form_layout.addRow(self.ft_optimizer_label, self.ft_optimizer_combo)
 
         self.geometry_group = QGroupBox("ORCA Geometry")
@@ -201,6 +208,7 @@ class MainWindow(QMainWindow):
         self.geometry_file_label = QLabel("Custom File:")
         self.geometry_file_edit = QLineEdit()
         self.geometry_file_btn = QPushButton("Browse")
+        self.geometry_file_btn.setToolTip(tooltip("geometry_file_btn"))
         self.geometry_file_btn.clicked.connect(self.browse_geometry_file)
         self.geometry_file_widget = QWidget()
         geometry_file_layout = QHBoxLayout(self.geometry_file_widget)
@@ -254,10 +262,13 @@ class MainWindow(QMainWindow):
         
         h_param_btns = QHBoxLayout()
         add_manual_btn = QPushButton("Add Manual")
+        add_manual_btn.setToolTip(tooltip("add_manual_btn"))
         add_manual_btn.clicked.connect(self.add_manual_param)
         add_onnx_btn = QPushButton("Add from ONNX")
+        add_onnx_btn.setToolTip(tooltip("add_onnx_btn"))
         add_onnx_btn.clicked.connect(self.add_onnx_param)
         add_net_btn = QPushButton("Add from Netlist")
+        add_net_btn.setToolTip(tooltip("add_net_btn"))
         add_net_btn.clicked.connect(self.add_netlist_param)
         h_param_btns.addWidget(add_manual_btn)
         h_param_btns.addWidget(add_onnx_btn)
@@ -274,6 +285,7 @@ class MainWindow(QMainWindow):
         self.goal_list.doubleClicked.connect(lambda idx: self.edit_goal(self.goal_list.item(idx.row())))
         goal_layout.addWidget(self.goal_list)
         add_goal_btn = QPushButton("Add Goal")
+        add_goal_btn.setToolTip(tooltip("add_goal_btn"))
         add_goal_btn.clicked.connect(self.add_design_goal)
         goal_layout.addWidget(add_goal_btn)
         
@@ -294,9 +306,9 @@ class MainWindow(QMainWindow):
         self.show_goals_cb.stateChanged.connect(self.refresh_overlays)
         
         self.plot_prev_cb = QCheckBox("Plot Previous Result")
-        self.plot_prev_cb.setChecked(True) # Default to true as before
         
         self.zoom_btn = QPushButton("Zoom to Goal Frequency Range")
+        self.zoom_btn.setToolTip(tooltip("zoom_btn"))
         self.zoom_btn.clicked.connect(self.zoom_to_range)
         
         plot_controls.addWidget(self.show_goals_cb)
@@ -403,6 +415,24 @@ class MainWindow(QMainWindow):
             self.panel_stack.setCurrentIndex(0)
             self._set_tab_state(self.config_panel_btn, True)
             self._set_tab_state(self.viz_panel_btn, False)
+
+    def show_tutorial(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("COBRA Tutorial")
+        dialog.resize(720, 560)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser(dialog)
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(TUTORIAL_HTML)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+
+        dialog.exec()
 
     def _update_progress_display(self, iteration: int, max_iterations: int):
         max_iterations = max(1, int(max_iterations))
