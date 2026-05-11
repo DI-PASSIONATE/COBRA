@@ -8,6 +8,7 @@ from PySide6.QtGui import QDoubleValidator
 
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from .help_texts import tooltip
 
 def clean_name(name):
     # Sanitize name if needed
@@ -54,7 +55,7 @@ class DesignGoalDialog(QDialog):
         self.freq_unit_combo = QComboBox()
         self.freq_unit_combo.addItems(["Hz", "kHz", "MHz", "GHz", "THz"])
         self.freq_unit_combo.setCurrentText("GHz")
-        self.freq_unit_combo.setToolTip("Used when both Min and Max Frequency are set.")
+        self.freq_unit_combo.setToolTip(tooltip("freq_unit_combo"))
 
         self._raw_frequency_range = None
         

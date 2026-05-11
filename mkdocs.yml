@@ -3,8 +3,8 @@ site_description: >-
   Documentation for COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
 
 # Repository
-repo_name: DavidL-11/COBRA
-repo_url: https://github.com/DavidL-11/COBRA
+repo_name: DI-PASSIONATE/COBRA
+repo_url: https://github.com/DI-PASSIONATE/COBRA
 edit_uri: edit/main/docs/
 
 # Page tree
@@ -66,7 +66,7 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/DavidL-11/COBRA
+      link: https://github.com/DI-PASSIONATE/COBRA
 
 extra-css:
   - stylesheets/extra.css
