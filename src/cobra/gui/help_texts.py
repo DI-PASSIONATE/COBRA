@@ -82,6 +82,13 @@ TUTORIAL_HTML = """
       Project: <a href="https://www.elektronikforschung.de/projekte/di-passionate">DI-PASSIONATE</a><br />
       Authors: David Lurz, Gianluca Simone
     </p>
+
+    <h3>Found a Bug or Have a Feature Request?</h3>
+    <p>
+      Please submit an <a href="https://github.com/DI-PASSIONATE/COBRA/issues/new">issue on GitHub.</p>
+
+    </p>
+
   </body>
 </html>
 """
