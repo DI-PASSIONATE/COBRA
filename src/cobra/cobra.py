@@ -1,10 +1,13 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import json
+
+import skrf as rf
 from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
+from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.stages import (
     CircuitSimulationStage,
     EMSurrogateStage,
@@ -24,19 +27,50 @@ import os
 class COBRA:
     """
     COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
+    
+    Can be initialized with:
+    Pass a NetlistParser and component_onnx_mapping dict
+       >>> parser = XyceNetlistParser().from_file("netlist.cir")
+       >>> cobra = COBRA(netlist_parser=parser, 
+       ...               component_onnx_mapping={"X1": "model.onnx"})
     """
 
     def __init__(
         self,
-        em_surrogate_model: str,
+        netlist_parser: BaseNetlistParser,
+        component_onnx_mapping: Dict[str, str],
         optimizer: BaseOptimizer = OptunaOptimizer(),
         circuit_simulator: BaseSimulator = XyceSimulator(),
         palace_fine_tuning_command: Optional[str] = None,
         fine_tuning_iterations: int = 3,
         fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
     ):
+        # Validate initialization arguments
+        if not isinstance(netlist_parser, BaseNetlistParser):
+            raise TypeError("netlist_parser must be an instance of BaseNetlistParser")
+        
+        components = netlist_parser.components
+        if not components:
+            raise ValueError("NetlistParser contains no components (X instances) requiring surrogates")
+        
+        if component_onnx_mapping is None:
+            raise ValueError("component_onnx_mapping is required when using netlist_parser")
+        
+        # Validate that all components have ONNX files
+        missing_components = set(components.keys()) - set(component_onnx_mapping.keys())
+        if missing_components:
+            raise ValueError(
+                f"Missing ONNX files for components: {missing_components}. "
+                f"Available components: {set(components.keys())}"
+            )
+        
+        self.netlist_parser = netlist_parser
+        self.component_onnx_mapping = component_onnx_mapping
+
+        # Pass all components 
+        self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model=[component_onnx_mapping[comp] for comp in components])
+        
         self.optimizer_stage = OptimizerStage(optimizer)
-        self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model)
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
         self.fine_tuning_iterations = fine_tuning_iterations
@@ -66,14 +100,18 @@ class COBRA:
 
     def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None, results_name: Optional[str] = None) -> dict:
         """
-        Predict the next set of parameters based on the given netlist, design goals, and current parameters.
+        Run the optimization workflow.
 
         Parameters:
-        - netlist: A path to the netlist
+        - netlist: A path to the netlist file. If a netlist_parser was provided in __init__, 
+                   it should correspond to this file.
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
-        - optimization_parameters: A list of OptimizationProperty objects representing the parameters to be optimized, their types, and their ranges.
+        - optimization_parameters: A list of OptimizationProperty objects representing the parameters 
+                                   to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
-        - callback: An optional callback function that takes the current context as an argument. If the callback returns False, the optimization is stopped.
+        - orca_geometry: Optional geometry information for EM fine-tuning.
+        - callback: An optional callback function that takes the current context as an argument. 
+                    If the callback returns False, the optimization is stopped.
         - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
 
         Returns:
@@ -82,7 +120,7 @@ class COBRA:
         # Create results folder with timestamp and name
         if results_name is None:
             results_name = Path(netlist).stem
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         results_dir = Path("results") / f"{timestamp}_{results_name}"
         results_dir.mkdir(parents=True, exist_ok=True)
         
@@ -93,9 +131,11 @@ class COBRA:
         
         # Update netlist path to point to the results directory for all operations
         netlist = str(netlist_in_results)
+        
+        netlist_parser = self.netlist_parser
+        
         design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
-        netlist_parser = self.circuit_simulation_stage.simulator.netlist_parser.from_file(netlist)
 
         context = {
             "netlist": netlist,
@@ -115,12 +155,6 @@ class COBRA:
                 "total_time": 0.0,
             }
         }
-
-        # Backup netlist before optimization
-        with open(netlist, "r") as f:
-            original_netlist_content = f.read()
-        with open(f"{netlist}.backup", "w") as f:
-            f.write(original_netlist_content)
 
         # Perform optimizer step
         pbar = tqdm.tqdm(total=context["max_iterations"], desc="COBRA Optimization Progress")
@@ -184,10 +218,12 @@ class COBRA:
             context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, netlist_parser, context)
         else:
             print(f"Design goals achieved at iteration {context['iteration']}.")
-                
-        ntwk = context["predicted_network"]
-        surrogate_file = results_dir / f"surrogate_s_params.s{ntwk.nports}p"
-        ntwk.write_touchstone(str(surrogate_file))
+        
+        # Save the surrogate model's predicted S-parameters to the results directory for the user
+        ntwks: List[rf.Network] = context["predicted_networks"]
+        for i, ntwk in enumerate(ntwks):
+            surrogate_file = results_dir / f"surrogate_s_params.s{ntwk.nports}p"
+            ntwk.write_touchstone(str(surrogate_file))
 
         if self.em_fine_tuning_stage is not None:
             context["fine_tuning_active"] = True

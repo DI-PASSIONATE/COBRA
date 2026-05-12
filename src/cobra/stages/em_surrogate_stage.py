@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 from onnxruntime import InferenceSession
 import numpy as np
 import skrf as rf
@@ -12,25 +12,25 @@ class EMSurrogateStage(COBRABaseStage):
     It takes the current design state, runs the surrogate model, and updates the design state with the new EM results.
     """
 
-    def __init__(self, em_surrogate_model):
+    def __init__(self, em_surrogate_model: List[str]):
         self.em_surrogate_model = em_surrogate_model
-        self.session = InferenceSession(em_surrogate_model)
+        self.session = [InferenceSession(model_path) for model_path in em_surrogate_model]
 
     def run(self, context: Dict) -> Dict:
         params = context["model_parameters"]
-        ntwk = self.inference_snp(params)
-        context["predicted_network"] = ntwk
-        ntwk.write_touchstone("predicted_s_parameters.s2p")
+        context["predicted_networks"] = [self.inference_snp(session, params) for session in self.session]
+        for i, ntwk in enumerate(context["predicted_networks"]):
+            ntwk.write_touchstone(f"predicted_s_parameters_{i+1}.s2p")
         return context
 
 
-    def inference_snp(self, input_params: dict) -> rf.Network:
+    def inference_snp(self, session, input_params: dict) -> rf.Network:
         """
         Runs inference on the model for the given geometry parameters and frequency points, and saves the predicted S-parameters to a Touchstone file.
         """
         # Check compatability of input parameters with model input
         for param_name in input_params.keys():
-            if param_name not in [node.name for node in self.session.get_inputs()]:
+            if param_name not in [node.name for node in session.get_inputs()]:
                 raise ValueError(f"Input parameter '{param_name}' is not compatible with the model input.")
             
         input_names = [name for name in input_params.keys()]
@@ -53,10 +53,10 @@ class EMSurrogateStage(COBRABaseStage):
         feed_dict["frequency"] = (frequency_points).reshape(-1, 1).astype(np.float32)
         
         # Run inference
-        output_names = [node.name for node in self.session.get_outputs()]
+        output_names = [node.name for node in session.get_outputs()]
 
         # Actual inference
-        outputs = self.session.run(output_names, feed_dict)
+        outputs = session.run(output_names, feed_dict)
         output_dict = dict(zip(output_names, outputs))
 
         N, ntwk, output_dict = self.s_param_dict_to_network(output_dict, frequency_points)
