@@ -1,11 +1,14 @@
 # Example usage
 from cobra import COBRA, DesignGoal, DesignParameter, OptimizationProperty, OptimizationType, XyceSimulator, OptunaOptimizer
 from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
+from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
 design_goals = [
     DesignGoal(DesignParameter.S11_dB, max_value=-8, frequency_range="125-135ghz"),
     DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
 ]
+
+parser = NetlistParser()
 
 cobra = COBRA(
     optimizer=OptunaOptimizer(

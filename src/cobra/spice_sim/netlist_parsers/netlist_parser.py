@@ -18,6 +18,22 @@ class NetlistElement:
     value: Optional[str]
     model: Optional[str]
     params: Dict[str, str]
+
+
+@dataclass
+class Component:
+    """Represents a subcircuit component (X instance) in the netlist that requires surrogate modeling."""
+    name: str                  # e.g., "X1"
+    nodes: List[str]           # e.g., ["Port1", "Port2", "Port3", "Port4", "_net0", "_net1"]
+    model: str                 # e.g., "s_equivalent"
+    params: Dict[str, str]     # key-value parameters for the component
+
+
+@dataclass
+class Include:
+    """Represents an .INCLUDE directive in the netlist."""
+    file_path: str             # e.g., "cobra_output.sp"
+    line_index: int
         
 
 @dataclass
@@ -25,6 +41,8 @@ class BaseNetlistParser(ABC):
     def from_lines(self, lines: List[str]) -> "BaseNetlistParser":
         self._lines = lines[:]
         self._elements: Dict[str, NetlistElement] = {}  # includes MODEL entries too
+        self._components: Dict[str, Component] = {}      # X instances (subcircuits requiring surrogates)
+        self._includes: List[Include] = []               # .INCLUDE directives
         self.parse_netlist()
         return self
 
@@ -51,6 +69,24 @@ class BaseNetlistParser(ABC):
         if name not in self._elements:
             raise KeyError(f"Element '{name}' not found.")
         return self._elements[name]
+    
+    @property
+    def components(self) -> Dict[str, Component]:
+        """Returns a dictionary of all components (X instances) that require surrogate models."""
+        return self._components.copy()
+    
+    @property
+    def includes(self) -> List[Include]:
+        """Returns a list of all .INCLUDE directives found in the netlist."""
+        return self._includes.copy()
+    
+    def add_component(self, component: Component) -> None:
+        """Register a component that requires a surrogate model."""
+        self._components[component.name] = component
+    
+    def add_include(self, include: Include) -> None:
+        """Register an .INCLUDE directive."""
+        self._includes.append(include)
     
     @abstractmethod
     def parse_netlist(self) -> None:

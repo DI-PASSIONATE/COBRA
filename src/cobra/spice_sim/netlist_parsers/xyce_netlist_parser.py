@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 import re
-from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser, NetlistElement
+from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser, NetlistElement, Component, Include
 
 
 class XyceNetlistParser(BaseNetlistParser):
@@ -17,6 +17,8 @@ class XyceNetlistParser(BaseNetlistParser):
 
     # .MODEL name TYPE key=val ...
     _model_re = re.compile(r"^\s*\.model\s+(\S+)\s+(\S+)\s*(.*)$", re.IGNORECASE)
+    # .INCLUDE "file.sp" or .INCLUDE file.sp
+    _include_re = re.compile(r"^\s*\.include\s+[\"']?([^\s\"']+)[\"']?\s*$", re.IGNORECASE)
     
     def set_value(self, name: str, new_value: str) -> None:
         e = self.get_element(name)
@@ -108,6 +110,8 @@ class XyceNetlistParser(BaseNetlistParser):
 
     def parse_netlist(self) -> None:
         self._elements.clear()
+        self._components.clear()
+        self._includes.clear()
 
         for idx, raw in enumerate(self._lines):
             if not raw.strip():
@@ -118,6 +122,13 @@ class XyceNetlistParser(BaseNetlistParser):
             code, inline_comment = self._split_inline_comment(raw)
             stripped = code.strip()
             if not stripped:
+                continue
+
+            # Check for .INCLUDE directive
+            m_include = self._include_re.match(stripped)
+            if m_include:
+                include_file = m_include.group(1)
+                self._includes.append(Include(file_path=include_file, line_index=idx))
                 continue
 
             # .MODEL entries into list
@@ -174,6 +185,16 @@ class XyceNetlistParser(BaseNetlistParser):
                 model=model,
                 params=params,
             )
+
+            # Track X components (subcircuits) as components needing surrogates
+            if etype == "X":
+                component = Component(
+                    name=name,
+                    nodes=nodes,
+                    model=model if model else "",
+                    params=params,
+                )
+                self._components[name] = component
 
     def _parse_instance(self, tokens: List[str], etype: str) -> Tuple[List[str], Optional[str], Optional[str], Dict[str, str], Optional[str]]:
         nodes: List[str] = []
