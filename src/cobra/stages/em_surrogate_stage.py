@@ -1,4 +1,5 @@
 from typing import Dict, List
+import os
 from onnxruntime import InferenceSession
 import numpy as np
 import skrf as rf
@@ -12,15 +13,32 @@ class EMSurrogateStage(COBRABaseStage):
     It takes the current design state, runs the surrogate model, and updates the design state with the new EM results.
     """
 
-    def __init__(self, em_surrogate_model: List[str]):
+    def __init__(self, em_surrogate_model: List[str], component_names: List[str] = None):
         self.em_surrogate_model = em_surrogate_model
         self.session = [InferenceSession(model_path) for model_path in em_surrogate_model]
+        self.component_names = component_names or []
 
     def run(self, context: Dict) -> Dict:
         params = context["model_parameters"]
-        context["predicted_networks"] = [self.inference_snp(session, params) for session in self.session]
-        for i, ntwk in enumerate(context["predicted_networks"]):
-            ntwk.write_touchstone(f"predicted_s_parameters_{i+1}.s2p")
+        results_dir = context.get("results_dir", ".")
+        context["predicted_networks"] = []
+        for session, comp_name in zip(self.session, self.component_names):
+            comp_params = {}
+            for k, v in params.items():
+                if ":" in k:
+                    comp, p_name = k.split(":", 1)
+                    if comp == comp_name:
+                        comp_params[p_name] = v
+                else:
+                    comp_params[k] = v
+            ntwk = self.inference_snp(session, comp_params)
+            ntwk.name = comp_name
+            context["predicted_networks"].append(ntwk)
+            
+        for ntwk in context["predicted_networks"]:
+            # e.g., predictions could be named X1.s2p, X2.s4p, etc. depending on components and ports
+            num_ports = ntwk.number_of_ports
+            ntwk.write_touchstone(os.path.join(results_dir, f"{ntwk.name}_predicted.s{num_ports}p"))
         return context
 
 

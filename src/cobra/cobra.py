@@ -68,7 +68,10 @@ class COBRA:
         self.component_onnx_mapping = component_onnx_mapping
 
         # Pass all components 
-        self.em_surrogate_stage = EMSurrogateStage(em_surrogate_model=[component_onnx_mapping[comp] for comp in components])
+        self.em_surrogate_stage = EMSurrogateStage(
+            em_surrogate_model=[component_onnx_mapping[comp] for comp in components],
+            component_names=list(components.keys())
+        )
         
         self.optimizer_stage = OptimizerStage(optimizer)
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
@@ -222,7 +225,8 @@ class COBRA:
         # Save the surrogate model's predicted S-parameters to the results directory for the user
         ntwks: List[rf.Network] = context["predicted_networks"]
         for i, ntwk in enumerate(ntwks):
-            surrogate_file = results_dir / f"surrogate_s_params.s{ntwk.nports}p"
+            name_suffix = f"_{ntwk.name}" if ntwk.name else f"_{i+1}"
+            surrogate_file = results_dir / f"surrogate_s_params{name_suffix}.s{ntwk.nports}p"
             ntwk.write_touchstone(str(surrogate_file))
 
         if self.em_fine_tuning_stage is not None:

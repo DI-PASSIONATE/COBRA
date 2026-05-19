@@ -1,4 +1,5 @@
 from typing import Dict, List
+import os
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
@@ -16,10 +17,11 @@ class CircuitSimulationStage(COBRABaseStage):
 
     def run(self, context: Dict) -> Dict:
         ntwk: List[rf.Network] = context["predicted_networks"]
+        results_dir = context.get("results_dir", ".")
         # Preprocess (e.g. vector fitting)
-        #preprocessed_file = self.simulator.preprocess_ntwk(ntwk)
         for n in ntwk:
-            self.simulator.preprocess_ntwk(n)
+            out_name = os.path.join(results_dir, n.name if n.name else "cobra_output")
+            self.simulator.preprocess_ntwk(n, name=out_name)
 
         # Output is a single network - even if we have multiple surrogate models
         new_ntwk = self.simulator.run_simulation(netlist_name=context["netlist"])

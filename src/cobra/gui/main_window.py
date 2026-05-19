@@ -928,21 +928,23 @@ class MainWindow(QMainWindow):
                 
             # Filter out 'frequency' from inputs
             filtered_inputs = [p for p in all_inputs if p.lower() != "frequency"]
-            self.component_inputs[comp_name] = filtered_inputs
+            
+            prefixed_inputs = [f"{comp_name}:{p}" for p in filtered_inputs]
+            self.component_inputs[comp_name] = prefixed_inputs
             
             current_param_names = {p.name for p in self.opt_params}
             
-            for param_name in filtered_inputs:
-                if param_name not in current_param_names:
+            for original_name, prefixed_name in zip(filtered_inputs, prefixed_inputs):
+                if prefixed_name not in current_param_names:
                     dlg = OptimizationParamDialog(
                         from_source="ONNX",
-                        source_data=[param_name],
+                        source_data=[prefixed_name],
                         parent=self,
                         metadata=metadata,
                         link_candidates=[p.name for p in self.opt_params],
                     )
                     self._add_param_to_table(dlg.get_data())
-                    current_param_names.add(param_name)
+                    current_param_names.add(prefixed_name)
         except Exception as e:
             # Not an ONNX file or failed to parse, simply return
             pass
@@ -1332,7 +1334,8 @@ class MainWindow(QMainWindow):
                 
                 for name in sorted(inputs):
                     if name in current_values:
-                        self._add_current_param_row(name, current_values[name])
+                        display_name = name.split(":", 1)[1] if ":" in name else name
+                        self._add_current_param_row(display_name, current_values[name])
             
             if other_params:
                 r = self.current_param_table.rowCount()

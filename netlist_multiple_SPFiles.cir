@@ -1,6 +1,6 @@
 * Qucs 25.2.0  /home/users/simone/Hiwi/Trafo_Cobra_multipleSnP.sch
-.INCLUDE "cobra_output_1.sp"
-.INCLUDE "cobra_output_2.sp"
+.INCLUDE "X1.sp"
+.INCLUDE "X2.sp"
 
 C1 P4_T2 P3_T2  0F 
 C2 Port2 Port1  7.94F 
