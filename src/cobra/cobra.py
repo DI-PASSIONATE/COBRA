@@ -137,6 +137,14 @@ class COBRA:
         
         netlist_parser = self.netlist_parser
         
+        # Replace the component model names in the netlist to match the vector fitted subcircuits
+        for comp_name in self.component_onnx_mapping.keys():
+            try:
+                netlist_parser.set_model(comp_name, f"{comp_name}_subct")
+            except Exception as e:
+                print(f"Warning: Could not set subcircuit model for {comp_name}: {e}")
+        netlist_parser.save(netlist)
+        
         design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
 
