@@ -840,8 +840,8 @@ class MainWindow(QMainWindow):
             components = parser.components
             
             if components:
-                # New workflow: show component-based ONNX selectors
-                self.update_component_onnx_selectors(components)
+                # New workflow: show component-based ONNX/Touchstone selectors
+                self.update_component_onnx_selectors(components, netlist_path)
                 status = f"Found {len(components)} component(s): {', '.join(components.keys())}"
                 self.statusBar().showMessage(status)
             else:
@@ -851,8 +851,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
             self.clear_component_onnx_selectors()
     
-    def update_component_onnx_selectors(self, components: Dict):
-        """Create ONNX selectors for each detected component."""
+    def update_component_onnx_selectors(self, components: Dict, netlist_path: str):
+        """Create ONNX/Touchstone selectors for each detected component."""
         # Clear existing component selectors if any
         self.clear_component_onnx_selectors()
         
@@ -863,12 +863,25 @@ class MainWindow(QMainWindow):
         if not components:
             return
         
-        # Insert ONNX selectors for each component
-        for comp_name in sorted(components.keys()):
+        netlist_dir = os.path.dirname(netlist_path) if netlist_path else ""
+
+        # Insert ONNX/Touchstone selectors for each component
+        for comp_name, comp_data in sorted(components.items()):
             comp_edit = QLineEdit()
+            
+            # Check for a static TSTONEFILE parameter from the netlist
+            tstone_file = comp_data.params.get("TSTONEFILE")
+            if tstone_file:
+                # If the path is not absolute, resolve it relative to the netlist directory
+                if not os.path.isabs(tstone_file) and netlist_dir:
+                    tstone_file = os.path.normpath(os.path.join(netlist_dir, tstone_file))
+                
+                # Always populate the GUI, even if the file isn't found locally yet
+                comp_edit.setText(tstone_file)
+            
             comp_btn = QPushButton("Browse")
             comp_btn.clicked.connect(
-                lambda checked, edit=comp_edit: self.browse_file(edit, "ONNX Files (*.onnx)")
+                lambda checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone Files (*.onnx *.s*p *.snp)")
             )
             comp_edit.textChanged.connect(
                 lambda text, c=comp_name: self.on_onnx_file_changed(c, text)
@@ -881,7 +894,7 @@ class MainWindow(QMainWindow):
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(QLabel(f"{comp_name} ONNX:"))
+            row_layout.addWidget(QLabel(f"{comp_name} Model:"))
             row_layout.addLayout(h_layout)
             self.component_onnx_layout.addWidget(row_widget)
             self.component_onnx_edits[comp_name] = comp_edit
@@ -1160,14 +1173,14 @@ class MainWindow(QMainWindow):
                 if comp_name not in self.component_onnx_edits:
                     QMessageBox.warning(
                         self, "Missing Component Selector",
-                        f"ONNX selector for component '{comp_name}' not found."
+                        f"Model selector for component '{comp_name}' not found."
                     )
                     return
                 onnx_path = self.component_onnx_edits[comp_name].text()
                 if not onnx_path:
                     QMessageBox.warning(
-                        self, "Missing ONNX Files",
-                        f"Please select ONNX model for component '{comp_name}'."
+                        self, "Missing Model Files",
+                        f"Please select ONNX or Touchstone model for component '{comp_name}'."
                     )
                     return
                 component_onnx_mapping[comp_name] = onnx_path

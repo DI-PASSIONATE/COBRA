@@ -15,23 +15,37 @@ class EMSurrogateStage(COBRABaseStage):
 
     def __init__(self, em_surrogate_model: List[str], component_names: List[str] = None):
         self.em_surrogate_model = em_surrogate_model
-        self.session = [InferenceSession(model_path) for model_path in em_surrogate_model]
+        
+        self.session = []
+        self.is_touchstone = []
+        for model_path in em_surrogate_model:
+            if str(model_path).lower().endswith(tuple(f".s{i}p" for i in range(1, 10)) + (".snp",)):
+                self.session.append(model_path)
+                self.is_touchstone.append(True)
+            else:
+                self.session.append(InferenceSession(model_path))
+                self.is_touchstone.append(False)
+                
         self.component_names = component_names or []
 
     def run(self, context: Dict) -> Dict:
         params = context["model_parameters"]
         results_dir = context.get("results_dir", ".")
         context["predicted_networks"] = []
-        for session, comp_name in zip(self.session, self.component_names):
-            comp_params = {}
-            for k, v in params.items():
-                if ":" in k:
-                    comp, p_name = k.split(":", 1)
-                    if comp == comp_name:
-                        comp_params[p_name] = v
-                else:
-                    comp_params[k] = v
-            ntwk = self.inference_snp(session, comp_params)
+        for session, is_ts, comp_name in zip(self.session, self.is_touchstone, self.component_names):
+            if is_ts:
+                ntwk = rf.Network(session)
+            else:
+                comp_params = {}
+                for k, v in params.items():
+                    if ":" in k:
+                        comp, p_name = k.split(":", 1)
+                        if comp == comp_name:
+                            comp_params[p_name] = v
+                    else:
+                        comp_params[k] = v
+                ntwk = self.inference_snp(session, comp_params)
+            
             ntwk.name = comp_name
             context["predicted_networks"].append(ntwk)
             

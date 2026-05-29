@@ -56,11 +56,11 @@ class COBRA:
         if component_onnx_mapping is None:
             raise ValueError("component_onnx_mapping is required when using netlist_parser")
         
-        # Validate that all components have ONNX files
+        # Validate that all components have models
         missing_components = set(components.keys()) - set(component_onnx_mapping.keys())
         if missing_components:
             raise ValueError(
-                f"Missing ONNX files for components: {missing_components}. "
+                f"Missing model files for components: {missing_components}. "
                 f"Available components: {set(components.keys())}"
             )
         

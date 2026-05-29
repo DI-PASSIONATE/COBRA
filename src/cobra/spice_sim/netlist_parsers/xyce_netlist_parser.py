@@ -44,10 +44,14 @@ class XyceNetlistParser(BaseNetlistParser):
 
     def _normalize_tstonefile_subcircuits(self) -> None:
         """Convert Qucs-S TSTONEFILE Y-devices into Xyce-compatible subcircuit instances."""
+        self._tstonefile_map = getattr(self, '_tstonefile_map', {})
+        self._tstonefile_map.clear()
+
         # First pass: collect the .MODEL lines that are only placeholders for
         # Touchstone data. We need this mapping before rewriting the instance
         # lines because the model directive can appear before or after the Y line.
         model_line_by_name: Dict[str, int] = {}
+        model_tstone_files: Dict[str, str] = {}
 
         for idx, raw in enumerate(self._lines):
             code, _ = self._split_inline_comment(raw)
@@ -63,10 +67,12 @@ class XyceNetlistParser(BaseNetlistParser):
             model_type = m_model.group(2)
             if model_type.upper() != "LIN":
                 continue
-            if not self._tstonefile_re.search(stripped):
+            tstone_match = self._tstonefile_re.search(stripped)
+            if not tstone_match:
                 continue
 
             model_line_by_name[model_name] = idx
+            model_tstone_files[model_name] = tstone_match.group(1)
 
         if not model_line_by_name:
             return
@@ -117,6 +123,14 @@ class XyceNetlistParser(BaseNetlistParser):
             # nodes, so we drop the zeros here.
             port_nodes = [node for node in tokens[2:-1] if node != "0"]
             instance_tokens = [x_name] + port_nodes + [f"{x_name}_subct"]
+            
+            # Inject TSTONEFILE back into the component so GUI can find it
+            # We store it internally rather than emitting it to the text strings,
+            # because Xyce will crash if it encounters TSTONEFILE as an X param.
+            tfile = model_tstone_files.get(model_name)
+            if tfile:
+                self._tstonefile_map[x_name] = tfile
+            
             updated_lines[idx] = self._format_line(instance_tokens, inline_comment, raw.endswith("\n"))
 
         self._lines = updated_lines
@@ -302,6 +316,9 @@ class XyceNetlistParser(BaseNetlistParser):
             # Only X instances are considered surrogate-capable components in the
             # current COBRA workflow.
             if etype == "X":
+                if hasattr(self, '_tstonefile_map') and name in self._tstonefile_map:
+                    params["TSTONEFILE"] = self._tstonefile_map[name]
+
                 component = Component(
                     name=name,
                     nodes=nodes,
