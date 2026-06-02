@@ -25,6 +25,10 @@ class XyceNetlistParser(BaseNetlistParser):
     # Match ordinary .MODEL lines so we can detect the special LIN + TSTONEFILE
     # models that need to become surrogate subcircuits.
     _model_re = re.compile(r"^\s*\.model\s+(\S+)\s+(\S+)\s*(.*)$", re.IGNORECASE)
+    # Detect .SUBCKT/.ENDS blocks so their inner instances are not treated as
+    # top-level components during parsing.
+    _subckt_re = re.compile(r"^\s*\.subckt\b", re.IGNORECASE)
+    _ends_re = re.compile(r"^\s*\.ends\b", re.IGNORECASE)
     # Qucs-S uses TSTONEFILE on LIN models to point at Touchstone data instead
     # of an actual SPICE subcircuit, so these entries must be rewritten.
     _tstonefile_re = re.compile(r"\bTSTONEFILE\s*=\s*([^\s]+)", re.IGNORECASE)
@@ -236,6 +240,9 @@ class XyceNetlistParser(BaseNetlistParser):
         self._elements.clear()
         self._components.clear()
         self._includes.clear()
+        self._inline_subckt_names.clear()
+
+        _subckt_depth = 0  # >0 means we are inside a .SUBCKT definition block
 
         for idx, raw in enumerate(self._lines):
             if not raw.strip():
@@ -246,6 +253,22 @@ class XyceNetlistParser(BaseNetlistParser):
             code, inline_comment = self._split_inline_comment(raw)
             stripped = code.strip()
             if not stripped:
+                continue
+
+            # Track .SUBCKT/.ENDS nesting so we only parse top-level instances.
+            # Record the subcircuit name so X instances that reference it are
+            # treated as inline-defined (no surrogate/ONNX selector needed).
+            if self._subckt_re.match(stripped):
+                tokens_sc = stripped.split()
+                if len(tokens_sc) >= 2:
+                    self._inline_subckt_names.add(tokens_sc[1])
+                _subckt_depth += 1
+                continue
+            if self._ends_re.match(stripped):
+                if _subckt_depth > 0:
+                    _subckt_depth -= 1
+                continue
+            if _subckt_depth > 0:
                 continue
 
             # Record .INCLUDE lines so the rest of the application can inspect
@@ -313,19 +336,24 @@ class XyceNetlistParser(BaseNetlistParser):
                 params=params,
             )
 
-            # Only X instances are considered surrogate-capable components in the
-            # current COBRA workflow.
+            # X instances that reference an inline .SUBCKT definition are
+            # treated as netlist-level components (optimizable via set_param),
+            # not as surrogate-capable components requiring an ONNX/Touchstone
+            # model file. Only X instances whose model is not defined inline
+            # (i.e., it comes from an .INCLUDE or external library) are added
+            # to _components and shown in the model-selector panel.
             if etype == "X":
                 if hasattr(self, '_tstonefile_map') and name in self._tstonefile_map:
                     params["TSTONEFILE"] = self._tstonefile_map[name]
 
-                component = Component(
-                    name=name,
-                    nodes=nodes,
-                    model=model if model else "",
-                    params=params,
-                )
-                self._components[name] = component
+                if model not in self._inline_subckt_names:
+                    component = Component(
+                        name=name,
+                        nodes=nodes,
+                        model=model if model else "",
+                        params=params,
+                    )
+                    self._components[name] = component
 
     def _parse_instance(self, tokens: List[str], etype: str) -> Tuple[List[str], Optional[str], Optional[str], Dict[str, str], Optional[str]]:
         # Start with the generic empty shape and fill in only the fields each
@@ -457,8 +485,17 @@ class XyceNetlistParser(BaseNetlistParser):
     def update_parameters(self, parameters: Dict[str, float]) -> None:
         # Bulk-update multiple named parameters by reusing the single-element
         # setter, which keeps the parser state synchronized after each change.
+        # Parameters for inline subcircuit instances use the format
+        # "InstanceName:ParamKey" (e.g. "Xnpn13G2:Nx") and are dispatched to
+        # set_param; plain names are updated via set_value as before.
         for name, value in parameters.items():
-            if name in self._elements:
+            if ":" in name:
+                instance_name, param_key = name.split(":", 1)
+                if instance_name in self._elements:
+                    self.set_param(instance_name, param_key, str(value))
+                else:
+                    print(f"Warning: Instance '{instance_name}' not found in netlist elements.")
+            elif name in self._elements:
                 self.set_value(name, str(value))
             else:
                 print(f"Warning: Parameter '{name}' not found in netlist elements.")

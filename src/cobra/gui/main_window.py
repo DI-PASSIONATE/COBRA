@@ -1023,8 +1023,17 @@ class MainWindow(QMainWindow):
             # Find R, C, L, V, I elements
             prospects = []
             for elem in parser.list_elements(["R", "C", "L", "V", "I"]):
-                 prospects.append(elem.name)
-            
+                prospects.append(elem.name)
+
+            # Also expose key=value parameters on X instances whose subcircuit
+            # is defined inline (via .SUBCKT). These are treated as netlist
+            # variables, not surrogate model inputs.
+            inline_names = parser.inline_subckt_names
+            for elem in parser.list_elements(["X"]):
+                if elem.model in inline_names:
+                    for key in elem.params:
+                        prospects.append(f"{elem.name}:{key}")
+
             # Filter out already added parameters
             current_param_names = {p.name for p in self.opt_params}
             available_prospects = [name for name in prospects if name not in current_param_names]
