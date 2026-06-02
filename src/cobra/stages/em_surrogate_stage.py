@@ -1,4 +1,5 @@
-from typing import Dict
+from typing import Dict, List
+import os
 from onnxruntime import InferenceSession
 import numpy as np
 import skrf as rf
@@ -12,25 +13,56 @@ class EMSurrogateStage(COBRABaseStage):
     It takes the current design state, runs the surrogate model, and updates the design state with the new EM results.
     """
 
-    def __init__(self, em_surrogate_model):
+    def __init__(self, em_surrogate_model: List[str], component_names: List[str] = None):
         self.em_surrogate_model = em_surrogate_model
-        self.session = InferenceSession(em_surrogate_model)
+        
+        self.session = []
+        self.is_touchstone = []
+        for model_path in em_surrogate_model:
+            if str(model_path).lower().endswith(tuple(f".s{i}p" for i in range(1, 10)) + (".snp",)):
+                self.session.append(model_path)
+                self.is_touchstone.append(True)
+            else:
+                self.session.append(InferenceSession(model_path))
+                self.is_touchstone.append(False)
+                
+        self.component_names = component_names or []
 
     def run(self, context: Dict) -> Dict:
         params = context["model_parameters"]
-        ntwk = self.inference_snp(params)
-        context["predicted_network"] = ntwk
-        ntwk.write_touchstone("predicted_s_parameters.s2p")
+        results_dir = context.get("results_dir", ".")
+        context["predicted_networks"] = []
+        for session, is_ts, comp_name in zip(self.session, self.is_touchstone, self.component_names):
+            if is_ts:
+                ntwk = rf.Network(session)
+            else:
+                comp_params = {}
+                for k, v in params.items():
+                    if ":" in k:
+                        comp, p_name = k.split(":", 1)
+                        if comp == comp_name:
+                            comp_params[p_name] = v
+                    else:
+                        comp_params[k] = v
+                ntwk = self.inference_snp(session, comp_params)
+            
+            ntwk.name = comp_name
+            context["predicted_networks"].append(ntwk)
+            
+        for ntwk in context["predicted_networks"]:
+            # e.g., predictions could be named X1.s2p, X2.s4p, etc. depending on components and ports
+            num_ports = ntwk.number_of_ports
+            ntwk.write_touchstone(os.path.join(results_dir, f"{ntwk.name}_predicted.s{num_ports}p"))
         return context
 
 
-    def inference_snp(self, input_params: dict) -> rf.Network:
+    def inference_snp(self, session, input_params: dict) -> rf.Network:
         """
         Runs inference on the model for the given geometry parameters and frequency points, and saves the predicted S-parameters to a Touchstone file.
         """
         # Check compatability of input parameters with model input
         for param_name in input_params.keys():
-            if param_name not in [node.name for node in self.session.get_inputs()]:
+            if param_name not in [node.name for node in session.get_inputs()]:
                 raise ValueError(f"Input parameter '{param_name}' is not compatible with the model input.")
             
         input_names = [name for name in input_params.keys()]
@@ -53,10 +85,10 @@ class EMSurrogateStage(COBRABaseStage):
         feed_dict["frequency"] = (frequency_points).reshape(-1, 1).astype(np.float32)
         
         # Run inference
-        output_names = [node.name for node in self.session.get_outputs()]
+        output_names = [node.name for node in session.get_outputs()]
 
         # Actual inference
-        outputs = self.session.run(output_names, feed_dict)
+        outputs = session.run(output_names, feed_dict)
         output_dict = dict(zip(output_names, outputs))
 
         N, ntwk, output_dict = self.s_param_dict_to_network(output_dict, frequency_points)

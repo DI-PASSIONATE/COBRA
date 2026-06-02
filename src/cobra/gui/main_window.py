@@ -22,7 +22,7 @@ import pyqtgraph as pg
 
 # COBRA imports
 from cobra.cobra import COBRA
-from cobra.optimizers.base_optimizer import OptimizationProperty
+from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
@@ -37,6 +37,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         gmsh.initialize()
+        
+        # Initialize component ONNX selector dictionaries
+        self.component_onnx_edits: Dict[str, QLineEdit] = {}
+        self.component_onnx_btns: Dict[str, QPushButton] = {}
+        
         self.setWindowTitle("COBRA GUI")
         self.resize(1200, 800)
         
@@ -113,23 +118,22 @@ class MainWindow(QMainWindow):
         # 1. File Selection
         self.config_form_layout = QFormLayout()
         
-        self.onnx_edit = QLineEdit()
-        self.onnx_btn = QPushButton("Browse")
-        self.onnx_btn.setToolTip(tooltip("onnx_btn"))
-        self.onnx_btn.clicked.connect(lambda: self.browse_file(self.onnx_edit, "ONNX Files (*.onnx)"))
-        h_onnx = QHBoxLayout()
-        h_onnx.addWidget(self.onnx_edit)
-        h_onnx.addWidget(self.onnx_btn)
-        self.config_form_layout.addRow("ONNX Model:", h_onnx)
-        
         self.netlist_edit = QLineEdit()
         self.netlist_btn = QPushButton("Browse")
         self.netlist_btn.setToolTip(tooltip("netlist_btn"))
-        self.netlist_btn.clicked.connect(lambda: self.browse_file(self.netlist_edit, "Netlist Files (*.cir *.sp)"))
+        self.netlist_btn.clicked.connect(self.on_netlist_selected)
+        self.netlist_label = QLabel("Netlist:")
         h_net = QHBoxLayout()
         h_net.addWidget(self.netlist_edit)
         h_net.addWidget(self.netlist_btn)
-        self.config_form_layout.addRow("Netlist:", h_net)
+        self.config_form_layout.addRow(self.netlist_label, h_net)
+
+        self.component_onnx_container = QWidget()
+        self.component_onnx_layout = QVBoxLayout(self.component_onnx_container)
+        self.component_onnx_layout.setContentsMargins(0, 0, 0, 0)
+        self.component_onnx_layout.setSpacing(6)
+        self.component_onnx_container.setVisible(False)
+        self.config_form_layout.addRow("", self.component_onnx_container)
         
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
@@ -261,17 +265,9 @@ class MainWindow(QMainWindow):
         param_layout.addWidget(self.param_table)
         
         h_param_btns = QHBoxLayout()
-        add_manual_btn = QPushButton("Add Manual")
-        add_manual_btn.setToolTip(tooltip("add_manual_btn"))
-        add_manual_btn.clicked.connect(self.add_manual_param)
-        add_onnx_btn = QPushButton("Add from ONNX")
-        add_onnx_btn.setToolTip(tooltip("add_onnx_btn"))
-        add_onnx_btn.clicked.connect(self.add_onnx_param)
         add_net_btn = QPushButton("Add from Netlist")
         add_net_btn.setToolTip(tooltip("add_net_btn"))
         add_net_btn.clicked.connect(self.add_netlist_param)
-        h_param_btns.addWidget(add_manual_btn)
-        h_param_btns.addWidget(add_onnx_btn)
         h_param_btns.addWidget(add_net_btn)
         param_layout.addLayout(h_param_btns)
         
@@ -441,6 +437,21 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, max_iterations)
         self.progress_bar.setValue(iteration)
         self.progress_label.setText(f"Iteration {iteration}/{max_iterations} ({percentage:.1f}%)")
+
+    def _add_current_param_row(self, name, value):
+        if isinstance(value, (float, np.floating)):
+            display_val = f"{round(float(value), 4)}"
+        else:
+            display_val = str(value)
+
+        row = self.current_param_table.rowCount()
+        self.current_param_table.insertRow(row)
+        name_item = QTableWidgetItem(name)
+        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.current_param_table.setItem(row, 0, name_item)
+        val_item = QTableWidgetItem(display_val)
+        val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.current_param_table.setItem(row, 1, val_item)
 
     def _style_plot_for_light_background(self, plot_widget: pg.PlotWidget):
         axis_pen = pg.mkPen('k')
@@ -815,10 +826,141 @@ class MainWindow(QMainWindow):
         if fname:
             line_edit.setText(fname)
 
-    def add_manual_param(self):
-        dlg = OptimizationParamDialog(parent=self, link_candidates=[p.name for p in self.opt_params])
-        if dlg.exec():
-            self._add_param_to_table(dlg.get_data())
+    def on_netlist_selected(self):
+        """Handle netlist selection with automatic parsing."""
+        fname, _ = QFileDialog.getOpenFileName(self, "Select Netlist", "", "Netlist Files (*.cir *.sp)")
+        if fname:
+            self.netlist_edit.setText(fname)
+            self.parse_and_update_components(fname)
+    
+    def parse_and_update_components(self, netlist_path: str):
+        """Parse netlist and update UI with detected components."""
+        try:
+            parser = XyceNetlistParser().from_file(netlist_path)
+            components = parser.components
+            
+            if components:
+                # New workflow: show component-based ONNX/Touchstone selectors
+                self.update_component_onnx_selectors(components, netlist_path)
+                status = f"Found {len(components)} component(s): {', '.join(components.keys())}"
+                self.statusBar().showMessage(status)
+            else:
+                self.clear_component_onnx_selectors()
+                self.statusBar().showMessage("No components found in netlist.")
+        except Exception as e:
+            QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
+            self.clear_component_onnx_selectors()
+    
+    def update_component_onnx_selectors(self, components: Dict, netlist_path: str):
+        """Create ONNX/Touchstone selectors for each detected component."""
+        # Clear existing component selectors if any
+        self.clear_component_onnx_selectors()
+        
+        # Create component ONNX selector widgets
+        self.component_onnx_edits = {}
+        self.component_onnx_btns = {}
+        self.component_onnx_container.setVisible(bool(components))
+        if not components:
+            return
+        
+        netlist_dir = os.path.dirname(netlist_path) if netlist_path else ""
+
+        # Insert ONNX/Touchstone selectors for each component
+        for comp_name, comp_data in sorted(components.items()):
+            comp_edit = QLineEdit()
+            
+            # Check for a static TSTONEFILE parameter from the netlist
+            tstone_file = comp_data.params.get("TSTONEFILE")
+            if tstone_file:
+                # If the path is not absolute, resolve it relative to the netlist directory
+                if not os.path.isabs(tstone_file) and netlist_dir:
+                    tstone_file = os.path.normpath(os.path.join(netlist_dir, tstone_file))
+                
+                # Always populate the GUI, even if the file isn't found locally yet
+                comp_edit.setText(tstone_file)
+            
+            comp_btn = QPushButton("Browse")
+            comp_btn.clicked.connect(
+                lambda checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone Files (*.onnx *.s*p *.snp)")
+            )
+            comp_edit.textChanged.connect(
+                lambda text, c=comp_name: self.on_onnx_file_changed(c, text)
+            )
+            
+            h_layout = QHBoxLayout()
+            h_layout.addWidget(comp_edit)
+            h_layout.addWidget(comp_btn)
+            
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(QLabel(f"{comp_name} Model:"))
+            row_layout.addLayout(h_layout)
+            self.component_onnx_layout.addWidget(row_widget)
+            self.component_onnx_edits[comp_name] = comp_edit
+            self.component_onnx_btns[comp_name] = comp_btn
+    
+    def clear_component_onnx_selectors(self):
+        """Remove all component ONNX selectors from the UI."""
+        if hasattr(self, 'component_onnx_edits'):
+            for edit in self.component_onnx_edits.values():
+                edit.deleteLater()
+            self.component_onnx_edits.clear()
+        
+        if hasattr(self, 'component_onnx_btns'):
+            for btn in self.component_onnx_btns.values():
+                btn.deleteLater()
+            self.component_onnx_btns.clear()
+
+        if hasattr(self, 'component_onnx_container'):
+            self.component_onnx_container.setVisible(False)
+
+        if hasattr(self, 'component_onnx_layout'):
+            while self.component_onnx_layout.count():
+                item = self.component_onnx_layout.takeAt(0)
+                widget = item.widget() if item else None
+                if widget:
+                    widget.deleteLater()
+
+        if hasattr(self, 'component_inputs'):
+            self.component_inputs.clear()
+    #
+    
+    def on_onnx_file_changed(self, comp_name: str, path: str):
+        path = path.strip()
+        if not path or not os.path.exists(path):
+            return
+        
+        try:
+            sess = onnxruntime.InferenceSession(path)
+            all_inputs = [clean_name(i.name) for i in sess.get_inputs()]
+            metadata = sess.get_modelmeta().custom_metadata_map
+
+            if not hasattr(self, 'component_inputs'):
+                self.component_inputs = {}
+                
+            # Filter out 'frequency' from inputs
+            filtered_inputs = [p for p in all_inputs if p.lower() != "frequency"]
+            
+            prefixed_inputs = [f"{comp_name}:{p}" for p in filtered_inputs]
+            self.component_inputs[comp_name] = prefixed_inputs
+            
+            current_param_names = {p.name for p in self.opt_params}
+            
+            for original_name, prefixed_name in zip(filtered_inputs, prefixed_inputs):
+                if prefixed_name not in current_param_names:
+                    dlg = OptimizationParamDialog(
+                        from_source="ONNX",
+                        source_data=[prefixed_name],
+                        parent=self,
+                        metadata=metadata,
+                        link_candidates=[p.name for p in self.opt_params],
+                    )
+                    self._add_param_to_table(dlg.get_data())
+                    current_param_names.add(prefixed_name)
+        except Exception as e:
+            # Not an ONNX file or failed to parse, simply return
+            pass
 
     def param_context_menu(self, pos):
         row = self.param_table.rowAt(pos.y())
@@ -869,39 +1011,6 @@ class MainWindow(QMainWindow):
         self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
         self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
 
-    def add_onnx_param(self):
-        path = self.onnx_edit.text()
-        if not path:
-             QMessageBox.warning(self, "Error", "Select ONNX file first")
-             return
-        try:
-            sess = onnxruntime.InferenceSession(path)
-            # Only support float inputs which are typically the params
-            all_inputs = [clean_name(i.name) for i in sess.get_inputs()]
-            
-            # Get metadata for min/max values
-            metadata = sess.get_modelmeta().custom_metadata_map
-            
-            # Filter out already added parameters
-            current_param_names = {p.name for p in self.opt_params}
-            available_inputs = [name for name in all_inputs if name not in current_param_names]
-            
-            if not available_inputs:
-                QMessageBox.information(self, "Info", "All ONNX parameters have already been added.")
-                return
-
-            dlg = OptimizationParamDialog(
-                "ONNX",
-                available_inputs,
-                self,
-                metadata=metadata,
-                link_candidates=[p.name for p in self.opt_params],
-            )
-            if dlg.exec():
-                self._add_param_to_table(dlg.get_data())
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-
     def add_netlist_param(self):
         path = self.netlist_edit.text()
         if not path:
@@ -914,8 +1023,17 @@ class MainWindow(QMainWindow):
             # Find R, C, L, V, I elements
             prospects = []
             for elem in parser.list_elements(["R", "C", "L", "V", "I"]):
-                 prospects.append(elem.name)
-            
+                prospects.append(elem.name)
+
+            # Also expose key=value parameters on X instances whose subcircuit
+            # is defined inline (via .SUBCKT). These are treated as netlist
+            # variables, not surrogate model inputs.
+            inline_names = parser.inline_subckt_names
+            for elem in parser.list_elements(["X"]):
+                if elem.model in inline_names:
+                    for key in elem.params:
+                        prospects.append(f"{elem.name}:{key}")
+
             # Filter out already added parameters
             current_param_names = {p.name for p in self.opt_params}
             available_prospects = [name for name in prospects if name not in current_param_names]
@@ -1042,10 +1160,41 @@ class MainWindow(QMainWindow):
             self._set_action_button_state("resume")
 
     def start_optimization(self):
-        onnx = self.onnx_edit.text()
         netlist = self.netlist_edit.text()
-        if not onnx or not netlist:
-            QMessageBox.warning(self, "Missing Files", "Please select ONNX and Netlist files.")
+        if not netlist:
+            QMessageBox.warning(self, "Missing Netlist", "Please select a netlist file.")
+            return
+
+        # Parse netlist and extract components
+        try:
+            netlist_parser = XyceNetlistParser().from_file(netlist)
+        except Exception as e:
+            QMessageBox.critical(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
+            return
+        
+        # Get detected components
+        components = netlist_parser.components
+        
+        if components:
+            # Component-based workflow: validate all components have ONNX files
+            component_onnx_mapping = {}
+            for comp_name in components.keys():
+                if comp_name not in self.component_onnx_edits:
+                    QMessageBox.warning(
+                        self, "Missing Component Selector",
+                        f"Model selector for component '{comp_name}' not found."
+                    )
+                    return
+                onnx_path = self.component_onnx_edits[comp_name].text()
+                if not onnx_path:
+                    QMessageBox.warning(
+                        self, "Missing Model Files",
+                        f"Please select ONNX or Touchstone model for component '{comp_name}'."
+                    )
+                    return
+                component_onnx_mapping[comp_name] = onnx_path
+        else:
+            QMessageBox.warning(self, "No Components Found", "No surrogatecomponents (X instances) found in netlist.")
             return
 
         orca_geometry = None
@@ -1074,9 +1223,11 @@ class MainWindow(QMainWindow):
              elif isinstance(widget, QLineEdit):
                  sim_kwargs[name] = widget.text()
         
+        # Create COBRA with component-based workflow
         cobra = COBRA(
-            em_surrogate_model=onnx,
-            optimizer=optimizer_cls(**optimizer_kwargs),# multi_objective=self.moo_cb.isChecked()),
+            netlist_parser=netlist_parser,
+            component_onnx_mapping=component_onnx_mapping,
+            optimizer=optimizer_cls(**optimizer_kwargs),
             circuit_simulator=simulator_cls(**sim_kwargs),
             palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None,
             fine_tuning_iterations=self.ft_iter_spin.value(),
@@ -1182,21 +1333,51 @@ class MainWindow(QMainWindow):
                     item.setText(display_val)
 
         self.current_param_table.setRowCount(0)
-        for name in sorted(current_values.keys()):
-            value = current_values[name]
-            if isinstance(value, (float, np.floating)):
-                display_val = f"{round(float(value), 4)}"
-            else:
-                display_val = str(value)
-
-            row = self.current_param_table.rowCount()
-            self.current_param_table.insertRow(row)
-            name_item = QTableWidgetItem(name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.current_param_table.setItem(row, 0, name_item)
-            val_item = QTableWidgetItem(display_val)
-            val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.current_param_table.setItem(row, 1, val_item)
+        
+        # Determine how to display the current parameters: Group them by component if any
+        if hasattr(self, 'component_inputs') and self.component_inputs:
+            all_comp_inputs = {inp for inputs in self.component_inputs.values() for inp in inputs}
+            other_params = [name for name in current_values.keys() if name not in all_comp_inputs]
+            
+            for comp_name, inputs in sorted(self.component_inputs.items()):
+                # Add component header row
+                r = self.current_param_table.rowCount()
+                self.current_param_table.insertRow(r)
+                
+                header_item = QTableWidgetItem(f"--- {comp_name} ---")
+                header_item.setFlags(Qt.ItemFlag.NoItemFlags)
+                header_item.setBackground(Qt.GlobalColor.lightGray)
+                self.current_param_table.setItem(r, 0, header_item)
+                
+                empty_item = QTableWidgetItem("")
+                empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
+                empty_item.setBackground(Qt.GlobalColor.lightGray)
+                self.current_param_table.setItem(r, 1, empty_item)
+                
+                for name in sorted(inputs):
+                    if name in current_values:
+                        display_name = name.split(":", 1)[1] if ":" in name else name
+                        self._add_current_param_row(display_name, current_values[name])
+            
+            if other_params:
+                r = self.current_param_table.rowCount()
+                self.current_param_table.insertRow(r)
+                
+                header_item = QTableWidgetItem("--- Netlist / Other ---")
+                header_item.setFlags(Qt.ItemFlag.NoItemFlags)
+                header_item.setBackground(Qt.GlobalColor.lightGray)
+                self.current_param_table.setItem(r, 0, header_item)
+                
+                empty_item = QTableWidgetItem("")
+                empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
+                empty_item.setBackground(Qt.GlobalColor.lightGray)
+                self.current_param_table.setItem(r, 1, empty_item)
+                
+                for name in sorted(other_params):
+                    self._add_current_param_row(name, current_values[name])
+        else:
+            for name in sorted(current_values.keys()):
+                self._add_current_param_row(name, current_values[name])
 
         # Update Goal Status Table
         ntwk_n = context.get("simulated_network")

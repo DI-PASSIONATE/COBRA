@@ -296,11 +296,19 @@ class OptimizationParamDialog(QDialog):
         self.form_layout.addRow(self.buttons)
 
     def _update_onnx_metadata(self, name):
+        # Allow checking metadata natively and without prefix (e.g. 'W' from 'X1:W')
+        base_name = name.split(":", 1)[1] if ":" in name else name
+        
         if "input_parameter_ranges" in self.metadata:
             try:
                 meta_data = json.loads(self.metadata["input_parameter_ranges"])
+                params = None
                 if name in meta_data:
                     params = meta_data[name]
+                elif base_name in meta_data:
+                    params = meta_data[base_name]
+
+                if params:
                     if "min" in params:
                         self.min_spin.setValue(float(params["min"]))
                     if "max" in params:

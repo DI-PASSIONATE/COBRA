@@ -94,5 +94,5 @@ class EMFineTuningStage(COBRABaseStage):
             future.result()
 
         ntwk = rf.Network(os.path.join(base_dir, f"{name}_dc_deembedded.s6p"))
-        context["predicted_network"] = ntwk
+        context["predicted_networks"] = [ntwk]
         return context

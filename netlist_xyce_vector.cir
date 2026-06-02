@@ -1,5 +1,5 @@
 * --- Inclusion of the Vector Fitted Model ---
-.INCLUDE "cobra_output.sp"
+.INCLUDE "X1.sp"
 X1 Port1 Port2 Port3 Port4 _net0 _net1 s_equivalent 
 
 C2 Port4 Port3 1.0F

@@ -1,0 +1,20 @@
+* Qucs 25.2.0  /home/users/simone/Hiwi/Trafo_Cobra_multipleSnP.sch
+.INCLUDE "X1.sp"
+.INCLUDE "X2.sp"
+
+C1 P4_T2 P3_T2  0F 
+C2 Port2 Port1  7.94F 
+L1 P4_T2 P3_T2  1 
+L2 Port2 Port1  1 
+P_input Port1 Port2 port=1  z0=925  AC 2.72029  SIN 0 2.72029 100
+P_output P3_T2 P4_T2 port=2  z0=100  AC 0.894427  SIN 0 0.894427 100
+Cshunt_p P3_T2 0  5F 
+Cshunt_n 0 P4_T2  5F 
+R1 Port3 P1_T2  3 tc1=0.0 tc2=0.0 
+R2 Port4 P2_T2  3 tc1=0.0 tc2=0.0 
+X1 P1_T2 P2_T2 P3_T2 P4_T2 _net2 _net3 s_equivalent 
+X2 Port1 Port2 Port3 Port4 _net0 _net1 s_equivalent 
+.AC LIN 500 100G 200G
+.LIN format=touchstone sparcalc=1
+.PRINT ac format=std file=spice4qucs_sparam.prn sdb(1,1) s(1,1) sp(1,1) y(1,1) z(1,1) sdb(1,2) s(1,2) sp(1,2) y(1,2) z(1,2) sdb(2,1) s(2,1) sp(2,1) y(2,1) z(2,1) sdb(2,2) s(2,2) sp(2,2) y(2,2) z(2,2)
+.END

@@ -1,0 +1,42 @@
+* Qucs 25.2.0  /home/users/simone/Hiwi/HB_example_LNA.sch
+.LIB "/home/users/simone/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerRES.lib" res_typ
+.LIB "/home/users/simone/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerHBT.lib" hbt_typ
+.LIB "/home/users/simone/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerCAP.lib" cap_typ
+
+.SUBCKT IHP_PDK_nonlinear_components_npn13G2  gnd c b e bn Nx=1  
+X1 c b e bn npn13G2 Nx={Nx} 
+.ENDS
+  
+
+.SUBCKT IHP_PDK_basic_components_ptap1  gnd P1 P2 w=0.78e-6 l=0.78e-6
+X1 P1 P2 ptap1 w={w} l={l}
+.ENDS
+  
+.PARAM Cout = 44f
+V1 Vdd 0 DC 2.5
+L1 _net0 _net1  100P 
+L2 _net2 _net1  40.000P 
+Xnpn13G1 0 _net0 _net0 0 sub IHP_PDK_nonlinear_components_npn13G2 Nx=1
+R1 _net3 Vdd  3K tc1=0.0 tc2=0.0 
+R2 0 _net3  13K tc1=0.0 tc2=0.0 
+R3 _net0 Vdd  2.5K tc1=0.0 tc2=0.0 
+C2 0 _net0  200F 
+C3 0 _net2  38F 
+C4 _net4 _net2  300F 
+C5 0 _net3  72F 
+Xnpn13G2 0 _net5 _net1 0 sub IHP_PDK_nonlinear_components_npn13G2 Nx=8
+Xnpn13G3 0 ip _net3 _net5 sub IHP_PDK_nonlinear_components_npn13G2 Nx=8
+Xptap1 0 sub 0 IHP_PDK_basic_components_ptap1 w=0.78U l=0.78U
+
+
+
+VOut Out _net6 DC 0
+L4 Vdd ip  10N 
+L3 ip Out  107P 
+C6 0 Out  31F 
+R4 0 _net6  50 tc1=0.0 tc2=0.0 
+P1 _net4 0 port=1  z0=50  AC 0.2  SIN 0 0.2 130G
+.options hbint numfreq=3 STARTUPPERIODS=2
+.HB 130G
+.PRINT  hb I(VOut) v(Out) v(Vdd) v(ip) v(sub) 
+.END

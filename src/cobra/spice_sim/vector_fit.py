@@ -31,7 +31,8 @@ def vector_fit(nw: skrf.Network, name: str):
 
     # write SPICE netlist
     netlist_filename = name + '.sp'
-    vf.write_spice_subcircuit_s(netlist_filename)
+    subcircuit_name = os.path.basename(name) + '_subct'
+    vf.write_spice_subcircuit_s(netlist_filename, fitted_model_name=subcircuit_name)
 
     # Return filename
     return netlist_filename

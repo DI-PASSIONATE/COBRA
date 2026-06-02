@@ -15,16 +15,17 @@ class XyceSimulator(BaseSimulator):
         self.parallel = parallel_xyce
         #self.netlist_parser.from_file("TODO")
 
-    def preprocess_ntwk(self, ntwk):
+    def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
-        return vector_fit(ntwk, name="cobra_output")
+        return vector_fit(ntwk, name=name)
 
     def run_simulation(self, netlist_name: str) -> rf.Network:
+        results_dir = os.path.dirname(netlist_name)
         output_name = "xyce_output"
         parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
-        command = parallel_command + [self.xyce_command, netlist_name, "-o", output_name]
+        command = parallel_command + [self.xyce_command, os.path.basename(netlist_name), "-o", output_name]
         
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, text=True, cwd=results_dir)
         
         if result.returncode != 0:
             print(f"Simulation Failed! Return code: {result.returncode}")
@@ -32,7 +33,7 @@ class XyceSimulator(BaseSimulator):
             return None
         
         # Xyce outputs a file with the extension .s*p, we need to find the exact filename
-        output_files = glob.glob(f"{output_name}.s*p")
+        output_files = glob.glob(os.path.join(results_dir, f"{output_name}.s*p"))
         if not output_files:
             print("No output file found!")
             return None

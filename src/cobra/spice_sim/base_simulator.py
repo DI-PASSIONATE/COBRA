@@ -22,12 +22,13 @@ class BaseSimulator(ABC):
         pass
 
     @abstractmethod
-    def preprocess_ntwk(self, ntwk) -> str:
+    def preprocess_ntwk(self, ntwk, name: str) -> str:
         """
         Preprocess the network by performing some operations (e.g., vector fitting) 
         that the simulator requires before running the simulation. 
         Args:
             ntwk: The network object containing the S-parameters and frequency information.
+            name (str): The name of the network for identification purposes.
         Returns:
             A file path to the preprocessed network data (e.g., a SPICE subcircuit file) that can be included in the netlist for circuit simulation.
         """
