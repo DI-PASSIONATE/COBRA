@@ -7,6 +7,14 @@ It combines:
 - circuit-level SPICE simulation via Xyce,
 - and goal-driven optimization (Optuna-based).
 
+You can easily define goals and configurations in the GUI:
+
+![COBRA GUI screenshot showing netlist loading, component mapping, design goal configuration, and optimization controls](.github/cobra_config.png)
+
+and visualize optimization progress in real time:
+
+![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](.github/cobra_visual.png)
+
 ## How COBRA Fits with ORCA
 
 COBRA is the optimization/runtime side of the flow.
