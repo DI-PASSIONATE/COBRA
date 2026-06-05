@@ -3,7 +3,7 @@
 COBRA (Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer) is an optimization framework for RFIC workflows.
 It combines:
 
-- surrogate-model S-parameter prediction (from ORCA-generated ONNX models or fixed Touchstone SNP files),
+- surrogate-model S-parameter prediction (from ![ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
 - circuit-level SPICE simulation via Xyce,
 - and goal-driven optimization (Optuna-based).
 
@@ -15,15 +15,17 @@ and visualize optimization progress in real time:
 
 ![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](.github/cobra_visual.png)
 
+For more in-depth information, read our SBCCI paper [to be published soon] or check out the [documentation](http://di-passionate.github.io/COBRA).
+
 ## How COBRA Fits with ORCA
 
 COBRA is the optimization/runtime side of the flow.
 
-- ORCA creates the surrogate model (for example, `tf_octa_c_ports.onnx`) from EM simulation data.
+- [ORCA](https://github.com/DI-PASSIONATE/ORCA) creates the surrogate model (for example, `tf_octa_c_ports.onnx`) from EM simulation data.
 - COBRA loads that ONNX model and predicts S-parameters during optimization loops.
-- Optional fine-tuning in COBRA can call full-wave EM simulations (Palace) and uses ORCA geometry classes (preset or custom).
+- Optional fine-tuning in COBRA can call full-wave EM simulations (Palace) and uses [ORCA](https://github.com/DI-PASSIONATE/ORCA) geometry classes (preset or custom).
 
-In short: ORCA builds the model, COBRA uses it to optimize circuits quickly and can verify/refine with EM fine-tuning.
+In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA uses it to optimize circuits quickly and can verify/refine with EM fine-tuning.
 
 ## Requirements
 
@@ -31,13 +33,13 @@ In short: ORCA builds the model, COBRA uses it to optimize circuits quickly and 
 - Xyce (current circuit simulator backend)
 - A valid netlist (`.cir`, exported from Qucs-S)
 - A component model source per parsed component:
-    - ORCA-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
+    - [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
     - fixed Touchstone file (`.sNp`, e.g. `.s2p`, `.s4p`, `.s6p`) for non-optimizable components
 
 Optional:
 
 - Palace, if you want EM fine-tuning
-- ORCA installed/importable in your Python environment if you use ORCA geometry presets/classes in scripts or GUI fine-tuning
+- [ORCA](https://github.com/DI-PASSIONATE/ORCA) installed/importable in your Python environment if you use ORCA geometry presets/classes in scripts or GUI fine-tuning
 
 ## Installation
 
