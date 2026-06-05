@@ -3,8 +3,8 @@
 COBRA (Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer) is an optimization framework for RFIC workflows.
 It combines:
 
-- surrogate-model S-parameter prediction (from ORCA-generated ONNX models),
-- circuit-level SPICE simulation,
+- surrogate-model S-parameter prediction (from ORCA-generated ONNX models or fixed Touchstone SNP files),
+- circuit-level SPICE simulation via Xyce,
 - and goal-driven optimization (Optuna-based).
 
 ## How COBRA Fits with ORCA
@@ -22,7 +22,9 @@ In short: ORCA builds the model, COBRA uses it to optimize circuits quickly and 
 - Python 3.11+
 - Xyce (current circuit simulator backend)
 - A valid netlist (`.cir`, exported from Qucs-S)
-- An ORCA-generated surrogate ONNX model (`.onnx`)
+- A component model source per parsed component:
+    - ORCA-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
+    - fixed Touchstone file (`.sNp`, e.g. `.s2p`, `.s4p`, `.s6p`) for non-optimizable components
 
 Optional:
 
@@ -92,6 +94,8 @@ pip install -e .
 
 COBRA supports two main usage modes.
 
+Technically, fully GUI-free usage through Python code is supported and works well for scripted workflows, CI, and reproducible experiments. For most users and day-to-day interactive optimization, the GUI is still highly recommended.
+
 ### 1. GUI mode
 
 After installation, start the GUI with:
@@ -102,13 +106,13 @@ cobra
 
 The GUI lets you:
 
-- select ONNX model and netlist,
+- load a netlist and map each parsed subcircuit component to either an ONNX surrogate model or a fixed SNP Touchstone file,
 - configure optimization parameters and design goals,
 - run/pause/stop optimization,
-- visualize S-parameters and goal losses,
-- optionally enable fine-tuning with Palace and select ORCA geometry presets or custom geometry classes.
+- visualize S-parameters and goal losses in real time,
+- optionally enable EM fine-tuning with Palace and select ORCA geometry presets or custom geometry classes.
 
-### 2. Python script mode
+### 2. Python script mode (GUI-free)
 
 Use the provided example:
 
@@ -118,66 +122,232 @@ python examples/main.py
 
 The example in `examples/main.py` shows how to:
 
-- define design goals,
+- parse `netlist_multiple_SPFiles.cir` with `XyceNetlistParser`,
+- map `X1` to an ONNX surrogate and `X2` to a fixed Touchstone SNP file,
+- optimize prefixed model inputs for `X1` (for example `X1:bottom_winding_diameter`),
+- optimize parsed netlist values `Cshunt_p` and `Cshunt_n` with `linked_to`,
 - configure `OptunaOptimizer` and `XyceSimulator`,
-- pass optimization properties,
-- connect ORCA geometry (`TransformerOcta`) for optional fine-tuning,
-- call `cobra.run(...)`.
+- run `cobra.run(...)` with optional ORCA geometry (`TransformerOcta`). The ORCA geometry is only required for finetuning.
 
-## Minimal Python Usage Pattern
+## Python Usage
+
+### Complete example (from `examples/main.py`)
 
 ```python
-from cobra import COBRA, DesignGoal, DesignParameter, OptimizationProperty, OptimizationType, XyceSimulator, OptunaOptimizer
+import os
+
+from cobra import (
+    COBRA,
+    DesignGoal,
+    DesignParameter,
+    OptimizationProperty,
+    OptimizationType,
+    OptunaOptimizer,
+    XyceSimulator,
+)
+from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+NETLIST_PATH = os.path.join(BASE_DIR, "netlist_multiple_SPFiles.cir")
+ONNX_MODEL_PATH = os.path.join(BASE_DIR, "tf_octa_c_ports.onnx")
+FIXED_TOUCHSTONE_PATH = os.path.join(BASE_DIR, "XYLIN_Trafo_output_predicted.s6p")
+
+
+design_goals = [
+    DesignGoal(DesignParameter.S11_dB, max_value=-9, frequency_range="125-135ghz"),
+    DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
+]
+
+parser = XyceNetlistParser().from_file(NETLIST_PATH)
 
 cobra = COBRA(
-	em_surrogate_model="path/to/orca_model.onnx",
-	optimizer=OptunaOptimizer(sampler="tpe", pruner="median"),
-	circuit_simulator=XyceSimulator(),
+    netlist_parser=parser,
+    component_onnx_mapping={
+        "X1": str(ONNX_MODEL_PATH),
+        "X2": str(FIXED_TOUCHSTONE_PATH),
+    },
+    optimizer=OptunaOptimizer(
+        multi_objective=False,
+        sampler="tpe",
+        pruner="median",
+    ),
+    circuit_simulator=XyceSimulator(),
 )
 
+parameters = [
+    OptimizationProperty(name="X1:bottom_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
+    OptimizationProperty(name="X1:top_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
+    OptimizationProperty(name="X1:center_displacement", type=OptimizationType.MODEL_INPUT, min_value=0.0, max_value=20.0, step=0.1),
+    OptimizationProperty(name="X1:bottom_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
+    OptimizationProperty(name="X1:top_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
+    OptimizationProperty(name="Cshunt_p", type=OptimizationType.NETLIST_VARIABLE, unit="F", min_value=0.0, max_value=20.0, step=1.0),
+    OptimizationProperty(name="Cshunt_n", type=OptimizationType.NETLIST_VARIABLE, linked_to="Cshunt_p", unit="F", min_value=0.0, max_value=0.0, step=0.0),
+]
+
 context = cobra.run(
-	netlist="path/to/netlist.cir",
-	design_goals=[
-		DesignGoal(DesignParameter.S11_dB, max_value=-8, frequency_range="125-135ghz"),
-	],
-	optimization_parameters=[
-		OptimizationProperty(
-			name="my_param",
-			type=OptimizationType.MODEL_INPUT,
-			min_value=0.0,
-			max_value=1.0,
-			step=0.01,
-		)
-	],
-	max_iterations=200,
+    netlist=str(NETLIST_PATH),
+    design_goals=design_goals,
+    optimization_parameters=parameters,
+    orca_geometry=TransformerOcta(),
+    max_iterations=200,
+    results_name="main_mixed_sources_example",
 )
+
+print(context)
 ```
+
+This example demonstrates, roughly:
+
+- mixed component sources in one run (`X1` as ONNX, `X2` as fixed SNP),
+- component-scoped model optimization via `X1:<param>` names,
+- direct parsed-netlist optimization via `NETLIST_VARIABLE`,
+- linked netlist constraints (`Cshunt_n` always equals `Cshunt_p`),
+- optional ORCA geometry wiring for fine-tuning-ready workflows.
+
+## Capabilities
+
+### Design parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `S11_dB`, `S21_dB`, `S31_dB`, `S41_dB`, `S12_dB`, `S22_dB` | S-parameters in dB |
+| `Lp`, `Ls` | Primary / secondary inductance (nH), derived from mixed-mode Z-parameters |
+| `Rp`, `Rs` | Primary / secondary series resistance (Ω) |
+| `Qp`, `Qs` | Primary / secondary quality factor |
+| `k` | Magnetic coupling coefficient |
+| `SRF` | Self-resonance frequency (GHz) |
+
+Each goal accepts an optional `frequency_range` string (e.g., `"125-135ghz"`), a `min_value`, a `max_value`, and a `weight`.
+
+### Optimizer options
+
+`OptunaOptimizer` wraps [Optuna](https://optuna.org) and supports:
+
+- **Samplers**: `"tpe"` (default, Bayesian), `"random"`, `"simulated_annealing"`, `"auto"` (requires `optunahub`)
+- **Pruners**: `None` (default), `"median"`, `"successive_halving"`, `"hyperband"`
+- **Multi-objective mode**: set `multi_objective=True` to optimize for a Pareto front instead of a single aggregated loss
+
+For EM fine-tuning, a `GradientDescentOptimizer` is also available by passing `fine_tuning_optimizer="gradient_descent"` to `COBRA`.
+
+### Optimization parameter types
+
+| `OptimizationType` | What it controls |
+|--------------------|-----------------|
+| `MODEL_INPUT` | Geometry parameter fed directly to the ONNX surrogate model |
+| `NETLIST_VARIABLE` | Parsed netlist element values/parameters (for example component values like `C1 0F` or instance/model params) patched directly in the netlist |
+
+Parameters can be linked (`linked_to="other_param"`) so that one variable always mirrors another, useful for symmetrically constrained components.
 
 ## Typical Inputs and Outputs
 
 Inputs:
 
-- surrogate model `.onnx` (from ORCA)
-- circuit netlist `.cir`/`.sp`
+- circuit netlist `.cir` / `.sp` (Qucs-S / Xyce format)
+- one or more component model files: ORCA-generated ONNX (`.onnx`) and/or fixed Touchstone (`.sNp`)
 - design goals and optimization parameter definitions
 
-Generated artifacts commonly include:
+Results are saved to a timestamped folder `results/<timestamp>_<netlist_name>/` and include:
 
-- optimization context JSON (`cobra_optimization_context.json`)
-- predicted surrogate S-parameters (for example `surrogate_s_params.sNp`)
-- simulator output touchstone files and result netlists
+- `cobra_optimization_context.json` — full optimization history and best parameters
+- `<component>_predicted.s<N>p` — surrogate-predicted Touchstone files per component
+- `surrogate_s_params_<component>.s<N>p` — best-trial surrogate S-parameters
+- vector-fitted SPICE subcircuits (`<component>.sp`) included by the final netlist
 
 ## EM Fine-Tuning Notes (Optional)
 
 If you enable fine-tuning:
 
-- set `palace_fine_tuning_command` in script mode or enable it in GUI,
-- provide an ORCA geometry object/class (preset or custom),
-- choose whether fine-tuning reuses the surrogate optimizer state or switches to gradient descent,
-- COBRA will run EM verification/fine-tuning iterations in addition to surrogate-based steps.
+- pass `palace_fine_tuning_command` to `COBRA` (or enable it in the GUI),
+- provide an ORCA geometry object via `orca_geometry=` in `cobra.run(...)`,
+- choose `fine_tuning_optimizer="reuse"` to continue with the surrogate optimizer, or `"gradient_descent"` to switch to gradient descent for the fine-tuning phase,
+- COBRA will generate a GDS file, mesh it with gmsh, run a full Palace EM simulation, and iterate.
+
+## How COBRA Works Internally
+
+COBRA runs a staged pipeline on each optimization iteration. Understanding each stage clarifies why certain design choices were made.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                          COBRA run loop                              │
+│                                                                      │
+│  ┌──────────────┐   new params   ┌─────────────────┐                │
+│  │  Optimizer   │───────────────▶│  Netlist Parser  │ (patch .cir)  │
+│  │  (Optuna)    │                └────────┬────────┘                │
+│  └──────┬───────┘                         │ updated netlist          │
+│         │ tell(penalties)                 ▼                          │
+│         │                       ┌─────────────────┐                 │
+│         │                       │  EM Surrogate   │ (ONNX inference) │
+│         │                       │  Stage          │                 │
+│         │                       └────────┬────────┘                 │
+│         │                                │ rf.Network per component  │
+│         │                                ▼                          │
+│         │                       ┌─────────────────┐                 │
+│         │                       │  Circuit Sim    │ (vector fit →   │
+│         │                       │  Stage          │  Xyce)          │
+│         │                       └────────┬────────┘                 │
+│         │                                │ simulated rf.Network      │
+│         │                                ▼                          │
+│         └───────────────────────┌─────────────────┐                 │
+│                                 │  Design Goal    │                 │
+│                                 │  Checker        │                 │
+│                                 └─────────────────┘                 │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Stage 1 — Optimizer (`OptunaOptimizer`)
+
+Optuna's sampler proposes the next set of parameters (geometry inputs and/or netlist variables). After each iteration the checker's penalty values are fed back via `tell()`, so the sampler can learn the landscape. TPE (Tree-structured Parzen Estimator) is the default because it works well with a small number of evaluations — exactly what is needed when each evaluation involves a circuit simulation.
+
+### Stage 2 — Netlist parsing and patching (`XyceNetlistParser`)
+
+Before each simulation the netlist is updated in two ways:
+
+1. **Parsed netlist elements** (`NETLIST_VARIABLE` parameters) are patched directly in the `.cir` text (for example R/C/L values and supported instance/model parameters) so Xyce picks them up.
+2. **TSTONEFILE rewriting** — Qucs-S exports Touchstone references as `YLIN` devices with a `.MODEL … LIN TSTONEFILE=…` directive. Xyce cannot parse this syntax, and more importantly SPICE simulators in general cannot use a raw Touchstone file as a subcircuit. The parser detects these blocks and rewrites them into normal `X…` subcircuit instances that point to the vector-fitted `.sp` file that will be generated in Stage 3.
+
+### Stage 3 — EM surrogate inference (`EMSurrogateStage`)
+
+The ONNX model (produced by ORCA) receives the current geometry parameters and a fixed frequency sweep (1 GHz–200 GHz, 1 GHz steps) as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
+
+ONNX was chosen because it is a portable, framework-agnostic format: the model runs with `onnxruntime` at inference time without requiring the full training environment (PyTorch, TensorFlow, …), keeping COBRA's dependency footprint small and deployment straightforward.
+
+A plain Touchstone file (`.sNp`) can also be used instead of an ONNX model when no geometry variation is needed — COBRA detects the file extension and loads it directly as a fixed network.
+
+### Stage 4 — Vector fitting and circuit simulation (`CircuitSimulationStage`)
+
+**Why vector fitting?**
+
+Xyce (like all SPICE-family simulators) cannot read a Touchstone file directly as a component. SPICE netlists describe circuits in terms of lumped elements and analytical subcircuits — there is no native mechanism to embed a tabulated frequency-domain response.
+
+COBRA solves this by vector-fitting the surrogate-predicted S-parameter network using `scikit-rf`'s `VectorFitting` implementation. Vector fitting approximates the frequency response as a sum of rational functions (poles and residues). The fitted model is then written out as a standard SPICE subcircuit (`.sp`) containing only resistors, capacitors, inductors, and controlled sources — elements every SPICE engine understands natively.
+
+The generated subcircuit is automatically included in the patched netlist via a `.INCLUDE` directive, so Xyce sees a fully self-contained netlist on every iteration.
+
+After the include is in place, COBRA invokes Xyce as a subprocess, reads the resulting Touchstone output back as a `scikit-rf` `Network`, and passes it to the goal checker.
+
+### Stage 5 — Design goal checking (`DesignGoalChecker`)
+
+Each `DesignGoal` computes a penalty scalar from the simulated network. The penalty is zero (or negative, acting as a reward) when the network already satisfies the goal, and grows proportionally to the squared normalized deviation when it does not. This smooth, differentiable penalty signal is what the optimizer minimizes.
+
+For 4-port networks the checker automatically converts to mixed-mode (differential/common-mode) parameters before extracting lumped quantities such as inductance, Q-factor, and coupling coefficient.
+
+### Optional Stage 6 — EM fine-tuning (`EMFineTuningStage`)
+
+Once the surrogate-driven optimization converges, COBRA can verify and refine the result with a real EM simulation:
+
+1. The current geometry parameters are used to generate a GDS layout file via the ORCA geometry class.
+2. gmsh meshes the GDS layout according to the PDK stackup.
+3. Palace runs a full-wave EM simulation and produces a verified Touchstone file.
+4. The verified S-parameters replace the surrogate prediction and are passed back through the circuit simulation and goal-checking stages.
+5. If the goals are not met, the optimizer is updated with the real penalty and a new iteration begins.
+
+This two-phase approach (fast surrogate loop + occasional EM verification) gives the speed of a surrogate-based optimizer while still guaranteeing that the final design is validated against the actual physics.
 
 ## Troubleshooting
 
 - If `cobra` command is not found, ensure your virtual environment is activated and reinstall with `pip install -e .`.
 - If geometry presets fail to load, verify ORCA is installed and importable in the same environment.
 - If circuit simulation fails, verify Xyce is installed and available in your `PATH`.
+- If `AutoSampler` fails to initialize, install its optional dependencies: `pip install optunahub cmaes scipy torch`.
