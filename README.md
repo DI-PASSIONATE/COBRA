@@ -1,8 +1,14 @@
 # COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
 
-©2026 *Gianluca Simone, David Lurz, Martin Grund, Fabian Schneider, Michael Loose, Sascha Breun, Manuel Koch, Robert Weigel, Norman Franchi*
+©2026 
 
-*Institute for Intelligent Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany*
+Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loose\*, Sascha Breun\*, Manuel Koch\*, Robert Weigel\*, Norman Franchi\*
+
+\* Institute for Intelligent Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany
+
+° Chair of Integrated Electronic Systems, Otto-von-Guericke-University Magdeburg, Germany
+
+[Paper] [Documentation]  [[BibTex](#cite-this-work)]
 
 > [!NOTE]
 > COBRA is still under active development, and the paper is yet to be released. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DavidL-11/COBRA/issues) or reach out!
@@ -22,8 +28,6 @@ and visualize optimization progress in real time:
 
 ![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](docs/cobra_visual.png)
 
-For more in-depth information, read our SBCCI paper [to be published soon] or check out the [documentation](http://di-passionate.github.io/COBRA).
-
 ## How COBRA Fits with ORCA
 
 COBRA is the optimization/runtime side of the flow.
@@ -34,21 +38,20 @@ COBRA is the optimization/runtime side of the flow.
 
 In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA uses it to optimize circuits quickly and can verify/refine with EM fine-tuning.
 
-## Requirements
+## Installation
+### Requirements
 
 - Python 3.11+
-- Xyce (current circuit simulator backend)
-- A valid netlist (`.cir`, exported from Qucs-S)
+- [Xyce](https://xyce.sandia.gov/) (current circuit simulator backend)
+- [Qucs-S](https://qucs-s-help.readthedocs.io/en/latest/) (to create a '.cir' netlist for Xyce)
 - A component model source per parsed component:
     - [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
     - fixed Touchstone file (`.sNp`, e.g. `.s2p`, `.s4p`, `.s6p`) for non-optimizable components
 
 Optional:
 
-- Palace, if you want EM fine-tuning
+- [AWS Palace](https://awslabs.github.io/palace/stable/), if you want EM fine-tuning
 - [ORCA](https://github.com/DI-PASSIONATE/ORCA) installed/importable in your Python environment if you use ORCA geometry presets/classes in scripts or GUI fine-tuning
-
-## Installation
 
 ### Option A: Using `uv` (recommended)
 

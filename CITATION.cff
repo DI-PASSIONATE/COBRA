@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "GitHub Repository for COBRA - AI-Assisted RFIC Optimization Framework"
+authors:
+- family-names: "Simone"
+  given-names: "Gianluca"
+  orcid: "https://orcid.org/0009-0002-6315-1538"
+- family-names: "Lurz"
+  given-names: "David"
+  orcid: "https://orcid.org/0009-0003-6526-5464"
+- family-names: "Franchi"
+  given-names: "Norman"
+  orcid: "https://orcid.org/0000-0002-2777-4722"
+version: 1.0.0
+date-released: 2026
+url: "https://github.com/DI-PASSIONATE/COBRA"
+preferred-citation:
+  type: conference-paper
+  authors:
+    - family-names: "Simone"
+      given-names: "Gianluca"
+    - family-names: "Lurz"
+      given-names: "David"
+    - family-names: "Franchi"
+      given-names: "Norman"
+  title: "COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design"
+  collection-title: "2026 39nd SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)"
+  conference:
+    name: "Symposium on Integrated Circuits and System Design"
+  year: 2026
+  publisher:
+    name: "IEEE"
+  url: "https://github.com/DI-PASSIONATE/COBRA"
