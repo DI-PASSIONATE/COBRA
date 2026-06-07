@@ -1,6 +1,13 @@
-# COBRA
+# COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
 
-COBRA (Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer) is an optimization framework for RFIC workflows.
+©2026 *Gianluca Simone, David Lurz, Martin Grund, Fabian Schneider, Michael Loose, Sascha Breun, Manuel Koch, Robert Weigel, Norman Franchi*
+
+*Institute for Intelligent Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany*
+
+> [!NOTE]
+> COBRA is still under active development, and the paper is yet to be released. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DavidL-11/COBRA/issues) or reach out!
+
+**COBRA** is an optimization framework for RFIC workflows.
 It combines:
 
 - surrogate-model S-parameter prediction (from ![ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
@@ -9,11 +16,11 @@ It combines:
 
 You can easily define goals and configurations in the GUI:
 
-![COBRA GUI screenshot showing netlist loading, component mapping, design goal configuration, and optimization controls](.github/cobra_config.png)
+![COBRA GUI screenshot showing netlist loading, component mapping, design goal configuration, and optimization controls](docs/cobra_config.png)
 
 and visualize optimization progress in real time:
 
-![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](.github/cobra_visual.png)
+![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](docs/cobra_visual.png)
 
 For more in-depth information, read our SBCCI paper [to be published soon] or check out the [documentation](http://di-passionate.github.io/COBRA).
 
@@ -361,3 +368,40 @@ This two-phase approach (fast surrogate loop + occasional EM verification) gives
 - If geometry presets fail to load, verify ORCA is installed and importable in the same environment.
 - If circuit simulation fails, verify Xyce is installed and available in your `PATH`.
 - If `AutoSampler` fails to initialize, install its optional dependencies: `pip install optunahub cmaes scipy torch`.
+
+## Cite This Work
+If you use COBRA in your research, please cite our upcoming SBCCI 2026 paper:
+
+```
+@INPROCEEDINGS{2026_COBRA,
+  author={Simone, Gianluca and Lurz, David and Grund, Martin and Schneider, Fabian and Loose, Michael and Breun, Sascha and Koch, Manuel and Weigel, Robert and Franchi, Norman},
+  doi={},
+  booktitle={
+2026 39nd SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)},
+  number={},
+  pages={},
+  title={{COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design}},
+  volume={},
+  year={2026},
+  organization={IEEE},
+  keywords={artificial intelligence, design automation, EDA, neural network, open-source, optimization, Palace, Qucs-S, radio frequency integrated circuit, surrogate model, Xyce}
+}
+```
+
+## Acknowledgements
+This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible.
+
+<table width="100%">
+  <tr>
+    <td align="left" width="50%">
+      <a href="https://www.lites.tf.fau.de/" target="_blank">
+        <img src="docs/lites.png" alt="Lehrstuhl für Intelligente Technische Elektronik und Systeme @ FAU" width="94%"/>
+      </a>
+    </td>
+    <td align="right" width="50%">
+      <a href="https://www.elektronikforschung.de/projekte/di-passionate" target="_blank">
+        <img src="docs/bmftr.jpg" alt="DI-PASSIONATE Project (funded by BMFTR)" width="94%"/>
+      </a>
+    </td>
+  </tr>
+</table>
