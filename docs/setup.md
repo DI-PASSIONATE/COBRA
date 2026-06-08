@@ -1,46 +1,87 @@
-## Setup
+## Installation
 
-Required tools:
+## Requirements
 
-- Python 3.11 or higher
-- Python package manager (Recommended: `uv`, but `pip` can also be used)
-- virtual environment tool (e.g., venv or conda)
-- SPICE simulator (currently supported: Xyce), can be installed e.g. via `spack`
-- Qucs-S (Schematic editor) for netlist generation
-- Optional: Palace EM simulation software (open-source, available at https://github.com/awslabs/palace) for finetuning
+- Python 3.11+
+- Xyce simulator available in your `PATH`
+- Qucs-S for generating/inspecting compatible netlists
 
-### Installation Steps
+Optional:
 
-- Clone this repository
+- ORCA installed/importable if you use ORCA geometry presets/classes
+- Palace if you want EM fine-tuning
 
-```bash
-git clone https://github.com/DavidL-11/COBRA && cd COBRA
-```
+!!! note
+	COBRA supports Python 3.11 to 3.14.
 
-- (Install UV (![https://docs.astral.sh/uv/getting-started/installation/]))
+## Clone Repository
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+git clone https://github.com/DI-PASSIONATE/COBRA
+cd COBRA
 ```
 
-- Download Python 3.13
+## Install COBRA
+
+=== "Option A: uv (recommended)"
+
+	```bash
+	curl -LsSf https://astral.sh/uv/install.sh | sh
+	uv python install 3.13
+	uv venv --python 3.13
+	source .venv/bin/activate
+	uv pip install -e .
+	```
+
+=== "Option B: venv + pip"
+
+	```bash
+	python3 -m venv .venv
+	source .venv/bin/activate
+	pip install -U pip
+	pip install -e .
+	```
+
+## Verify Setup
+
+Run the following checks in your activated environment:
 
 ```bash
-uv python install 3.13
+cobra
 ```
 
-- Create and activate a virtual environment
+Expected behavior: COBRA GUI starts.
+
+To verify script workflow:
 
 ```bash
-uv venv --python 3.13
+python examples/main.py
 ```
 
-- Install COBRA
+!!! warning
+	`examples/main.py` requires external tools (including Xyce), valid model files, and compatible netlist inputs.
 
-```bash
-uv pip install -e .
-```
+## External Tool Notes
 
-- If you plan to use Palace for EM simulations, install Palace on your system by following [the Palace installation instructions](https://awslabs.github.io/palace/stable/install/index.html).
+### Xyce
 
-You can then use cobra by running `cobra` in your terminal. 
+- COBRA currently uses Xyce as the circuit simulator backend.
+- Ensure `Xyce` executable is on `PATH`.
+
+### Qucs-S
+
+- Qucs-S is used to create netlists (`.cir`) that COBRA parses.
+
+### Palace (Optional)
+
+- If you use EM fine-tuning, install Palace and ensure your command invocation is valid.
+- See official instructions: <https://awslabs.github.io/palace/stable/install/index.html>
+
+### ORCA (Optional)
+
+- ORCA is used to generate surrogates and optional geometry workflows.
+
+## Next Steps
+
+- Continue with **Getting Started -> Quickstart** for a first run.
+- Use **User Guide -> Script Mode** if you prefer GUI-free automation.

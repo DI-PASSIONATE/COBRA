@@ -10,7 +10,19 @@ edit_uri: edit/main/docs/
 # Page tree
 nav:
   - Home: index.md
-  - Installation: setup.md
+  - Getting Started:
+    - Installation: setup.md
+    - Quickstart: getting-started/quickstart.md
+  - Support:
+    - Troubleshooting: advanced/troubleshooting.md
+    - FAQ: advanced/faq.md
+  - API Reference:
+    - Overview: api/index.md
+    - Core: api/core.md
+    - Optimizers: api/optimizers.md
+    - Simulation and Netlist Parsing: api/simulation.md
+  - Advanced:
+    - Fine-Tuning: advanced/fine-tuning.md
   
 # Configuration
 theme:

@@ -8,15 +8,15 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 
 ° Chair of Integrated Electronic Systems, Otto-von-Guericke-University Magdeburg, Germany
 
-[Paper] [Documentation]  [[BibTex](#cite-this-work)]
+[Paper (Coming Soon)](#cite-this-work) | [Documentation](docs/index.md) | [BibTex](#cite-this-work)
 
 > [!NOTE]
-> COBRA is still under active development, and the paper is yet to be released. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DavidL-11/COBRA/issues) or reach out!
+> COBRA is still under active development, and the paper is yet to be released. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DI-PASSIONATE/COBRA/issues) or reach out.
 
 **COBRA** is an optimization framework for RFIC workflows.
 It combines:
 
-- surrogate-model S-parameter prediction (from ![ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
+- surrogate-model S-parameter prediction (from [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
 - circuit-level SPICE simulation via Xyce,
 - and goal-driven optimization (Optuna-based).
 
@@ -58,7 +58,7 @@ Optional:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/DavidL-11/COBRA
+git clone https://github.com/DI-PASSIONATE/COBRA
 cd COBRA
 ```
 
@@ -92,7 +92,7 @@ uv pip install -e .
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/DavidL-11/COBRA
+git clone https://github.com/DI-PASSIONATE/COBRA
 cd COBRA
 ```
 
