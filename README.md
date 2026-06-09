@@ -392,7 +392,16 @@ If you use COBRA in your research, please cite our upcoming SBCCI 2026 paper:
 ```
 
 ## Acknowledgements
-This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible.
+This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible, including but not limited to:
+
+- [gdsfactory](https://github.com/gdsfactory/gdsfactory)
+- [gds2palace](https://github.com/VolkerMuehlhaus/gds2palace_ihp_sg13g2)
+- [setupEM](https://github.com/VolkerMuehlhaus/setupEM)
+- [Palace](https://github.com/awslabs/palace)
+- [PyTorch](https://github.com/pytorch/pytorch)
+- [ONNX](https://github.com/onnx/onnx)
+- [scikit-rf](https://github.com/scikit-rf/scikit-rf)
+- [OpenStack](https://opendev.org/openstack)
 
 <table width="100%">
   <tr>
