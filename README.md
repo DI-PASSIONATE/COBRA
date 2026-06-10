@@ -1,5 +1,5 @@
 # COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
-[![Documentation](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/pages/pages-build-deployment/badge.svg?branch=gh-pages)](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/pages/pages-build-deployment)
+[![Documentation](https://img.shields.io/badge/pages-documentation-green?logo=github)](https://di-passionate.github.io/COBRA/)
 
 ©2026 
 
