@@ -28,7 +28,8 @@ from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 
-from .dialogs import DesignGoalDialog, OptimizationParamDialog, clean_name
+from .dialogs import DesignGoalDialog, OptimizationParamDialog
+from .hf_model_browser import HuggingFaceModelDialog
 from .help_texts import TUTORIAL_HTML, tooltip
 from .theme import apply_theme
 from .worker import OptimizationWorker
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         # Initialize component ONNX selector dictionaries
         self.component_onnx_edits: Dict[str, QLineEdit] = {}
         self.component_onnx_btns: Dict[str, QPushButton] = {}
+        self.component_hf_btns: Dict[str, QPushButton] = {}
         
         self.setWindowTitle("COBRA GUI")
         self.resize(1200, 800)
@@ -826,6 +828,12 @@ class MainWindow(QMainWindow):
         if fname:
             line_edit.setText(fname)
 
+    def _open_hf_model_dialog(self, line_edit: QLineEdit):
+        dlg = HuggingFaceModelDialog(self)
+        if dlg.exec():
+            if dlg.selected_file_path:
+                line_edit.setText(dlg.selected_file_path)
+
     def on_netlist_selected(self):
         """Handle netlist selection with automatic parsing."""
         fname, _ = QFileDialog.getOpenFileName(self, "Select Netlist", "", "Netlist Files (*.cir *.sp)")
@@ -859,6 +867,7 @@ class MainWindow(QMainWindow):
         # Create component ONNX selector widgets
         self.component_onnx_edits = {}
         self.component_onnx_btns = {}
+        self.component_hf_btns = {}
         self.component_onnx_container.setVisible(bool(components))
         if not components:
             return
@@ -883,6 +892,11 @@ class MainWindow(QMainWindow):
             comp_btn.clicked.connect(
                 lambda checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone Files (*.onnx *.s*p *.snp)")
             )
+            comp_hf_btn = QPushButton("Select from HuggingFace")
+            comp_hf_btn.setToolTip("Browse and download ORCA surrogate models from HuggingFace")
+            comp_hf_btn.clicked.connect(
+                lambda checked, edit=comp_edit: self._open_hf_model_dialog(edit)
+            )
             comp_edit.textChanged.connect(
                 lambda text, c=comp_name: self.on_onnx_file_changed(c, text)
             )
@@ -890,6 +904,7 @@ class MainWindow(QMainWindow):
             h_layout = QHBoxLayout()
             h_layout.addWidget(comp_edit)
             h_layout.addWidget(comp_btn)
+            h_layout.addWidget(comp_hf_btn)
             
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
@@ -899,6 +914,7 @@ class MainWindow(QMainWindow):
             self.component_onnx_layout.addWidget(row_widget)
             self.component_onnx_edits[comp_name] = comp_edit
             self.component_onnx_btns[comp_name] = comp_btn
+            self.component_hf_btns[comp_name] = comp_hf_btn
     
     def clear_component_onnx_selectors(self):
         """Remove all component ONNX selectors from the UI."""
@@ -911,6 +927,11 @@ class MainWindow(QMainWindow):
             for btn in self.component_onnx_btns.values():
                 btn.deleteLater()
             self.component_onnx_btns.clear()
+
+        if hasattr(self, 'component_hf_btns'):
+            for btn in self.component_hf_btns.values():
+                btn.deleteLater()
+            self.component_hf_btns.clear()
 
         if hasattr(self, 'component_onnx_container'):
             self.component_onnx_container.setVisible(False)
@@ -933,7 +954,7 @@ class MainWindow(QMainWindow):
         
         try:
             sess = onnxruntime.InferenceSession(path)
-            all_inputs = [clean_name(i.name) for i in sess.get_inputs()]
+            all_inputs = [i.name for i in sess.get_inputs()]
             metadata = sess.get_modelmeta().custom_metadata_map
 
             if not hasattr(self, 'component_inputs'):
