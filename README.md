@@ -132,8 +132,12 @@ The GUI lets you:
 - run/pause/stop optimization,
 - visualize S-parameters and goal losses in real time,
 - optionally enable EM fine-tuning with Palace and select ORCA geometry presets or custom geometry classes.
+- browse, download, and use community surrogate models directly from HuggingFace.
 
-### 2. Python script mode (GUI-free)
+For a more detailed walkthrough of the GUI features, see the [GUI User Guide](#gui-user-guide) section below or [visit the documentation](https://di-passionate.github.io/COBRA/).
+
+
+### 2. Python script mode
 
 Use the provided example:
 
@@ -150,82 +154,49 @@ The example in `examples/main.py` shows how to:
 - configure `OptunaOptimizer` and `XyceSimulator`,
 - run `cobra.run(...)` with optional ORCA geometry (`TransformerOcta`). The ORCA geometry is only required for finetuning.
 
-## Python Usage
+## GUI User Guide
+Coming soon
 
-### Complete example (from `examples/main.py`)
+### Using the HuggingFace Model Browser
+
+The GUI includes a built-in browser for ORCA surrogate models shared on HuggingFace. How to upload your own models to HuggingFace and make them discoverable in COBRA is covered in ORCA's documentation, but the basic convention is to tag your HuggingFace repo with `orca-surrogate` and include the required files (`<repo>.onnx` and optionally `<repo>.py`).
+Each component selector row in the configuration panel has a **HuggingFace** button next to the standard Browse button.
+
+**Browsing and downloading a model:**
+
+1. Click **HuggingFace** for any component.
+2. The dialog opens and immediately shows any models you have already downloaded (marked `[LOCAL]`) at the top of the list.
+3. While the list loads, public models tagged `orca-surrogate` on HuggingFace are fetched in the background and appended once available, sorted by download count.
+4. Select a model to see its details on the right (owner, downloads, likes, tags, description, and whether EM fine-tuning is available).
+5. If the model is not yet local, click **Download** — the repo is saved to `./models/<owner>/<repo>/`.
+6. Once downloaded (or if already local), click **Use** to populate the component's file field with the path to `<repo>.onnx`.
+
+**File convention for shared models:**
+
+COBRA expects each HuggingFace repo to contain at least two files:
+
+| File | Purpose |
+|------|---------|
+| `<repo>.onnx` | The ORCA-generated surrogate model
+| `<repo>.py` | The ORCA geometry class for EM fine-tuning
+
+If the geometry class file is missing, COBRA will disable fine-tuning for that model and show a warning in the details panel. This allows sharing surrogate models e.g. for the default components included with ORCA.
+
+**Using a downloaded model in scripts:**
+
+Downloaded models land in `./models/<owner>/<repo>/` relative to the working directory.
+You can reference them directly in Python scripts:
 
 ```python
 import os
-
-from cobra import (
-    COBRA,
-    DesignGoal,
-    DesignParameter,
-    OptimizationProperty,
-    OptimizationType,
-    OptunaOptimizer,
-    XyceSimulator,
-)
-from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
-from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
-
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-NETLIST_PATH = os.path.join(BASE_DIR, "netlist_multiple_SPFiles.cir")
-ONNX_MODEL_PATH = os.path.join(BASE_DIR, "tf_octa_c_ports.onnx")
-FIXED_TOUCHSTONE_PATH = os.path.join(BASE_DIR, "XYLIN_Trafo_output_predicted.s6p")
-
-
-design_goals = [
-    DesignGoal(DesignParameter.S11_dB, max_value=-9, frequency_range="125-135ghz"),
-    DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
-]
-
-parser = XyceNetlistParser().from_file(NETLIST_PATH)
-
 cobra = COBRA(
     netlist_parser=parser,
     component_onnx_mapping={
-        "X1": str(ONNX_MODEL_PATH),
-        "X2": str(FIXED_TOUCHSTONE_PATH),
+        "X1": "models/UserA/my_transformer/my_transformer.onnx",
     },
-    optimizer=OptunaOptimizer(
-        multi_objective=False,
-        sampler="tpe",
-        pruner="median",
-    ),
-    circuit_simulator=XyceSimulator(),
+    ...
 )
-
-parameters = [
-    OptimizationProperty(name="X1:bottom_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
-    OptimizationProperty(name="X1:top_winding_diameter", type=OptimizationType.MODEL_INPUT, min_value=20.0, max_value=100.0, step=0.1),
-    OptimizationProperty(name="X1:center_displacement", type=OptimizationType.MODEL_INPUT, min_value=0.0, max_value=20.0, step=0.1),
-    OptimizationProperty(name="X1:bottom_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
-    OptimizationProperty(name="X1:top_linewidth", type=OptimizationType.MODEL_INPUT, min_value=2.0, max_value=8.0, step=0.1),
-    OptimizationProperty(name="Cshunt_p", type=OptimizationType.NETLIST_VARIABLE, unit="F", min_value=0.0, max_value=20.0, step=1.0),
-    OptimizationProperty(name="Cshunt_n", type=OptimizationType.NETLIST_VARIABLE, linked_to="Cshunt_p", unit="F", min_value=0.0, max_value=0.0, step=0.0),
-]
-
-context = cobra.run(
-    netlist=str(NETLIST_PATH),
-    design_goals=design_goals,
-    optimization_parameters=parameters,
-    orca_geometry=TransformerOcta(),
-    max_iterations=200,
-    results_name="main_mixed_sources_example",
-)
-
-print(context)
 ```
-
-This example demonstrates, roughly:
-
-- mixed component sources in one run (`X1` as ONNX, `X2` as fixed SNP),
-- component-scoped model optimization via `X1:<param>` names,
-- direct parsed-netlist optimization via `NETLIST_VARIABLE`,
-- linked netlist constraints (`Cshunt_n` always equals `Cshunt_p`),
-- optional ORCA geometry wiring for fine-tuning-ready workflows.
 
 ## Capabilities
 

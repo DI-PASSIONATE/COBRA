@@ -1,18 +1,14 @@
 import json
 from typing import List, Optional
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QComboBox, QLineEdit, 
-    QDoubleSpinBox, QMessageBox
+    QDialog, QDialogButtonBox, QFormLayout, QComboBox, QLineEdit,
+    QDoubleSpinBox, QMessageBox,
 )
 from PySide6.QtGui import QDoubleValidator
 
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from .help_texts import tooltip
-
-def clean_name(name):
-    # Sanitize name if needed
-    return name
 
 class DesignGoalDialog(QDialog):
     def __init__(self, parent=None, goal=None):
@@ -354,3 +350,4 @@ class OptimizationParamDialog(QDialog):
             unit=unit,
             linked_to=linked_to,
         )
+
