@@ -277,7 +277,6 @@ class MainWindow(QMainWindow):
         goal_group = QGroupBox("Design Goals")
         goal_layout = QVBoxLayout(goal_group)
         self.goal_list = QListWidget()
-        self.goal_list.setFixedHeight(100)
         self.goal_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.goal_list.customContextMenuRequested.connect(self.goal_context_menu)
         self.goal_list.doubleClicked.connect(lambda idx: self.edit_goal(self.goal_list.item(idx.row())))
@@ -839,6 +838,8 @@ class MainWindow(QMainWindow):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Netlist", "", "Netlist Files (*.cir *.sp)")
         if fname:
             self.netlist_edit.setText(fname)
+            self.opt_params.clear()
+            self.param_table.setRowCount(0)
             self.parse_and_update_components(fname)
     
     def parse_and_update_components(self, netlist_path: str):
