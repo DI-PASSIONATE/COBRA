@@ -1,5 +1,5 @@
 from cobra.stages.base_stage import COBRABaseStage
-from typing import Any, Dict, cast
+from typing import Any, Dict, Optional, cast
 from concurrent.futures import ProcessPoolExecutor
 import importlib
 import multiprocessing as mp
@@ -56,9 +56,10 @@ class EMFineTuningStage(COBRABaseStage):
         self.palace_executable = palace_executable
 
         
-    def run(self, context: Dict, orca_geometry=None) -> Dict:
+    def run(self, context: Dict, orca_geometry=None, comp_name: Optional[str] = None) -> Dict:
         """
-        Creates a GDS file based on the current parameters, meshes it 
+        Creates a GDS file based on the current parameters, meshes it.
+        If comp_name is provided, only parameters for that component are forwarded.
         """
         from ihp import PDK
         BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
@@ -70,10 +71,23 @@ class EMFineTuningStage(COBRABaseStage):
         
         base_dir = os.path.abspath(context.get("results_dir", os.path.join(os.getcwd(), "results")))
         fine_tuning_run = context.get("fine_tuning_iteration", 0)
-        name = f"cobra_result_ft_{fine_tuning_run}_{context['iteration']}"
+        name_suffix = f"_{comp_name}" if comp_name else ""
+        name = f"cobra_result_ft_{fine_tuning_run}_{context['iteration']}{name_suffix}"
         gds_output_path = os.path.join(base_dir, f"{name}.gds")
         
-        parameters = context["model_parameters"]
+        # Filter parameters for this specific component if comp_name is given
+        all_parameters = context["model_parameters"]
+        if comp_name:
+            prefix = f"{comp_name}:"
+            parameters: Dict[str, Any] = {}
+            for k, v in all_parameters.items():
+                if k.startswith(prefix):
+                    parameters[k[len(prefix):]] = v  # strip component prefix
+                elif ":" not in k:
+                    parameters[k] = v  # shared / unscoped parameter
+        else:
+            parameters = all_parameters
+        
         geometry.create_gds_file(name=name, output_path=gds_output_path, params=parameters)
 
         # !!!
@@ -94,5 +108,7 @@ class EMFineTuningStage(COBRABaseStage):
             future.result()
 
         ntwk = rf.Network(os.path.join(base_dir, f"{name}_dc_deembedded.s6p"))
+        if comp_name:
+            ntwk.name = comp_name
         context["predicted_networks"] = [ntwk]
         return context

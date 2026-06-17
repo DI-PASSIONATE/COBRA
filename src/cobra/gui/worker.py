@@ -14,14 +14,14 @@ class OptimizationWorker(QThread):
 
     def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
                  optimization_parameters: List[OptimizationProperty], 
-                 max_iterations: int, orca_geometry: Optional[Any] = None):
+                 max_iterations: int, orca_geometries: Optional[Any] = None):
         super().__init__()
         self.cobra = cobra_instance
         self.netlist = netlist
         self.design_goals = design_goals
         self.optimization_parameters = optimization_parameters
         self.max_iterations = max_iterations
-        self.orca_geometry = orca_geometry
+        self.orca_geometries = orca_geometries
         self.stop_requested = False
         self.paused = False
 
@@ -70,7 +70,7 @@ class OptimizationWorker(QThread):
                 design_goals=self.design_goals,
                 optimization_parameters=self.optimization_parameters,
                 max_iterations=self.max_iterations,
-                orca_geometry=self.orca_geometry,
+                orca_geometries=self.orca_geometries,
                 callback=optimization_callback
             )
             

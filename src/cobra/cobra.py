@@ -101,7 +101,7 @@ class COBRA:
             "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
         )
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometry=None, callback=None, results_name: Optional[str] = None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: Optional[Dict] = None, callback=None, results_name: Optional[str] = None) -> dict:
         """
         Run the optimization workflow.
 
@@ -112,7 +112,8 @@ class COBRA:
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters 
                                    to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
-        - orca_geometry: Optional geometry information for EM fine-tuning.
+        - orca_geometries: Optional dict mapping component names to ORCA geometry objects for EM
+                           fine-tuning. Only required for ONNX-based (non-Touchstone) components.
         - callback: An optional callback function that takes the current context as an argument. 
                     If the callback returns False, the optimization is stopped.
         - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
@@ -155,7 +156,7 @@ class COBRA:
             "goal_achieved": False,
             "max_iterations": max_iterations,
             "iterations": [],
-            "orca_geometry": orca_geometry,
+            "orca_geometries": orca_geometries or {},
             "results_dir": str(results_dir),
             "times": {
                 "optimizer": 0.0,
@@ -303,8 +304,22 @@ class COBRA:
         """ Perform EM fine-tuning using the EM fine-tuning stage. """
         if self.em_fine_tuning_stage is None:
             raise ValueError("EM fine-tuning stage is not defined. Cannot perform fine-tuning.")
-        elif context.get("orca_geometry", None) is None:
-            raise ValueError("ORCA geometry is not provided in the context. Cannot perform EM fine-tuning without geometry information.")
+
+        orca_geometries = context.get("orca_geometries") or {}
+
+        # Validate that every ONNX-based component has a geometry
+        onnx_components = [
+            comp for comp, is_ts in zip(
+                self.em_surrogate_stage.component_names, self.em_surrogate_stage.is_touchstone
+            )
+            if not is_ts
+        ]
+        missing = [c for c in onnx_components if c not in orca_geometries]
+        if missing:
+            raise ValueError(
+                f"No ORCA geometry provided for component(s): {missing}. "
+                "Cannot perform EM fine-tuning without geometry information."
+            )
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
         fine_tuning_optimizer_stage = self._build_fine_tuning_optimizer_stage()
@@ -317,8 +332,32 @@ class COBRA:
             context["fine_tuning_active"] = True
             context["fine_tuning_iteration"] = iteration + 1
             context["fine_tuning_total"] = self.fine_tuning_iterations
-            # Perform EM simulation INSTEAD OF surrogate model prediction
-            context = self.em_fine_tuning_stage.run(context, orca_geometry=context.get("orca_geometry", None))
+
+            # Build a name→network map from the previous iteration for .snp components
+            prior_networks_by_comp = {
+                ntwk.name: ntwk
+                for ntwk in context.get("predicted_networks", [])
+                if ntwk.name
+            }
+
+            # Run Palace for every ONNX component; carry forward .snp networks unchanged
+            assembled_networks = []
+            for comp_name, is_ts in zip(
+                self.em_surrogate_stage.component_names, self.em_surrogate_stage.is_touchstone
+            ):
+                if is_ts:
+                    ntwk = prior_networks_by_comp.get(comp_name)
+                    if ntwk is not None:
+                        assembled_networks.append(ntwk)
+                else:
+                    context = self.em_fine_tuning_stage.run(
+                        context,
+                        orca_geometry=orca_geometries[comp_name],
+                        comp_name=comp_name,
+                    )
+                    assembled_networks.append(context["predicted_networks"][0])
+
+            context["predicted_networks"] = assembled_networks
 
             # Perform circuit-level simulation
             context = self.circuit_simulation_stage.run(context)
@@ -332,7 +371,7 @@ class COBRA:
                     print("Fine Tuning stopped by callback.")
                     break
 
-            # If design goals are achieved, break the loop and don't tell the optimizer about the results → fine-tune
+            # If design goals are achieved, break the loop
             if context["goal_achieved"]:
                 print(f"Design goals achieved after EM fine-tuning at iteration {iteration}.")
                 break

@@ -29,6 +29,7 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
+from .geometry_selector import GeometrySelectorWidget
 from .hf_model_browser import HuggingFaceModelDialog
 from .help_texts import TUTORIAL_HTML, tooltip
 from .theme import apply_theme
@@ -196,39 +197,13 @@ class MainWindow(QMainWindow):
         self.ft_optimizer_combo.setToolTip(tooltip("ft_optimizer_combo"))
         self.config_form_layout.addRow(self.ft_optimizer_label, self.ft_optimizer_combo)
 
-        self.geometry_group = QGroupBox("ORCA Geometry")
-        geometry_group_layout = QVBoxLayout(self.geometry_group)
+        self.component_geometry_container = QWidget()
+        self.component_geometry_layout = QVBoxLayout(self.component_geometry_container)
+        self.component_geometry_layout.setContentsMargins(0, 0, 0, 0)
+        self.component_geometry_layout.setSpacing(6)
+        self.component_geometry_container.setVisible(False)
+        self.component_geometry_selectors: Dict[str, GeometrySelectorWidget] = {}
 
-        self.geometry_form_layout = QFormLayout()
-
-        self.geometry_source_label = QLabel("Geometry Source:")
-        self.geometry_source_combo = QComboBox()
-        self.geometry_source_combo.addItem("ORCA Preset", "preset")
-        self.geometry_source_combo.addItem("Custom Python File", "custom")
-        self.geometry_form_layout.addRow(self.geometry_source_label, self.geometry_source_combo)
-
-        self.geometry_preset_label = QLabel("Preset:")
-        self.geometry_preset_combo = QComboBox()
-        self.geometry_form_layout.addRow(self.geometry_preset_label, self.geometry_preset_combo)
-
-        self.geometry_file_label = QLabel("Custom File:")
-        self.geometry_file_edit = QLineEdit()
-        self.geometry_file_btn = QPushButton("Browse")
-        self.geometry_file_btn.setToolTip(tooltip("geometry_file_btn"))
-        self.geometry_file_btn.clicked.connect(self.browse_geometry_file)
-        self.geometry_file_widget = QWidget()
-        geometry_file_layout = QHBoxLayout(self.geometry_file_widget)
-        geometry_file_layout.setContentsMargins(0, 0, 0, 0)
-        geometry_file_layout.addWidget(self.geometry_file_edit)
-        geometry_file_layout.addWidget(self.geometry_file_btn)
-        self.geometry_form_layout.addRow(self.geometry_file_label, self.geometry_file_widget)
-
-        self.geometry_class_label = QLabel("Geometry Class:")
-        self.geometry_class_combo = QComboBox()
-        self.geometry_form_layout.addRow(self.geometry_class_label, self.geometry_class_combo)
-
-        geometry_group_layout.addLayout(self.geometry_form_layout)
-        
         # Disable fine-tuning fields by default
         self.palace_label.setVisible(False)
         self.palace_edit.setVisible(False)
@@ -236,11 +211,9 @@ class MainWindow(QMainWindow):
         self.ft_iter_spin.setVisible(False)
         self.ft_optimizer_label.setVisible(False)
         self.ft_optimizer_combo.setVisible(False)
-        self.geometry_group.setVisible(False)
-        
-        # If fine-tuning is toggled, show palace command and ORCA geometry fields
+
+        # If fine-tuning is toggled, show palace command and per-component geometry selectors
         self.finetune_cb.toggled.connect(self.on_finetune_toggled)
-        self.geometry_source_combo.currentIndexChanged.connect(self.update_geometry_source)
 
         self.config_scroll_area = QScrollArea()
         self.config_scroll_area.setWidgetResizable(True)
@@ -251,7 +224,7 @@ class MainWindow(QMainWindow):
         self.config_scroll_layout = QVBoxLayout(self.config_scroll_widget)
         self.config_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.config_scroll_layout.addLayout(self.config_form_layout)
-        self.config_scroll_layout.addWidget(self.geometry_group)
+        self.config_scroll_layout.addWidget(self.component_geometry_container)
         self.config_scroll_layout.addStretch()
         self.config_scroll_area.setWidget(self.config_scroll_widget)
         
@@ -369,16 +342,12 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.loss_history = {} # key: goal index, value: list of losses
         self.overlay_items = []
-        self.orca_preset_classes: Dict[str, type] = {}
-        self.custom_geometry_classes: Dict[str, type] = {}
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
         
         apply_theme(self)
         self._set_action_button_state("start")
         self.update_simulator_options()
-        self.reload_orca_preset_geometries(show_errors=False)
-        self.update_geometry_source()
         self.set_active_panel("config")
 
     def _refresh_widget_style(self, widget: QWidget):
@@ -690,137 +659,7 @@ class MainWindow(QMainWindow):
         self.ft_iter_spin.setVisible(checked)
         self.ft_optimizer_label.setVisible(checked)
         self.ft_optimizer_combo.setVisible(checked)
-        self.geometry_group.setVisible(checked)
-
-        if checked and self.geometry_source_combo.currentData() == "preset" and self.geometry_preset_combo.count() == 0:
-            self.reload_orca_preset_geometries()
-
-    def browse_geometry_file(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "Select Geometry File", "", "Python Files (*.py)")
-        if not fname:
-            return
-
-        self.geometry_file_edit.setText(fname)
-        self.load_custom_geometry_classes(fname)
-
-    def reload_orca_preset_geometries(self, show_errors: bool = True):
-        current_label = self.geometry_preset_combo.currentText()
-        self.geometry_preset_combo.blockSignals(True)
-        self.geometry_preset_combo.clear()
-        self.orca_preset_classes = {}
-
-        try:
-            BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-            presets = importlib.import_module("orca.geometry.presets")
-
-            discovered_classes = []
-            for _, module_name, _ in pkgutil.iter_modules(presets.__path__):
-                module = importlib.import_module(f"orca.geometry.presets.{module_name}")
-                for class_name, cls in inspect.getmembers(module, inspect.isclass):
-                    if cls is BaseGeometry or not issubclass(cls, BaseGeometry):
-                        continue
-                    if cls.__module__ != module.__name__:
-                        continue
-
-                    label = class_name
-                    if label in self.orca_preset_classes:
-                        label = f"{class_name} ({module_name})"
-                    discovered_classes.append((label, cls))
-
-            for label, cls in sorted(discovered_classes, key=lambda item: item[0].lower()):
-                self.orca_preset_classes[label] = cls
-                self.geometry_preset_combo.addItem(label, cls)
-
-            if current_label:
-                index = self.geometry_preset_combo.findText(current_label)
-                if index >= 0:
-                    self.geometry_preset_combo.setCurrentIndex(index)
-        except Exception as exc:
-            if show_errors:
-                QMessageBox.critical(self, "ORCA Geometry", f"Failed to load ORCA preset geometries:\n{exc}")
-        finally:
-            self.geometry_preset_combo.blockSignals(False)
-
-    def load_custom_geometry_classes(self, file_path: str, show_errors: bool = True) -> bool:
-        self.geometry_class_combo.blockSignals(True)
-        self.geometry_class_combo.clear()
-        self.custom_geometry_classes = {}
-
-        if not file_path:
-            self.geometry_class_combo.blockSignals(False)
-            return False
-
-        try:
-            BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-
-            abs_path = os.path.abspath(file_path)
-            if not os.path.isfile(abs_path):
-                raise FileNotFoundError(f"Geometry file not found: {abs_path}")
-
-            module_name = f"cobra_custom_geometry_{abs(hash(abs_path))}"
-            spec = importlib.util.spec_from_file_location(module_name, abs_path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Unable to load geometry module from {abs_path}")
-
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            classes = []
-            for class_name, cls in inspect.getmembers(module, inspect.isclass):
-                if cls is BaseGeometry or not issubclass(cls, BaseGeometry):
-                    continue
-                if cls.__module__ != module.__name__:
-                    continue
-                classes.append((class_name, cls))
-
-            if not classes:
-                raise ValueError("No classes extending BaseGeometry were found in the selected file.")
-
-            for class_name, cls in sorted(classes, key=lambda item: item[0].lower()):
-                self.custom_geometry_classes[class_name] = cls
-                self.geometry_class_combo.addItem(class_name, cls)
-
-            return True
-        except Exception as exc:
-            if show_errors:
-                QMessageBox.critical(self, "ORCA Geometry", f"Failed to load custom geometry:\n{exc}")
-            return False
-        finally:
-            self.geometry_class_combo.blockSignals(False)
-
-    def update_geometry_source(self):
-        source = self.geometry_source_combo.currentData()
-        use_preset = source == "preset"
-
-        self.geometry_preset_label.setVisible(use_preset)
-        self.geometry_preset_combo.setVisible(use_preset)
-        self.geometry_file_label.setVisible(not use_preset)
-        self.geometry_file_widget.setVisible(not use_preset)
-        self.geometry_class_label.setVisible(not use_preset)
-        self.geometry_class_combo.setVisible(not use_preset)
-
-        if use_preset and self.geometry_preset_combo.count() == 0:
-            self.reload_orca_preset_geometries()
-        elif not use_preset and self.geometry_class_combo.count() == 0 and self.geometry_file_edit.text().strip():
-            self.load_custom_geometry_classes(self.geometry_file_edit.text().strip(), show_errors=False)
-
-    def get_selected_geometry_class(self) -> Optional[type]:
-        if self.geometry_source_combo.currentData() == "preset":
-            return self.geometry_preset_combo.currentData()
-        return self.geometry_class_combo.currentData()
-
-    def create_orca_geometry(self):
-        if self.geometry_source_combo.currentData() == "custom":
-            file_path = self.geometry_file_edit.text().strip()
-            if not file_path:
-                raise ValueError("Please select a custom geometry Python file.")
-            self.load_custom_geometry_classes(file_path)
-
-        geometry_cls = self.get_selected_geometry_class()
-        if geometry_cls is None:
-            raise ValueError("Please select an ORCA geometry class.")
-
-        return geometry_cls()
+        self._update_geometry_selectors_visibility()
 
     def browse_file(self, line_edit, filter):
         fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", filter)
@@ -832,6 +671,32 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             if dlg.selected_file_path:
                 line_edit.setText(dlg.selected_file_path)
+
+    @staticmethod
+    def _is_touchstone_path(path: str) -> bool:
+        lower = path.lower()
+        return lower.endswith(tuple(f".s{i}p" for i in range(1, 10)) + (".snp",))
+
+    def _update_geometry_selectors_visibility(self):
+        """Show a geometry selector for each ONNX component when fine-tuning is enabled."""
+        checked = self.finetune_cb.isChecked()
+        any_visible = False
+        for comp_name, selector in self.component_geometry_selectors.items():
+            edit = self.component_onnx_edits.get(comp_name)
+            path = edit.text().strip() if edit else ""
+            show = checked and bool(path) and not self._is_touchstone_path(path)
+            selector.setVisible(show)
+            if show:
+                any_visible = True
+        self.component_geometry_container.setVisible(any_visible)
+
+    def create_orca_geometries(self) -> Dict[str, object]:
+        """Instantiate and return a geometry for every visible ONNX-component selector."""
+        geometries: Dict[str, object] = {}
+        for comp_name, selector in self.component_geometry_selectors.items():
+            if selector.isVisible():
+                geometries[comp_name] = selector.get_geometry()
+        return geometries
 
     def on_netlist_selected(self):
         """Handle netlist selection with automatic parsing."""
@@ -916,7 +781,19 @@ class MainWindow(QMainWindow):
             self.component_onnx_edits[comp_name] = comp_edit
             self.component_onnx_btns[comp_name] = comp_btn
             self.component_hf_btns[comp_name] = comp_hf_btn
-    
+
+        # Create a geometry selector for each component (shown only when fine-tuning is enabled
+        # and the component uses an ONNX surrogate rather than a fixed .snp file)
+        self.component_geometry_selectors = {}
+        for comp_name in sorted(components.keys()):
+            selector = GeometrySelectorWidget(f"ORCA Geometry for {comp_name}", parent=self)
+            selector.setVisible(False)
+            self.component_geometry_selectors[comp_name] = selector
+            self.component_geometry_layout.addWidget(selector)
+
+        # Re-evaluate visibility in case fine-tuning is already enabled
+        self._update_geometry_selectors_visibility()
+
     def clear_component_onnx_selectors(self):
         """Remove all component ONNX selectors from the UI."""
         if hasattr(self, 'component_onnx_edits'):
@@ -946,10 +823,21 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, 'component_inputs'):
             self.component_inputs.clear()
-    #
+
+        # Clear geometry selectors
+        if hasattr(self, 'component_geometry_selectors'):
+            for selector in self.component_geometry_selectors.values():
+                self.component_geometry_layout.removeWidget(selector)
+                selector.deleteLater()
+            self.component_geometry_selectors.clear()
+        if hasattr(self, 'component_geometry_container'):
+            self.component_geometry_container.setVisible(False)
     
     def on_onnx_file_changed(self, comp_name: str, path: str):
         path = path.strip()
+        # Always refresh geometry selector visibility when file selection changes
+        self._update_geometry_selectors_visibility()
+
         if not path or not os.path.exists(path):
             return
         
@@ -1219,10 +1107,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Components Found", "No surrogatecomponents (X instances) found in netlist.")
             return
 
-        orca_geometry = None
+        orca_geometries = {}
         if self.finetune_cb.isChecked():
             try:
-                orca_geometry = self.create_orca_geometry()
+                orca_geometries = self.create_orca_geometries()
             except Exception as exc:
                 QMessageBox.critical(self, "ORCA Geometry", str(exc))
                 return
@@ -1275,7 +1163,7 @@ class MainWindow(QMainWindow):
         self.worker = OptimizationWorker(
             cobra, netlist, self.goals, 
             self.opt_params, self.max_iter_spin.value(),
-            orca_geometry
+            orca_geometries
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
