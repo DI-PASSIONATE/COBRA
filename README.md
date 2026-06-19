@@ -9,7 +9,7 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 
 ° Chair of Integrated Electronic Systems, Otto-von-Guericke-University Magdeburg, Germany
 
-[Paper (Coming Soon)](#cite-this-work) | [Documentation](docs/index.md) | [BibTex](#cite-this-work)
+[Paper (Coming Soon)](#cite-this-work) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
 
 > [!NOTE]
 > COBRA is still under active development, and the paper is yet to be released. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DI-PASSIONATE/COBRA/issues) or reach out.
