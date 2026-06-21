@@ -92,13 +92,14 @@ class DesignGoalDialog(QDialog):
 
     def get_data(self):
         p_name = self.param_combo.currentText()
-        # Try to resolve to a DesignParameter enum member first.
+        # Try to resolve to a DesignParameter enum member first (lumped params).
+        # S-parameter strings (e.g. "S21_dB") are kept as plain strings.
         param = None
         for p in DesignParameter:
             if p.value == p_name:
                 param = p
                 break
-        # Fall back to plain string for dynamically generated parameters (e.g. "S31_dB").
+        # Fall back to plain string for S-parameter goals and any future types.
         if param is None:
             param = p_name
             

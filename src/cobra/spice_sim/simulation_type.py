@@ -86,10 +86,11 @@ class SimulationType(Enum):
             if num_ports < 1:
                 return []
             params: List[str] = []
-            # S-parameters in natural order (S11, S12, …, SNN)
+            # S-parameters: dB magnitude and linear magnitude, in natural order
             for i in range(1, num_ports + 1):
                 for j in range(1, num_ports + 1):
                     params.append(f"S{i}{j}_dB")
+                    params.append(f"S{i}{j}")
             # Single-port lumped parameters (need at least 1 port)
             params += ["Lp", "Rp", "Qp", "SRF"]
             # Two-port lumped parameters (secondary winding / coupling)

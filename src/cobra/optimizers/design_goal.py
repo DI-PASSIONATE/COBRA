@@ -1,4 +1,5 @@
 from enum import Enum
+import re
 from typing import Dict, Optional, Union
 import numpy as np
 import skrf as rf
@@ -6,12 +7,11 @@ import matplotlib.pyplot as plt
 
 
 class DesignParameter(Enum):
-    S11_dB = "S11_dB"
-    S21_dB = "S21_dB"
-    S31_dB = "S31_dB"
-    S41_dB = "S41_dB"
-    S12_dB = "S12_dB"
-    S22_dB = "S22_dB"
+    """
+    Lumped electrical parameters that require specific calculation logic.
+    S-parameter goals (e.g. S11_dB, S21_dB) are expressed as plain strings
+    and generated dynamically from the netlist port count.
+    """
     Lp = "Lp"
     Ls = "Ls"
     Rp = "Rp"
@@ -20,7 +20,7 @@ class DesignParameter(Enum):
     Qs = "Qs"
     k = "k"
     SRF = "SRF"
-    COMING_SOON = "CUSTOM"  # Placeholder for future custom metrics that may be added
+    COMING_SOON = "CUSTOM"  # Placeholder for future custom metrics
 
 class DesignGoal:
     """
@@ -162,15 +162,22 @@ class DesignGoalChecker:
                 # Or invalid frequency strings. We re-raise with context.
                 raise ValueError(f"Invalid frequency range format: '{frequency_range}'. Expected format e.g. '10-20ghz'.")
 
-        # Resolve to a plain string so we can do string-based dispatch
+        # Resolve to a plain string so we can do string-based dispatch everywhere.
         param_name = parameter.value if isinstance(parameter, DesignParameter) else str(parameter)
 
-        if param_name.startswith("S") and param_name.endswith("_dB"):
-            # Extract port indices from parameter name, e.g., S21_dB -> i=2, j=1
-            i, j = int(param_name[1]), int(param_name[2])
-            return ntwk.s_db[:, i-1, j-1]  # Convert to 0-based index
+        # S{i}{j}_dB  — magnitude in dB
+        m = re.match(r"^S(\d+)(\d+)_dB$", param_name, re.IGNORECASE)
+        if m:
+            i, j = int(m.group(1)), int(m.group(2))
+            return ntwk.s_db[:, i - 1, j - 1]
+
+        # S{i}{j}  — linear magnitude |S_{ij}|
+        m = re.match(r"^S(\d+)(\d+)$", param_name, re.IGNORECASE)
+        if m:
+            i, j = int(m.group(1)), int(m.group(2))
+            return np.abs(ntwk.s[:, i - 1, j - 1])
         else:
-            # For lumped parameters, we need to calculate them from the Z-parameters
+            # Lumped parameters — require Z-matrix conversion.
             mm_ntwk = ntwk.copy()
             if mm_ntwk.nports >= 4:
                 mm_ntwk.se2gmm(p=2)
@@ -178,24 +185,24 @@ class DesignGoalChecker:
             z_d11 = mm_ntwk.z[:, 0, 0]
             z_d22 = mm_ntwk.z[:, 1, 1]
             z_d21 = mm_ntwk.z[:, 1, 0]
-            freq_ghz = ntwk.f / 1e9  # Convert to GHz
-            omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians
+            freq_ghz = ntwk.f / 1e9
+            omega = 2 * np.pi * mm_ntwk.f
 
-            if parameter == DesignParameter.Lp or param_name == "Lp":
+            if param_name == "Lp":
                 return np.imag(z_d11) / omega * 1e9
-            elif parameter == DesignParameter.Ls or param_name == "Ls":
+            elif param_name == "Ls":
                 return np.imag(z_d22) / omega * 1e9
-            elif parameter == DesignParameter.Rp or param_name == "Rp":
+            elif param_name == "Rp":
                 return np.real(z_d11)
-            elif parameter == DesignParameter.Rs or param_name == "Rs":
+            elif param_name == "Rs":
                 return np.real(z_d22)
-            elif parameter == DesignParameter.Qp or param_name == "Qp":
+            elif param_name == "Qp":
                 return np.imag(z_d11) / np.real(z_d11)
-            elif parameter == DesignParameter.Qs or param_name == "Qs":
+            elif param_name == "Qs":
                 return np.imag(z_d22) / np.real(z_d22)
-            elif parameter == DesignParameter.k or param_name == "k":
+            elif param_name == "k":
                 return np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
-            elif parameter == DesignParameter.SRF or param_name == "SRF":
+            elif param_name == "SRF":
                 srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
                 return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
             elif parameter == DesignParameter.COMING_SOON:
