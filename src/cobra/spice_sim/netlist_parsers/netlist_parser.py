@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Set, Union
 from pathlib import Path
 import skrf as rf
 
+from cobra.spice_sim.simulation_type import SimulationType
+
 
 @dataclass
 class NetlistElement:
@@ -46,6 +48,8 @@ class BaseNetlistParser(ABC):
         self._includes: List[Include] = []               # .INCLUDE directives
         self._inline_subckt_names: Set[str] = set()      # .SUBCKT names defined within this file
         self.netlist_path: Optional[Union[str, Path]] = None
+        self._simulation_type: SimulationType = SimulationType.UNKNOWN
+        self._num_ports: int = 0
 
     # -------------------------------------------------------------------------
     # Factory / loader methods
@@ -70,6 +74,8 @@ class BaseNetlistParser(ABC):
         self._components.clear()
         self._includes.clear()
         self._inline_subckt_names.clear()
+        self._simulation_type = SimulationType.UNKNOWN
+        self._num_ports = 0
 
     # -------------------------------------------------------------------------
     # Serialisation
@@ -116,6 +122,24 @@ class BaseNetlistParser(ABC):
     def includes(self) -> List[Include]:
         """List of .INCLUDE directives found in the netlist."""
         return self._includes.copy()
+
+    @property
+    def simulation_type(self) -> SimulationType:
+        """The primary analysis type detected in the netlist (e.g. LIN, AC, HB)."""
+        return self._simulation_type
+
+    @property
+    def num_ports(self) -> int:
+        """Number of port elements (P-instances) found in the netlist."""
+        return self._num_ports
+
+    @property
+    def available_design_parameters(self) -> List[str]:
+        """
+        Convenience shortcut: the design parameters available for the current
+        simulation type and port count.
+        """
+        return self._simulation_type.available_parameters(self._num_ports)
 
     # -------------------------------------------------------------------------
     # Mutators (registration helpers)

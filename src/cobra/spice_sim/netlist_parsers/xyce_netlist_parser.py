@@ -7,6 +7,7 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import (
     Include,
     NetlistElement,
 )
+from cobra.spice_sim.simulation_type import SimulationType
 
 
 class XyceNetlistParser(BaseNetlistParser):
@@ -45,6 +46,9 @@ class XyceNetlistParser(BaseNetlistParser):
 
     # TSTONEFILE=... on a LIN model marks a Qucs-S surrogate placeholder.
     _tstonefile_re   = re.compile(r"\bTSTONEFILE\s*=\s*([^\s]+)",    re.IGNORECASE)
+
+    # Dot-directives that identify the primary simulation type.
+    _sim_directive_re = re.compile(r"^\s*(\.(?:LIN|AC|HB|TRAN|DC))\b", re.IGNORECASE)
 
     # .INCLUDE directives that reference fitted-subcircuit files.
     _include_re      = re.compile(
@@ -253,6 +257,20 @@ class XyceNetlistParser(BaseNetlistParser):
                 )
                 continue
 
+            # Detect the primary simulation / analysis directive.
+            # .LIN (S-parameter extraction) takes priority over .AC because
+            # the two often coexist: .AC drives the sweep and .LIN enables
+            # Touchstone/S-parameter output. .LIN is the more specific indicator.
+            m_sim = self._sim_directive_re.match(stripped)
+            if m_sim:
+                detected = SimulationType.from_directive(m_sim.group(1))
+                if detected is SimulationType.LIN:
+                    # .LIN always wins – it is more specific than a plain .AC sweep.
+                    self._simulation_type = SimulationType.LIN
+                elif self._simulation_type is SimulationType.UNKNOWN:
+                    # First non-LIN directive wins only if nothing has been set yet.
+                    self._simulation_type = detected
+
             # Other dot-directives are preserved in the text but not parsed.
             if stripped.startswith("."):
                 continue
@@ -298,6 +316,10 @@ class XyceNetlistParser(BaseNetlistParser):
                     model=model if model else "",
                     params=params,
                 )
+
+            # Count P-elements as netlist ports.
+            if etype == "P":
+                self._num_ports += 1
 
     # -------------------------------------------------------------------------
     # Private: Qucs-S TSTONEFILE → X-subcircuit normalisation

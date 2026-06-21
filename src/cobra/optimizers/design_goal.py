@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import numpy as np
 import skrf as rf
 import matplotlib.pyplot as plt
@@ -27,13 +27,20 @@ class DesignGoal:
     DesignGoal - This class represents a single design goal for the optimization process. It includes a minimum and maximum in a given frequency range
     """
 
-    def __init__(self, parameter: DesignParameter, frequency_range: Optional[str] = None, min_value: Optional[float] = None, max_value: Optional[float] = None, weight: float = 1.0):
+    def __init__(self, parameter: Union[DesignParameter, str], frequency_range: Optional[str] = None, min_value: Optional[float] = None, max_value: Optional[float] = None, weight: float = 1.0):
         self.parameter = parameter
         self.frequency_range = frequency_range
         self.min_value = min_value
         self.max_value = max_value
         self.weight = weight
         self._eps = 1e-9  # Small epsilon to prevent division by zero in penalty calculation
+
+    @property
+    def parameter_name(self) -> str:
+        """Return the string name of the parameter, regardless of whether it is an enum or a plain string."""
+        if isinstance(self.parameter, DesignParameter):
+            return self.parameter.value
+        return str(self.parameter)
 
     def penalty(self, values: np.ndarray) -> float:
         """
@@ -118,7 +125,7 @@ class DesignGoalChecker:
     def __str__(self):
         goal_strs = []
         for goal in self.design_goals:
-            goal_strs.append(f"{goal.parameter.value}: [{goal.min_value}, {goal.max_value}] in {goal.frequency_range if goal.frequency_range else 'full range'} (weight: {goal.weight})")
+            goal_strs.append(f"{goal.parameter_name}: [{goal.min_value}, {goal.max_value}] in {goal.frequency_range if goal.frequency_range else 'full range'} (weight: {goal.weight})")
         return "Design Goals:" + " | ".join(goal_strs)
     
     def loss(self, ntwk: rf.Network) -> tuple[Dict, list[float]]:
@@ -137,13 +144,13 @@ class DesignGoalChecker:
 
         for goal in self.design_goals:
             parameter_values = self.calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
-            design_state[goal.parameter.value] = parameter_values
+            design_state[goal.parameter_name] = parameter_values
             if parameter_values is None:
-                raise ValueError(f"Design state does not contain value for parameter {goal.parameter.value}")
+                raise ValueError(f"Design state does not contain value for parameter {goal.parameter_name}")
             penalties.append(goal.penalty(parameter_values) * goal.weight)
         return design_state, penalties
 
-    def calculate_parameter(self, ntwk: rf.Network, parameter: DesignParameter, frequency_range: str | None = None, custom_func_coming_soon=None) -> np.ndarray:
+    def calculate_parameter(self, ntwk: rf.Network, parameter: Union[DesignParameter, str], frequency_range: str | None = None, custom_func_coming_soon=None) -> np.ndarray:
         """
         Calculates a specific electrical parameter from the S-parameters of the given network within the specified frequency range.
         """
@@ -154,10 +161,13 @@ class DesignGoalChecker:
                 # skrf might fail with "could not convert string to float: ''" for malformed ranges like "10-"
                 # Or invalid frequency strings. We re-raise with context.
                 raise ValueError(f"Invalid frequency range format: '{frequency_range}'. Expected format e.g. '10-20ghz'.")
-                
-        if parameter.value.startswith("S") and parameter.value.endswith("_dB"):
+
+        # Resolve to a plain string so we can do string-based dispatch
+        param_name = parameter.value if isinstance(parameter, DesignParameter) else str(parameter)
+
+        if param_name.startswith("S") and param_name.endswith("_dB"):
             # Extract port indices from parameter name, e.g., S21_dB -> i=2, j=1
-            i, j = int(parameter.value[1]), int(parameter.value[2])
+            i, j = int(param_name[1]), int(param_name[2])
             return ntwk.s_db[:, i-1, j-1]  # Convert to 0-based index
         else:
             # For lumped parameters, we need to calculate them from the Z-parameters
@@ -171,24 +181,24 @@ class DesignGoalChecker:
             freq_ghz = ntwk.f / 1e9  # Convert to GHz
             omega = 2 * np.pi * mm_ntwk.f  # Angular frequency in radians
 
-            if parameter == DesignParameter.Lp:
+            if parameter == DesignParameter.Lp or param_name == "Lp":
                 return np.imag(z_d11) / omega * 1e9
-            elif parameter == DesignParameter.Ls:
+            elif parameter == DesignParameter.Ls or param_name == "Ls":
                 return np.imag(z_d22) / omega * 1e9
-            elif parameter == DesignParameter.Rp:
+            elif parameter == DesignParameter.Rp or param_name == "Rp":
                 return np.real(z_d11)
-            elif parameter == DesignParameter.Rs:
+            elif parameter == DesignParameter.Rs or param_name == "Rs":
                 return np.real(z_d22)
-            elif parameter == DesignParameter.Qp:
+            elif parameter == DesignParameter.Qp or param_name == "Qp":
                 return np.imag(z_d11) / np.real(z_d11)
-            elif parameter == DesignParameter.Qs:
+            elif parameter == DesignParameter.Qs or param_name == "Qs":
                 return np.imag(z_d22) / np.real(z_d22)
-            elif parameter == DesignParameter.k:
+            elif parameter == DesignParameter.k or param_name == "k":
                 return np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
-            elif parameter == DesignParameter.SRF:
+            elif parameter == DesignParameter.SRF or param_name == "SRF":
                 srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
                 return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
             elif parameter == DesignParameter.COMING_SOON:
                 return custom_func_coming_soon(ntwk)
             else:
-                raise ValueError(f"Unsupported design parameter: {parameter.value}")
+                raise ValueError(f"Unsupported design parameter: {param_name}")

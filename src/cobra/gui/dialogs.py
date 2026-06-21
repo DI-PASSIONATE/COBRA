@@ -11,18 +11,15 @@ from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from .help_texts import tooltip
 
 class DesignGoalDialog(QDialog):
-    def __init__(self, parent=None, goal=None):
+    def __init__(self, parent=None, goal=None, available_parameters: Optional[List[str]] = None):
         super().__init__(parent)
         self.setWindowTitle("Design Goal")
         self.setMinimumWidth(400)
         self.form_layout = QFormLayout(self)
         
         self.param_combo = QComboBox()
-        # Populate with DesignParameters + common metrics if implied
-        common_params = [p.value for p in DesignParameter]
-        # Remove duplicates
-        common_params = sorted(list(set(common_params)))
-        self.param_combo.addItems(common_params)
+        if available_parameters:
+            self.param_combo.addItems(available_parameters)
         
         self.weight_edit = QLineEdit()
         self.weight_edit.setPlaceholderText("Default: 1.0")
@@ -56,7 +53,12 @@ class DesignGoalDialog(QDialog):
         self._raw_frequency_range = None
         
         if goal:
-            self.param_combo.setCurrentText(goal.parameter.value)
+            p_name = goal.parameter_name
+            # If the goal's parameter isn't in the combo (e.g. netlist was changed),
+            # add it at the top so the existing goal can still be viewed/edited.
+            if self.param_combo.findText(p_name) == -1:
+                self.param_combo.insertItem(0, p_name)
+            self.param_combo.setCurrentText(p_name)
             if goal.min_value is not None:
                 self.min_edit.setText(str(goal.min_value))
             if goal.max_value is not None:
@@ -90,14 +92,15 @@ class DesignGoalDialog(QDialog):
 
     def get_data(self):
         p_name = self.param_combo.currentText()
+        # Try to resolve to a DesignParameter enum member first.
         param = None
         for p in DesignParameter:
             if p.value == p_name:
                 param = p
                 break
-        
+        # Fall back to plain string for dynamically generated parameters (e.g. "S31_dB").
         if param is None:
-            raise ValueError(f"Selected parameter '{p_name}' is not a valid DesignParameter.")
+            param = p_name
             
 
         min_val = float(self.min_edit.text()) if self.min_edit.text() else None

@@ -26,6 +26,7 @@ from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationTy
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+from cobra.spice_sim.simulation_type import SimulationType
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
@@ -130,6 +131,15 @@ class MainWindow(QMainWindow):
         h_net.addWidget(self.netlist_edit)
         h_net.addWidget(self.netlist_btn)
         self.config_form_layout.addRow(self.netlist_label, h_net)
+
+        self.sim_type_label = QLabel("Simulation Type:")
+        self.sim_type_value_label = QLabel("—")
+        self.sim_type_value_label.setToolTip(
+            "The primary analysis directive detected in the netlist "
+            "(e.g. .LIN, .AC, .HB, .TRAN).\n"
+            "This determines which design parameters are available."
+        )
+        self.config_form_layout.addRow(self.sim_type_label, self.sim_type_value_label)
 
         self.component_onnx_container = QWidget()
         self.component_onnx_layout = QVBoxLayout(self.component_onnx_container)
@@ -344,6 +354,7 @@ class MainWindow(QMainWindow):
         self.overlay_items = []
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
+        self._available_parameters: List[str] = []  # populated from netlist on load
         
         apply_theme(self)
         self._set_action_button_state("start")
@@ -443,7 +454,7 @@ class MainWindow(QMainWindow):
         specs: List[tuple[str, int, int]] = []
         seen = set()
         for goal in self.goals:
-            p_name = goal.parameter.value
+            p_name = goal.parameter_name
             match = re.match(r"^S\s*(?:\(\s*(\d)\s*,\s*(\d)\s*\)|(\d)(\d))(?:\b|_)", p_name, re.IGNORECASE)
             if not match:
                 continue
@@ -708,11 +719,21 @@ class MainWindow(QMainWindow):
             self.parse_and_update_components(fname)
     
     def parse_and_update_components(self, netlist_path: str):
-        """Parse netlist and update UI with detected components."""
+        """Parse netlist and update UI with detected components, simulation type and port count."""
         try:
             parser = XyceNetlistParser().from_file(netlist_path)
             components = parser.components
-            
+
+            # Update simulation type display and available parameter list
+            sim_type = parser.simulation_type
+            num_ports = parser.num_ports
+            self._available_parameters = parser.available_design_parameters
+
+            sim_label = sim_type.display_name
+            if num_ports > 0:
+                sim_label += f"  ({num_ports} port{'s' if num_ports != 1 else ''})"
+            self.sim_type_value_label.setText(sim_label)
+
             if components:
                 # New workflow: show component-based ONNX/Touchstone selectors
                 self.update_component_onnx_selectors(components, netlist_path)
@@ -993,7 +1014,15 @@ class MainWindow(QMainWindow):
         self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
 
     def add_design_goal(self):
-        dlg = DesignGoalDialog(self)
+        if not self._available_parameters:
+            QMessageBox.information(
+                self,
+                "Load a Netlist First",
+                "Please select a netlist file so that COBRA can determine the "
+                "available design parameters for your simulation type and port count.",
+            )
+            return
+        dlg = DesignGoalDialog(self, available_parameters=self._available_parameters)
         if dlg.exec():
             goal = dlg.get_data()
             self._add_goal_to_list(goal)
@@ -1015,7 +1044,7 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self.goals): return
         
         goal = self.goals[row]
-        dlg = DesignGoalDialog(self, goal=goal)
+        dlg = DesignGoalDialog(self, goal=goal, available_parameters=self._available_parameters if self._available_parameters else None)
         if dlg.exec():
             new_goal = dlg.get_data()
             self.goals[row] = new_goal
@@ -1048,7 +1077,7 @@ class MainWindow(QMainWindow):
         item.setText(self._goal_label(goal))
     
     def _goal_label(self, goal):
-        label = f"{goal.parameter.value} "
+        label = f"{goal.parameter_name} "
         if goal.min_value is not None: label += f"> {goal.min_value} "
         if goal.max_value is not None: label += f"< {goal.max_value}"
         if goal.frequency_range: label += f" @ {goal.frequency_range}"
