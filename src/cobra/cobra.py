@@ -1,4 +1,5 @@
 from typing import List, Dict, Optional, Union
+from enum import Enum
 import json
 
 import skrf as rf
@@ -24,6 +25,25 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 import os
+
+
+def _sanitize_for_json(obj):
+    """Recursively convert a context dict to a JSON-safe structure.
+
+    Enum keys/values become their ``.value``; anything else that is not a
+    native JSON type is left for ``json.dump``'s ``default=str`` fallback.
+    """
+    if isinstance(obj, dict):
+        return {
+            (k.value if isinstance(k, Enum) else k): _sanitize_for_json(v)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, Enum):
+        return obj.value
+    return obj
+
 
 class COBRA:
     """
@@ -133,7 +153,7 @@ class COBRA:
             "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
         )
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: Optional[Dict] = None, callback=None, results_name: Optional[str] = None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: Optional[Dict] = None, callback=None, results_name: Optional[str] = None, sim_params_by_type: Optional[Dict] = None) -> dict:
         """
         Run the optimization workflow.
 
@@ -190,6 +210,7 @@ class COBRA:
             "iterations": [],
             "orca_geometries": orca_geometries or {},
             "results_dir": str(results_dir),
+            "sim_params_by_type": sim_params_by_type or {},
             "times": {
                 "optimizer": 0.0,
                 "em_surrogate": 0.0,
@@ -288,8 +309,7 @@ class COBRA:
         # Save final context to a JSON file for analysis
         context_file = results_dir / "cobra_optimization_context.json"
         with open(context_file, "w") as f:
-            # Save context as json file
-            json.dump(context, f, indent=4, default=str)
+            json.dump(_sanitize_for_json(context), f, indent=4, default=str)
 
         print(f"\nAll results saved to: {results_dir}")
 

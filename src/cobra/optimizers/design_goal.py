@@ -1,211 +1,339 @@
-from enum import Enum
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Union
 import re
-from typing import Dict, Optional, Union
+
 import numpy as np
 import skrf as rf
-import matplotlib.pyplot as plt
+
+from cobra.spice_sim.simulation_type import SimulationType
 
 
-class DesignParameter(Enum):
+# ---------------------------------------------------------------------------
+# DesignParameter — an object-oriented descriptor for a single measurable goal
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DesignParameter:
     """
-    Lumped electrical parameters that require specific calculation logic.
-    S-parameter goals (e.g. S11_dB, S21_dB) are expressed as plain strings
-    and generated dynamically from the netlist port count.
+    A named, self-describing design parameter.
+
+    Attributes
+    ----------
+    name:
+        Unique identifier used in the GUI, context dict, and log output
+        (e.g. ``"S21_dB"``, ``"Lp"``).
+    simulation_type:
+        Which Xyce analysis type must be run to produce the result.
+    formula:
+        Callable ``(ntwk: rf.Network) -> np.ndarray | float``.
+        Receives the (possibly frequency-sliced) skrf Network and returns
+        the parameter values over the sweep.
+    description:
+        Human-readable explanation shown as a tooltip in the GUI.
     """
-    Lp = "Lp"
-    Ls = "Ls"
-    Rp = "Rp"
-    Rs = "Rs"
-    Qp = "Qp"
-    Qs = "Qs"
-    k = "k"
-    SRF = "SRF"
-    COMING_SOON = "CUSTOM"  # Placeholder for future custom metrics
+
+    name: str
+    simulation_type: SimulationType
+    formula: Callable[[rf.Network], np.ndarray]
+    description: str = ""
+    min_ports: int = 1
+    """Minimum number of netlist ports required to evaluate this parameter."""
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        if isinstance(other, DesignParameter):
+            return self.name == other.name
+        return NotImplemented
+
+
+# ---------------------------------------------------------------------------
+# Helper: Z-matrix accessor used by several lumped-parameter formulas
+# ---------------------------------------------------------------------------
+
+def _mm_z(ntwk: rf.Network):
+    """Return (mm_ntwk, z11, z22, z21, omega) after mixed-mode conversion if ≥ 4 ports."""
+    mm = ntwk.copy()
+    if mm.nports >= 4:
+        mm.se2gmm(p=2)
+    return mm, mm.z[:, 0, 0], mm.z[:, 1, 1], mm.z[:, 1, 0], 2 * np.pi * mm.f
+
+
+# ---------------------------------------------------------------------------
+# Predefined lumped-element parameters (AC/Z-matrix based)
+# ---------------------------------------------------------------------------
+
+def _lp(ntwk):
+    _, z11, *_, omega = _mm_z(ntwk)
+    return np.imag(z11) / omega * 1e9
+
+def _ls(ntwk):
+    _, _, z22, *_, omega = _mm_z(ntwk)
+    return np.imag(z22) / omega * 1e9
+
+def _rp(ntwk):
+    _, z11, *_ = _mm_z(ntwk)
+    return np.real(z11)
+
+def _rs(ntwk):
+    _, _, z22, *_ = _mm_z(ntwk)
+    return np.real(z22)
+
+def _qp(ntwk):
+    _, z11, *_ = _mm_z(ntwk)
+    return np.imag(z11) / np.real(z11)
+
+def _qs(ntwk):
+    _, _, z22, *_ = _mm_z(ntwk)
+    return np.imag(z22) / np.real(z22)
+
+def _k(ntwk):
+    _, z11, z22, z21, _ = _mm_z(ntwk)
+    return np.abs(np.imag(z21) / np.sqrt(np.imag(z11) * np.imag(z22)))
+
+def _srf(ntwk):
+    _, z11, *_ = _mm_z(ntwk)
+    freq_ghz = ntwk.f / 1e9
+    srf_idx = np.where(np.diff(np.sign(np.imag(z11))))[0]
+    return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
+
+
+# All single-port lumped parameters
+_SINGLE_PORT_LUMPED: list[DesignParameter] = [
+    DesignParameter("Lp",  SimulationType.AC, _lp,  "Primary (single-port) inductance in nH.",  min_ports=1),
+    DesignParameter("Rp",  SimulationType.AC, _rp,  "Primary (single-port) series resistance in Ω.", min_ports=1),
+    DesignParameter("Qp",  SimulationType.AC, _qp,  "Primary quality factor (Im(Z₁₁) / Re(Z₁₁)).", min_ports=1),
+    DesignParameter("SRF", SimulationType.AC, _srf, "Self-resonance frequency in GHz.",          min_ports=1),
+]
+
+# Two-port lumped parameters (secondary winding / coupling)
+_TWO_PORT_LUMPED: list[DesignParameter] = [
+    DesignParameter("Ls",  SimulationType.AC, _ls, "Secondary (two-port) inductance in nH.", min_ports=2),
+    DesignParameter("Rs",  SimulationType.AC, _rs, "Secondary (two-port) series resistance in Ω.", min_ports=2),
+    DesignParameter("Qs",  SimulationType.AC, _qs, "Secondary quality factor (Im(Z₂₂) / Re(Z₂₂)).", min_ports=2),
+    DesignParameter("k",   SimulationType.AC, _k,  "Magnetic coupling coefficient between primary and secondary.", min_ports=2),
+]
+
+
+# ---------------------------------------------------------------------------
+# Factory for dynamic S-parameter DesignParameters
+# ---------------------------------------------------------------------------
+
+def make_s_param_db(i: int, j: int) -> DesignParameter:
+    """Return a ``S{i}{j}_dB`` DesignParameter (dB magnitude)."""
+    return DesignParameter(
+        name=f"S{i}{j}_dB",
+        simulation_type=SimulationType.AC,
+        formula=lambda ntwk, _i=i, _j=j: ntwk.s_db[:, _i - 1, _j - 1],
+        description=f"S{i}{j} magnitude in dB.",
+        min_ports=max(i, j),
+    )
+
+
+def make_s_param_linear(i: int, j: int) -> DesignParameter:
+    """Return a ``S{i}{j}`` DesignParameter (linear magnitude)."""
+    return DesignParameter(
+        name=f"S{i}{j}",
+        simulation_type=SimulationType.AC,
+        formula=lambda ntwk, _i=i, _j=j: np.abs(ntwk.s[:, _i - 1, _j - 1]),
+        description=f"S{i}{j} linear magnitude.",
+        min_ports=max(i, j),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Global catalogue — all known DesignParameters up to MAX_PORTS S-param ports.
+# Use get_available_parameters() to obtain the subset valid for a given netlist.
+# ---------------------------------------------------------------------------
+
+MAX_PORTS: int = 8
+
+_ALL_PARAMETERS: list[DesignParameter] = (
+    [make_s_param_db(i, j)     for i in range(1, MAX_PORTS + 1) for j in range(1, MAX_PORTS + 1)]
+    + [make_s_param_linear(i, j) for i in range(1, MAX_PORTS + 1) for j in range(1, MAX_PORTS + 1)]
+    + _SINGLE_PORT_LUMPED
+    + _TWO_PORT_LUMPED
+)
+
+
+def get_available_parameters(
+    num_ports: int,
+    simulation_type: "SimulationType | None" = None,
+) -> list[DesignParameter]:
+    """
+    Return all DesignParameter instances whose constraints are satisfied.
+
+    Parameters
+    ----------
+    num_ports:
+        Number of ports in the netlist.  Only parameters whose
+        ``min_ports <= num_ports`` are included.
+    simulation_type:
+        When given, further restricts results to parameters that require
+        exactly this simulation type.  ``None`` means no restriction.
+    """
+    if num_ports < 1:
+        return []
+    return [
+        p for p in _ALL_PARAMETERS
+        if p.min_ports <= num_ports
+        and (simulation_type is None or p.simulation_type is simulation_type)
+    ]
+
+
+def find_parameter(name: str) -> Optional[DesignParameter]:
+    """Resolve a parameter name to its DesignParameter descriptor from the global catalogue."""
+    for p in _ALL_PARAMETERS:
+        if p.name == name:
+            return p
+    return None
+
+
+# ---------------------------------------------------------------------------
+# DesignGoal — a constraint on a DesignParameter over a frequency range
+# ---------------------------------------------------------------------------
 
 class DesignGoal:
     """
-    DesignGoal - This class represents a single design goal for the optimization process. It includes a minimum and maximum in a given frequency range
+    A single optimisation goal: ``parameter`` must satisfy ``[min_value, max_value]``
+    within the given ``frequency_range``.
     """
 
-    def __init__(self, parameter: Union[DesignParameter, str], frequency_range: Optional[str] = None, min_value: Optional[float] = None, max_value: Optional[float] = None, weight: float = 1.0):
+    def __init__(
+        self,
+        parameter: DesignParameter,
+        frequency_range: Optional[str] = None,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        weight: float = 1.0,
+    ):
+        if not isinstance(parameter, DesignParameter):
+            raise TypeError(
+                f"'parameter' must be a DesignParameter instance, got {type(parameter).__name__}. "
+                "Use find_parameter() or get_available_parameters() to look up parameters."
+            )
         self.parameter = parameter
         self.frequency_range = frequency_range
         self.min_value = min_value
         self.max_value = max_value
         self.weight = weight
-        self._eps = 1e-9  # Small epsilon to prevent division by zero in penalty calculation
+        self._eps = 1e-9
 
     @property
     def parameter_name(self) -> str:
-        """Return the string name of the parameter, regardless of whether it is an enum or a plain string."""
-        if isinstance(self.parameter, DesignParameter):
-            return self.parameter.value
-        return str(self.parameter)
+        return self.parameter.name
+
+    @property
+    def required_simulation_type(self) -> SimulationType:
+        return self.parameter.simulation_type
 
     def penalty(self, values: np.ndarray) -> float:
-        """
-        Calculates the penalty based on the provided boundaries and values.
-        """
+        """Calculate the penalty for the given measured values."""
         loss_val = 0.0
 
-        # Case A: Both boundaries are provided
         if self.min_value is not None and self.max_value is not None:
-            # Mask for values below min
             below_mask = values < self.min_value
-            # Mask for values above max
             above_mask = values > self.max_value
-            
-            # Calculate normalized squared errors
-            # Error = (Limit - Value) / Limit
             if np.any(below_mask):
-                diff_below = (self.min_value - values[below_mask]) / (np.abs(self.min_value) + self._eps)
-                loss_val += np.sum(diff_below**2)
-            
+                diff = (self.min_value - values[below_mask]) / (np.abs(self.min_value) + self._eps)
+                loss_val += np.sum(diff ** 2)
             if np.any(above_mask):
-                diff_above = (values[above_mask] - self.max_value) / (np.abs(self.max_value) + self._eps)
-                loss_val += np.sum(diff_above**2)
-            
+                diff = (values[above_mask] - self.max_value) / (np.abs(self.max_value) + self._eps)
+                loss_val += np.sum(diff ** 2)
             return loss_val
 
-        # Case B: Only Minimum value provided
         elif self.min_value is not None:
-            # Denominator for normalization
             denom = np.abs(self.min_value) + self._eps
-            
-            # Check for violations
             if np.any(values < self.min_value):
-                # Penalize only violating values
-                violating_values = values[values < self.min_value]
-                # (Min - Value) / Min
-                return np.sum(((self.min_value - violating_values) / denom)**2)
-            else:
-                # Reward (negative loss) for exceeding min
-                # (Value - Min) / Min
-                return -np.sum(((values - self.min_value) / denom)**2)
+                violating = values[values < self.min_value]
+                return np.sum(((self.min_value - violating) / denom) ** 2)
+            return -np.sum(((values - self.min_value) / denom) ** 2)
 
-        # Case C: Only Maximum value provided
         elif self.max_value is not None:
-            # Denominator for normalization
             denom = np.abs(self.max_value) + self._eps
-            
             if np.any(values > self.max_value):
-                # Penalize only violating values
-                violating_values = values[values > self.max_value]
-                # (Value - Max) / Max
-                return np.sum(((violating_values - self.max_value) / denom)**2)
-            else:
-                # Reward (negative loss) for being below max
-                # (Max - Value) / Max
-                return -np.sum(((self.max_value - values) / denom)**2)
-        raise ValueError("At least one of min_value or max_value must be provided for a DesignGoal.")
+                violating = values[values > self.max_value]
+                return np.sum(((violating - self.max_value) / denom) ** 2)
+            return -np.sum(((self.max_value - values) / denom) ** 2)
+
+        raise ValueError("At least one of min_value or max_value must be provided.")
+
+
+# ---------------------------------------------------------------------------
+# DesignGoalChecker — evaluates all goals against simulation results
+# ---------------------------------------------------------------------------
 
 class DesignGoalChecker:
-    """
-    DesignGoalChecker - This class checks if the design goals are met based on the current design state and the defined design goals.
-    """
+    """Evaluates a list of DesignGoals against one or more simulation results."""
 
     def __init__(self, design_goals: list[DesignGoal]):
-        self.design_goals: list[DesignGoal] = design_goals
+        self.design_goals = design_goals
 
-    def check_goals(self, context) -> Dict:
+    def check_goals(self, context: dict) -> dict:
         """
-        Checks if the design goals are met based on the current design state.
+        Evaluate all goals and update *context* with results.
+
+        Reads ``context["simulated_networks"]`` (``dict[SimulationType, rf.Network]``).
         """
-        ntwk = context["simulated_network"]
-        params, penalties = self.loss(ntwk)  # Calculate penalties based on the current design state
-        
-        # Check if any penalty is greater than zero, which indicates a violation of at least one design goal
-        context["goal_achieved"] = all(penalty <= 0.0 for penalty in penalties)
-        context["electrical_parameters"] = params  # Store calculated electrical parameters in context for later use (e.g., optimization feedback)
-        context["penalties"] = penalties  # Store penalties in context for later use (e.g., optimization feedback)
+        networks: dict = context.get("simulated_networks") or {}
+
+        params, penalties = self.loss(networks)
+        context["goal_achieved"] = all(p <= 0.0 for p in penalties)
+        context["electrical_parameters"] = params
+        context["penalties"] = penalties
         return context
 
+    def loss(self, networks: dict) -> tuple[dict, list[float]]:
+        """
+        Compute penalties for each goal using the appropriate network.
 
-    # Override function when called print(DesignGoalChecker) to print the design goals in a readable format
-    def __str__(self):
-        goal_strs = []
-        for goal in self.design_goals:
-            goal_strs.append(f"{goal.parameter_name}: [{goal.min_value}, {goal.max_value}] in {goal.frequency_range if goal.frequency_range else 'full range'} (weight: {goal.weight})")
-        return "Design Goals:" + " | ".join(goal_strs)
-    
-    def loss(self, ntwk: rf.Network) -> tuple[Dict, list[float]]:
+        Parameters
+        ----------
+        networks:
+            ``{SimulationType: rf.Network}`` — one entry per required analysis type.
         """
-        Computes a list of penalties for each design goal based on the current design state. 
-        The loss is calculated based on how much the current design state deviates from the defined design goals.
-        
-        Args:
-            ntwk: The skrf Network object
-        Returns:
-            A tuple containing the design state (a dictionary of calculated parameters) and a list of penalties
-        """
-        
         penalties = []
         design_state = {}
 
         for goal in self.design_goals:
-            parameter_values = self.calculate_parameter(ntwk, goal.parameter, goal.frequency_range)
-            design_state[goal.parameter_name] = parameter_values
-            if parameter_values is None:
-                raise ValueError(f"Design state does not contain value for parameter {goal.parameter_name}")
-            penalties.append(goal.penalty(parameter_values) * goal.weight)
+            sim_type = goal.required_simulation_type
+            ntwk = networks.get(sim_type)
+            if ntwk is None:
+                raise ValueError(
+                    f"No simulation result for '{sim_type.value}', "
+                    f"required by goal '{goal.parameter_name}'."
+                )
+
+            # Slice to frequency range if specified
+            if goal.frequency_range is not None:
+                try:
+                    ntwk_sliced = ntwk[goal.frequency_range]
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid frequency range '{goal.frequency_range}'. "
+                        "Expected format e.g. '10-20ghz'."
+                    )
+            else:
+                ntwk_sliced = ntwk
+
+            values = goal.parameter.formula(ntwk_sliced)
+            if values is None:
+                raise ValueError(f"Formula returned None for parameter '{goal.parameter_name}'.")
+
+            design_state[goal.parameter_name] = values
+            penalties.append(goal.penalty(values) * goal.weight)
+
         return design_state, penalties
 
-    def calculate_parameter(self, ntwk: rf.Network, parameter: Union[DesignParameter, str], frequency_range: str | None = None, custom_func_coming_soon=None) -> np.ndarray:
-        """
-        Calculates a specific electrical parameter from the S-parameters of the given network within the specified frequency range.
-        """
-        if frequency_range is not None:
-            try:
-                ntwk = ntwk[frequency_range]
-            except ValueError:
-                # skrf might fail with "could not convert string to float: ''" for malformed ranges like "10-"
-                # Or invalid frequency strings. We re-raise with context.
-                raise ValueError(f"Invalid frequency range format: '{frequency_range}'. Expected format e.g. '10-20ghz'.")
+    def __str__(self):
+        parts = [
+            f"{g.parameter_name}: [{g.min_value}, {g.max_value}]"
+            f" in {g.frequency_range or 'full range'} (w={g.weight})"
+            for g in self.design_goals
+        ]
+        return "Design Goals: " + " | ".join(parts)
 
-        # Resolve to a plain string so we can do string-based dispatch everywhere.
-        param_name = parameter.value if isinstance(parameter, DesignParameter) else str(parameter)
 
-        # S{i}{j}_dB  — magnitude in dB
-        m = re.match(r"^S(\d+)(\d+)_dB$", param_name, re.IGNORECASE)
-        if m:
-            i, j = int(m.group(1)), int(m.group(2))
-            return ntwk.s_db[:, i - 1, j - 1]
-
-        # S{i}{j}  — linear magnitude |S_{ij}|
-        m = re.match(r"^S(\d+)(\d+)$", param_name, re.IGNORECASE)
-        if m:
-            i, j = int(m.group(1)), int(m.group(2))
-            return np.abs(ntwk.s[:, i - 1, j - 1])
-        else:
-            # Lumped parameters — require Z-matrix conversion.
-            mm_ntwk = ntwk.copy()
-            if mm_ntwk.nports >= 4:
-                mm_ntwk.se2gmm(p=2)
-
-            z_d11 = mm_ntwk.z[:, 0, 0]
-            z_d22 = mm_ntwk.z[:, 1, 1]
-            z_d21 = mm_ntwk.z[:, 1, 0]
-            freq_ghz = ntwk.f / 1e9
-            omega = 2 * np.pi * mm_ntwk.f
-
-            if param_name == "Lp":
-                return np.imag(z_d11) / omega * 1e9
-            elif param_name == "Ls":
-                return np.imag(z_d22) / omega * 1e9
-            elif param_name == "Rp":
-                return np.real(z_d11)
-            elif param_name == "Rs":
-                return np.real(z_d22)
-            elif param_name == "Qp":
-                return np.imag(z_d11) / np.real(z_d11)
-            elif param_name == "Qs":
-                return np.imag(z_d22) / np.real(z_d22)
-            elif param_name == "k":
-                return np.abs(np.imag(z_d21) / np.sqrt(np.imag(z_d11) * np.imag(z_d22)))
-            elif param_name == "SRF":
-                srf_idx = np.where(np.diff(np.sign(np.imag(z_d11))))[0]
-                return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
-            elif parameter == DesignParameter.COMING_SOON:
-                return custom_func_coming_soon(ntwk)
-            else:
-                raise ValueError(f"Unsupported design parameter: {param_name}")

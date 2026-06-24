@@ -2,7 +2,7 @@ import json
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QLineEdit,
-    QDoubleSpinBox, QMessageBox,
+    QDoubleSpinBox, QMessageBox, QLabel,
 )
 from PySide6.QtGui import QDoubleValidator
 
@@ -11,16 +11,26 @@ from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from .help_texts import tooltip
 
 class DesignGoalDialog(QDialog):
-    def __init__(self, parent=None, goal=None, available_parameters: Optional[List[str]] = None):
+    def __init__(self, parent=None, goal: "DesignGoal | None" = None,
+                 available_parameters: "Optional[List[DesignParameter]]" = None):
         super().__init__(parent)
         self.setWindowTitle("Design Goal")
         self.setMinimumWidth(400)
         self.form_layout = QFormLayout(self)
-        
+
         self.param_combo = QComboBox()
         if available_parameters:
-            self.param_combo.addItems(available_parameters)
-        
+            for dp in available_parameters:
+                self.param_combo.addItem(dp.name, dp)
+                idx = self.param_combo.count() - 1
+                if dp.description:
+                    self.param_combo.setItemData(idx, dp.description, 3)  # Qt.ToolTipRole = 3
+
+        self.sim_type_label = QLabel()
+        self.sim_type_label.setEnabled(False)
+        self.param_combo.currentIndexChanged.connect(self._update_sim_type_label)
+        self._update_sim_type_label()
+
         self.weight_edit = QLineEdit()
         self.weight_edit.setPlaceholderText("Default: 1.0")
         self.weight_edit.setText("1.0")
@@ -51,14 +61,19 @@ class DesignGoalDialog(QDialog):
         self.freq_unit_combo.setToolTip(tooltip("freq_unit_combo"))
 
         self._raw_frequency_range = None
-        
+
         if goal:
-            p_name = goal.parameter_name
-            # If the goal's parameter isn't in the combo (e.g. netlist was changed),
-            # add it at the top so the existing goal can still be viewed/edited.
-            if self.param_combo.findText(p_name) == -1:
-                self.param_combo.insertItem(0, p_name)
-            self.param_combo.setCurrentText(p_name)
+            # Select matching item; if not in combo (netlist changed) add it at top
+            found = False
+            for i in range(self.param_combo.count()):
+                if self.param_combo.itemData(i) == goal.parameter:
+                    self.param_combo.setCurrentIndex(i)
+                    found = True
+                    break
+            if not found:
+                self.param_combo.insertItem(0, goal.parameter.name, goal.parameter)
+                self.param_combo.setCurrentIndex(0)
+
             if goal.min_value is not None:
                 self.min_edit.setText(str(goal.min_value))
             if goal.max_value is not None:
@@ -76,47 +91,47 @@ class DesignGoalDialog(QDialog):
                         self.freq_unit_combo.setCurrentText(unit_label)
             if goal.weight is not None:
                 self.weight_edit.setText(str(goal.weight))
-        
+
         self.form_layout.addRow("Parameter:", self.param_combo)
+        self.form_layout.addRow("Simulation Type:", self.sim_type_label)
         self.form_layout.addRow("Weight:", self.weight_edit)
         self.form_layout.addRow("Min Value:", self.min_edit)
         self.form_layout.addRow("Max Value:", self.max_edit)
         self.form_layout.addRow("Min Frequency:", self.freq_min_edit)
         self.form_layout.addRow("Max Frequency:", self.freq_max_edit)
         self.form_layout.addRow("Frequency Unit:", self.freq_unit_combo)
-        
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.form_layout.addRow(self.buttons)
 
-    def get_data(self):
-        p_name = self.param_combo.currentText()
-        # Try to resolve to a DesignParameter enum member first (lumped params).
-        # S-parameter strings (e.g. "S21_dB") are kept as plain strings.
-        param = None
-        for p in DesignParameter:
-            if p.value == p_name:
-                param = p
-                break
-        # Fall back to plain string for S-parameter goals and any future types.
-        if param is None:
-            param = p_name
-            
+    def _update_sim_type_label(self):
+        param = self.param_combo.currentData()
+        if param is not None and isinstance(param, DesignParameter):
+            self.sim_type_label.setText(param.simulation_type.value)
+        else:
+            self.sim_type_label.setText("—")
+
+    def get_data(self) -> DesignGoal:
+        param: DesignParameter = self.param_combo.currentData()
+        if param is None or not isinstance(param, DesignParameter):
+            raise ValueError("No valid parameter selected.")
 
         min_val = float(self.min_edit.text()) if self.min_edit.text() else None
         max_val = float(self.max_edit.text()) if self.max_edit.text() else None
-        
+
         freq_range, freq_error = self._build_frequency_range()
         if freq_error:
             raise ValueError(freq_error)
-        
+
         try:
             weight = float(self.weight_edit.text())
         except ValueError:
             weight = 1.0
 
-        return DesignGoal(parameter=param, frequency_range=freq_range, min_value=min_val, max_value=max_val, weight=weight)
+        return DesignGoal(parameter=param, frequency_range=freq_range,
+                          min_value=min_val, max_value=max_val, weight=weight)
 
     def accept(self):
         min_text = self.min_edit.text().strip()

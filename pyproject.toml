@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobra"
-version = "1.0.0"
+version = "1.1.0"
 description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}

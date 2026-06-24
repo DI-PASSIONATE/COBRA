@@ -1,9 +1,6 @@
 """
 SimulationType – a lightweight enum that identifies the primary analysis directive
-found in a SPICE/Xyce netlist (.LIN, .AC, .HB, .TRAN, .DC, …).
-
-Each SimulationType knows which design parameters are meaningful for circuits
-simulated with that analysis type, given the number of netlist ports.
+found in a SPICE/Xyce netlist (.AC, .HB, .TRAN, .DC, …).
 """
 from __future__ import annotations
 
@@ -121,34 +118,31 @@ class SimulationType(Enum):
 
     def available_parameters(self, num_ports: int) -> List[str]:
         """
-        Return the ordered list of design-parameter names that are valid for
-        this simulation type given ``num_ports`` netlist ports.
+        Return parameter *names* valid for this simulation type and port count.
 
-        For frequency-domain analyses (.LIN / .AC):
+        Iterates the global ``_ALL_PARAMETERS`` catalogue in
+        ``cobra.optimizers.design_goal`` and returns the names of every entry
+        whose ``simulation_type`` matches *self* and whose ``min_ports``
+        requirement is met.
 
-        * All ``S{i}{j}_dB`` combinations for ports 1 … num_ports.
-        * Lumped single-port parameters (Lp, Rp, Qp, SRF) when num_ports >= 1.
-          These use z[:,0,0] only.
-        * Two-port lumped parameters (Ls, Rs, Qs, k) only when num_ports >= 2.
-          These additionally require z[:,1,1] / z[:,1,0].
-
-        Other simulation types are not yet implemented and return an empty list.
+        For full ``DesignParameter`` objects use
+        ``get_available_parameters(num_ports, simulation_type=self)``.
         """
-        if self is SimulationType.AC:
-            if num_ports < 1:
-                return []
-            params: List[str] = []
-            # S-parameters: dB magnitude and linear magnitude, in natural order
-            for i in range(1, num_ports + 1):
-                for j in range(1, num_ports + 1):
-                    params.append(f"S{i}{j}_dB")
-                    params.append(f"S{i}{j}")
-            # Single-port lumped parameters (need at least 1 port)
-            params += ["Lp", "Rp", "Qp", "SRF"]
-            # Two-port lumped parameters (secondary winding / coupling)
-            if num_ports >= 2:
-                params += ["Ls", "Rs", "Qs", "k"]
-            return params
+        from cobra.optimizers.design_goal import get_available_parameters  # lazy – avoids circular import
+        return [p.name for p in get_available_parameters(num_ports, simulation_type=self)]
 
-        # HB, TRAN, DC – not yet implemented, return empty list
-        return []
+    @classmethod
+    def for_parameter(cls, param_name: str) -> "SimulationType":
+        """
+        Return the simulation type required to evaluate *param_name* by looking
+        it up in the global ``_ALL_PARAMETERS`` catalogue.
+        """
+        from cobra.optimizers.design_goal import find_parameter  # lazy – avoids circular import
+        p = find_parameter(param_name)
+        return p.simulation_type if p is not None else cls.UNKNOWN
+
+    @classmethod
+    def all_available_parameters(cls, num_ports: int) -> List[str]:
+        """Union of parameter names across all supported simulation types."""
+        from cobra.optimizers.design_goal import get_available_parameters  # lazy – avoids circular import
+        return [p.name for p in get_available_parameters(num_ports)]

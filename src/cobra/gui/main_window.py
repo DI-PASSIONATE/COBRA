@@ -29,6 +29,7 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
+from cobra.optimizers.design_goal import get_available_parameters, DesignParameter
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
@@ -380,7 +381,7 @@ class MainWindow(QMainWindow):
         self.overlay_items = []
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
-        self._available_parameters: List[str] = []  # populated from netlist on load
+        self._available_parameters: "List[DesignParameter]" = []  # populated from netlist on load
         self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name"
         self._parsed_directives: list = []  # last directives from netlist parse
         self._num_ports: int = 0
@@ -818,11 +819,11 @@ class MainWindow(QMainWindow):
             parser = XyceNetlistParser().from_file(netlist_path)
             components = parser.components
 
-            # Update simulation type combo and available parameter list
+            # Update available parameters (full list for port count — not gated by sim type)
             sim_type = parser.simulation_type
             self._num_ports = parser.num_ports
             self._parsed_directives = list(parser.simulation_directives)
-            self._available_parameters = parser.available_design_parameters
+            self._available_parameters = get_available_parameters(self._num_ports)
 
             # Select matching item in the combo (block signal to avoid double rebuild)
             self.sim_type_combo.blockSignals(True)
@@ -834,8 +835,8 @@ class MainWindow(QMainWindow):
             self.sim_type_label.setVisible(True)
             self.sim_type_combo.setVisible(True)
 
-            # Populate editable simulation-parameter fields
-            self._populate_sim_param_widgets(parser.simulation_directives)
+            # Populate editable simulation-parameter fields for required sim types
+            self._refresh_sim_params_for_goals()
 
             if components:
                 # New workflow: show component-based ONNX/Touchstone selectors
@@ -850,24 +851,33 @@ class MainWindow(QMainWindow):
             self.clear_component_onnx_selectors()
             self.sim_type_label.setVisible(False)
             self.sim_type_combo.setVisible(False)
-            self._populate_sim_param_widgets([])
+            self._populate_sim_param_widgets(set())
     
     def _on_sim_type_changed(self) -> None:
         """Called when the user manually picks a different simulation type in the combo."""
-        new_type = self.sim_type_combo.currentData()
-        if new_type is None:
-            return
-        # Update available design parameters for the new type
-        self._available_parameters = new_type.available_parameters(self._num_ports)
-        # Rebuild param widgets: use parsed values where they match, else defaults
-        self._populate_sim_param_widgets(self._parsed_directives, override_type=new_type)
+        # Rebuild param widgets for the now-required sim types
+        self._refresh_sim_params_for_goals()
 
-    def _populate_sim_param_widgets(self, directives, override_type: "SimulationType | None" = None) -> None:
-        """Create editable fields for each tweakable simulation directive parameter.
+    def _refresh_sim_params_for_goals(self) -> None:
+        """Rebuild sim-param widgets for all types required by the current goals + combo type."""
+        required: set = set()
+        for goal in self.goals:
+            st = goal.required_simulation_type
+            if st is not SimulationType.UNKNOWN:
+                required.add(st)
+        # Always include the primary type from the combo (or AC as default)
+        combo_type = self.sim_type_combo.currentData() if self.sim_type_combo.isVisible() else None
+        if combo_type:
+            required.add(combo_type)
+        if not required:
+            required = {SimulationType.AC}
+        self._populate_sim_param_widgets(required)
 
-        When *override_type* is given (user changed the combo manually), the
-        directive matching that type is used if present in *directives*; otherwise
-        sensible defaults from ``positional_param_defaults()`` are shown.
+    def _populate_sim_param_widgets(self, sim_types: "set[SimulationType]") -> None:
+        """Create editable fields for each sim type in *sim_types*.
+
+        For each type, existing parsed values are used where available;
+        missing slots are filled from ``positional_param_defaults()``.
         """
         while self.sim_params_form.rowCount() > 0:
             self.sim_params_form.removeRow(0)
@@ -875,17 +885,18 @@ class MainWindow(QMainWindow):
 
         skip = {"sweep_type", "src_name"}
 
-        if override_type is not None:
-            # Build a name→value map: start with defaults, then overlay parsed values
-            defaults = override_type.positional_param_defaults()
-            param_names = override_type.positional_param_names()
-            descriptions = override_type.positional_param_descriptions()
+        for sim_type in sorted(sim_types, key=lambda t: t.value):
+            param_names = sim_type.positional_param_names()
+            if not param_names:
+                continue
+            descriptions = sim_type.positional_param_descriptions()
+            defaults = sim_type.positional_param_defaults()
+            directive_key = sim_type.value.upper()  # e.g. ".AC"
 
-            # Try to pull values from the parsed directive that matches the type
-            parsed_values: dict[str, str] = {}
-            directive_key = override_type.value.upper()  # e.g. ".AC"
-            for d in directives:
-                if d.directive.upper() == directive_key:
+            # Pull values from the parsed directive that matches this type
+            parsed_values: dict = {}
+            for d in self._parsed_directives:
+                if SimulationType.from_directive(d.directive) is sim_type:
                     for i, name in enumerate(param_names):
                         if i < len(d.positional):
                             parsed_values[name] = d.positional[i]
@@ -902,25 +913,6 @@ class MainWindow(QMainWindow):
                 label = name.replace("_", " ").title()
                 self.sim_params_form.addRow(f"{directive_key} {label}:", edit)
                 self._sim_param_edits[key] = edit
-        else:
-            # Normal path: render all directives found in the netlist
-            for directive in directives:
-                sim_type = SimulationType.from_directive(directive.directive)
-                param_names = sim_type.positional_param_names()
-                descriptions = sim_type.positional_param_descriptions()
-                for i, name in enumerate(param_names):
-                    if name in skip:
-                        continue
-                    if i >= len(directive.positional):
-                        continue
-                    value = directive.positional[i]
-                    key = f"{directive.directive.upper()}:{name}"
-                    edit = QLineEdit(value)
-                    if name in descriptions:
-                        edit.setToolTip(descriptions[name])
-                    label = name.replace("_", " ").title()
-                    self.sim_params_form.addRow(f"{directive.directive} {label}:", edit)
-                    self._sim_param_edits[key] = edit
 
         self.sim_params_container.setVisible(bool(self._sim_param_edits))
 
@@ -1256,17 +1248,19 @@ class MainWindow(QMainWindow):
         self.loss_history = {}
         
         self.goal_list.takeItem(row)
+        self._refresh_sim_params_for_goals()
 
     def _add_goal_to_list(self, goal):
         self.goals.append(goal)
         label = self._goal_label(goal)
         self.goal_list.addItem(label)
-        # Init loss history
         idx = len(self.goals) - 1
         self.loss_history[idx] = []
+        self._refresh_sim_params_for_goals()
 
     def _update_goal_item(self, item, goal):
         item.setText(self._goal_label(goal))
+        self._refresh_sim_params_for_goals()
     
     def _goal_label(self, goal):
         label = f"{goal.parameter_name} "
@@ -1398,10 +1392,19 @@ class MainWindow(QMainWindow):
         
         self.draw_overlays()
         
+        # Build sim_params_by_type dict from GUI edits, keyed by SimulationType
+        sim_params_by_type: Dict[SimulationType, Dict[str, str]] = {}
+        for key, edit in self._sim_param_edits.items():
+            directive_str, param_name = key.split(":", 1)
+            st = SimulationType.from_directive(directive_str)
+            if st is not SimulationType.UNKNOWN:
+                sim_params_by_type.setdefault(st, {})[param_name] = edit.text().strip()
+
         self.worker = OptimizationWorker(
-            cobra, netlist, self.goals, 
+            cobra, netlist, self.goals,
             self.opt_params, self.max_iter_spin.value(),
-            orca_geometries
+            orca_geometries,
+            sim_params_by_type=sim_params_by_type,
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
@@ -1528,8 +1531,9 @@ class MainWindow(QMainWindow):
                 self._add_current_param_row(name, current_values[name])
 
         # Update Goal Status Table
-        ntwk_n = context.get("simulated_network")
-        if ntwk_n is not None:
+        networks = context.get("simulated_networks") or {}
+        primary_ntwk = next(iter(networks.values()), None)
+        if primary_ntwk is not None:
             # Metrics are now pre-calculated in COBRA.run and stored in context
             metrics = context.get("electrical_parameters", {})
             
@@ -1607,7 +1611,7 @@ class MainWindow(QMainWindow):
         try:
             self.s_param_plot.clear()
 
-            ntwk_n = context.get("simulated_network")
+            ntwk_n = next(iter((context.get("simulated_networks") or {}).values()), None)
             ntwk_prev = context.get("prev_network")
             requested_sparams = self._goal_sparam_specs()
             color_map: Dict[str, Tuple[int, int, int]] = {
