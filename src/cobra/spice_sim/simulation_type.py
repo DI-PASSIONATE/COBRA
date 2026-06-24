@@ -63,6 +63,47 @@ class SimulationType(Enum):
         """Short label shown in the GUI (e.g. ``".LIN"``, ``"unknown"``)."""
         return self.value
 
+    def positional_param_names(self) -> List[str]:
+        """
+        Named slots for the positional tokens that follow this directive keyword.
+
+        E.g. ``.AC LIN 500 100G 170G`` → ``["sweep_type", "points", "start_freq", "stop_freq"]``
+        """
+        _map: dict = {
+            SimulationType.AC:   ["sweep_type", "points", "start_freq", "stop_freq"],
+            SimulationType.TRAN: ["step", "stop_time", "start_time", "max_step"],
+            SimulationType.HB:   ["fund_freq"],
+            SimulationType.DC:   ["src_name", "start", "stop", "incr"],
+        }
+        return list(_map.get(self, []))
+
+    def positional_param_descriptions(self) -> dict[str, str]:
+        """Human-readable tooltip text for each positional parameter slot."""
+        _map: dict = {
+            SimulationType.AC: {
+                "sweep_type": "Frequency sweep spacing: LIN (linear), DEC (decade), or OCT (octave).",
+                "points":     "Number of frequency points in the sweep.",
+                "start_freq": "Start frequency (e.g. 100G for 100 GHz).",
+                "stop_freq":  "Stop frequency (e.g. 200G for 200 GHz).",
+            },
+            SimulationType.TRAN: {
+                "step":       "Print/output time step.",
+                "stop_time":  "Total simulation stop time.",
+                "start_time": "Time at which output begins (default 0).",
+                "max_step":   "Maximum internal time step (optional).",
+            },
+            SimulationType.HB: {
+                "fund_freq": "Fundamental frequency for the Harmonic Balance analysis.",
+            },
+            SimulationType.DC: {
+                "src_name": "Name of the voltage/current source to sweep.",
+                "start":    "Sweep start value.",
+                "stop":     "Sweep stop value.",
+                "incr":     "Sweep increment step.",
+            },
+        }
+        return dict(_map.get(self, {}))
+
     # ------------------------------------------------------------------
     # Parameter discovery
     # ------------------------------------------------------------------

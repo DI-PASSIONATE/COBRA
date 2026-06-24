@@ -1,5 +1,6 @@
 import subprocess
 
+from cobra.setting import CobraSetting
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
@@ -9,6 +10,38 @@ import glob, os
 
 class XyceSimulator(BaseSimulator):
     netlist_parser: BaseNetlistParser = XyceNetlistParser()
+
+    _settings = [
+        CobraSetting(
+            name="xyce_command",
+            dtype=str,
+            default="Xyce",
+            description=(
+                "Command used to invoke the Xyce simulator.\n"
+                "Can be a plain command name (e.g. 'Xyce') if it is on PATH,\n"
+                "or an absolute path to the Xyce executable."
+            ),
+        ),
+        CobraSetting(
+            name="parallel_xyce",
+            dtype=bool,
+            default=False,
+            description=(
+                "Run Xyce in parallel using MPI (mpirun -np 8).\n"
+                "Requires an MPI-enabled Xyce build and mpirun on PATH."
+            ),
+        ),
+        CobraSetting(
+            name="enforce_passivity",
+            dtype=bool,
+            default=False,
+            description=(
+                "Enforce passivity on the vector-fitted surrogate model.\n"
+                "Increases pre-processing time but prevents non-physical\n"
+                "active behaviour in the circuit simulator."
+            ),
+        ),
+    ]
 
     def __init__(self, xyce_command: str = "Xyce", parallel_xyce: bool = False, enforce_passivity: bool = False):
         self.xyce_command = xyce_command

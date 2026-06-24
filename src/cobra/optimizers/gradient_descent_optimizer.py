@@ -4,6 +4,7 @@ from typing import Any, Dict
 import numpy as np
 
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+from cobra.setting import CobraSetting
 
 
 class GradientDescentOptimizer(BaseOptimizer):
@@ -12,6 +13,44 @@ class GradientDescentOptimizer(BaseOptimizer):
     finite-difference probes to approximate gradients and refine the current
     solution.
     """
+
+    _settings = [
+        CobraSetting(
+            name="multi_objective",
+            dtype=bool,
+            default=False,
+            description=(
+                "Enable multi-objective optimisation.\n"
+                "When disabled, all goal losses are summed into a single scalar."
+            ),
+        ),
+        CobraSetting(
+            name="learning_rate",
+            dtype=float,
+            default=0.2,
+            description=(
+                "Gradient-descent step size (fraction of parameter range).\n"
+                "Smaller values give finer convergence; larger values explore faster."
+            ),
+        ),
+        CobraSetting(
+            name="exploration_scale",
+            dtype=float,
+            default=0.5,
+            description=(
+                "Scale of finite-difference probe offsets relative to the parameter range.\n"
+                "Increase to explore wider areas; decrease for fine local refinement."
+            ),
+        ),
+        CobraSetting(
+            name="random_seed",
+            dtype=int,
+            default=-1,
+            description=(
+                "Random seed for reproducibility. Use -1 for a non-deterministic run."
+            ),
+        ),
+    ]
 
     def __init__(
         self,

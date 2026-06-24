@@ -38,6 +38,15 @@ class Include:
     line_index: int
 
 
+@dataclass
+class SimulationDirective:
+    """A simulation/analysis directive found in the netlist (e.g. .AC, .LIN, .HB)."""
+    directive: str             # e.g. ".AC", ".LIN", ".TRAN"
+    positional: List[str]      # positional tokens after the keyword, e.g. ["LIN", "500", "100G", "170G"]
+    kv_params: Dict[str, str]  # key=value params on the same line, e.g. {"format": "touchstone"}
+    line_index: int
+
+
 class BaseNetlistParser(ABC):
     """Abstract base class for SPICE netlist parsers."""
 
@@ -50,6 +59,7 @@ class BaseNetlistParser(ABC):
         self.netlist_path: Optional[Union[str, Path]] = None
         self._simulation_type: SimulationType = SimulationType.UNKNOWN
         self._num_ports: int = 0
+        self._simulation_directives: List[SimulationDirective] = []
 
     # -------------------------------------------------------------------------
     # Factory / loader methods
@@ -76,6 +86,7 @@ class BaseNetlistParser(ABC):
         self._inline_subckt_names.clear()
         self._simulation_type = SimulationType.UNKNOWN
         self._num_ports = 0
+        self._simulation_directives.clear()
 
     # -------------------------------------------------------------------------
     # Serialisation
@@ -127,6 +138,11 @@ class BaseNetlistParser(ABC):
     def simulation_type(self) -> SimulationType:
         """The primary analysis type detected in the netlist (e.g. LIN, AC, HB)."""
         return self._simulation_type
+
+    @property
+    def simulation_directives(self) -> List[SimulationDirective]:
+        """All simulation/analysis directives found in the netlist."""
+        return list(self._simulation_directives)
 
     @property
     def num_ports(self) -> int:

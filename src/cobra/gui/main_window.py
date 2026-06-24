@@ -28,6 +28,7 @@ from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
+from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
@@ -141,6 +142,14 @@ class MainWindow(QMainWindow):
         )
         self.config_form_layout.addRow(self.sim_type_label, self.sim_type_value_label)
 
+        # Simulation Parameters — populated dynamically when a netlist is loaded.
+        # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
+        self.sim_params_container = QWidget()
+        self.sim_params_form = QFormLayout(self.sim_params_container)
+        self.sim_params_form.setContentsMargins(0, 0, 0, 0)
+        self.sim_params_container.setVisible(False)
+        self.config_form_layout.addRow("", self.sim_params_container)
+
         self.component_onnx_container = QWidget()
         self.component_onnx_layout = QVBoxLayout(self.component_onnx_container)
         self.component_onnx_layout.setContentsMargins(0, 0, 0, 0)
@@ -148,25 +157,18 @@ class MainWindow(QMainWindow):
         self.component_onnx_container.setVisible(False)
         self.config_form_layout.addRow("", self.component_onnx_container)
         
+        # ---- Optimizer selection + dynamic per-optimizer options ----
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
         self.config_form_layout.addRow("Optimizer:", self.optimizer_combo)
 
-        self.optuna_sampler_combo = QComboBox()
-        self.optuna_sampler_combo.addItem("TPESampler (default)", "tpe")
-        self.optuna_sampler_combo.addItem("RandomSampler", "random")
-        self.optuna_sampler_combo.addItem("SimulatedAnnealingSampler (optunahub)", "simulated_annealing")
-        self.optuna_sampler_combo.setToolTip(tooltip("optuna_sampler_combo"))
-        self.config_form_layout.addRow("Optuna Sampler:", self.optuna_sampler_combo)
+        # Track position for inserting dynamic optimizer options (CobraSetting-driven)
+        self.opt_options_insert_pos = self.config_form_layout.rowCount()
+        self.opt_options_count = 0
+        self.optimizer_widgets: Dict[str, object] = {}
+        self.optimizer_combo.currentIndexChanged.connect(self.update_optimizer_options)
 
-        self.optuna_pruner_combo = QComboBox()
-        self.optuna_pruner_combo.addItem("None", None)
-        self.optuna_pruner_combo.addItem("MedianPruner", "median")
-        self.optuna_pruner_combo.addItem("SuccessiveHalvingPruner", "successive_halving")
-        self.optuna_pruner_combo.addItem("HyperbandPruner", "hyperband")
-        self.optuna_pruner_combo.setToolTip(tooltip("optuna_pruner_combo"))
-        self.config_form_layout.addRow("Optuna Pruner:", self.optuna_pruner_combo)
-        
+        # ---- Simulator selection + dynamic per-simulator options ----
         self.simulator_combo = QComboBox()
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
         self.config_form_layout.addRow("Simulator:", self.simulator_combo)
@@ -176,10 +178,13 @@ class MainWindow(QMainWindow):
         self.sim_options_count = 0
         self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
         self.simulator_widgets = {}
-        
+
+        # ---- COBRA-level settings (tooltips sourced from COBRA._settings) ----
+        _cobra_tips = {s.name: s.description for s in getattr(COBRA, "_settings", [])}
         self.max_iter_spin = QSpinBox()
         self.max_iter_spin.setRange(1, 99999)
         self.max_iter_spin.setValue(500)
+        self.max_iter_spin.setToolTip(_cobra_tips.get("max_iterations", ""))
         self.config_form_layout.addRow("Max Iterations:", self.max_iter_spin)
 
         # self.moo_cb = QCheckBox("Multi-Objective Optimization")
@@ -192,12 +197,14 @@ class MainWindow(QMainWindow):
 
         self.palace_label = QLabel("Palace Command:")
         self.palace_edit = QLineEdit("palace")
+        self.palace_edit.setToolTip(_cobra_tips.get("palace_fine_tuning_command", ""))
         self.config_form_layout.addRow(self.palace_label, self.palace_edit)
 
         self.ft_iter_label = QLabel("Finetuning Iterations:")
         self.ft_iter_spin = QSpinBox()
         self.ft_iter_spin.setRange(1, 100)
         self.ft_iter_spin.setValue(3)
+        self.ft_iter_spin.setToolTip(_cobra_tips.get("fine_tuning_iterations", ""))
         self.config_form_layout.addRow(self.ft_iter_label, self.ft_iter_spin)
 
         self.ft_optimizer_label = QLabel("Finetuning Optimizer:")
@@ -224,6 +231,9 @@ class MainWindow(QMainWindow):
 
         # If fine-tuning is toggled, show palace command and per-component geometry selectors
         self.finetune_cb.toggled.connect(self.on_finetune_toggled)
+
+        # Populate initial optimizer options
+        self.update_optimizer_options()
 
         self.config_scroll_area = QScrollArea()
         self.config_scroll_area.setWidgetResizable(True)
@@ -270,10 +280,20 @@ class MainWindow(QMainWindow):
         goal_layout.addWidget(add_goal_btn)
         
         config_layout.addWidget(self.config_scroll_area, stretch=1)
-        config_bottom_layout = QHBoxLayout()
-        config_bottom_layout.addWidget(param_group, stretch=3)
-        config_bottom_layout.addWidget(goal_group, stretch=2)
-        config_layout.addLayout(config_bottom_layout, stretch=1)
+        
+        # Right panel: Optimization Parameters on top, Design Goals on bottom
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(param_group, stretch=1)
+        right_layout.addWidget(goal_group, stretch=1)
+
+        # Left panel: Configuration
+        config_panel_widget = QWidget()
+        config_panel_layout = QHBoxLayout(config_panel_widget)
+        config_panel_layout.setContentsMargins(0, 0, 0, 0)
+        config_panel_layout.addWidget(config_group, stretch=3)
+        config_panel_layout.addWidget(right_widget, stretch=2)
         
         # Visualization Panel
         viz_group = QGroupBox("Visualization")
@@ -343,7 +363,7 @@ class MainWindow(QMainWindow):
 
         viz_layout.addLayout(tables_layout, stretch=1)
         
-        self.panel_stack.addWidget(config_group)
+        self.panel_stack.addWidget(config_panel_widget)
         self.panel_stack.addWidget(viz_group)
         
         # Data storage
@@ -355,6 +375,7 @@ class MainWindow(QMainWindow):
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
         self._available_parameters: List[str] = []  # populated from netlist on load
+        self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name"
         
         apply_theme(self)
         self._set_action_button_state("start")
@@ -592,6 +613,54 @@ class MainWindow(QMainWindow):
                 print(f"Error drawing overlay for goal: {e}")
 
 
+    def update_optimizer_options(self):
+        """Rebuild per-optimizer settings rows using the selected optimizer's _settings list."""
+        for _ in range(self.opt_options_count):
+            result = self.config_form_layout.takeRow(self.opt_options_insert_pos)
+            if result.labelItem:
+                w = result.labelItem.widget()
+                if w: w.deleteLater()
+            if result.fieldItem:
+                w = result.fieldItem.widget()
+                if w: w.deleteLater()
+
+        self.opt_options_count = 0
+        self.optimizer_widgets = {}
+
+        opt_cls = self.optimizer_combo.currentData()
+        if not opt_cls:
+            return
+
+        idx = self.opt_options_insert_pos
+        count = 0
+
+        cobra_settings = getattr(opt_cls, "_settings", None)
+        if cobra_settings:
+            for setting in cobra_settings:
+                widget = self._widget_for_setting(setting.dtype, setting.default, setting.choices)
+                widget.setToolTip(setting.description)
+                label_text = setting.name.replace("_", " ").title()
+                self.config_form_layout.insertRow(idx, label_text + ":", widget)
+                self.optimizer_widgets[setting.name] = widget
+                idx += 1
+                count += 1
+        else:
+            try:
+                sig = inspect.signature(opt_cls.__init__)
+            except ValueError:
+                return
+            for name, param in sig.parameters.items():
+                if name in ("self", "args", "kwargs"):
+                    continue
+                widget = self._widget_for_setting(param.annotation, param.default)
+                label_text = name.replace("_", " ").title()
+                self.config_form_layout.insertRow(idx, label_text + ":", widget)
+                self.optimizer_widgets[name] = widget
+                idx += 1
+                count += 1
+
+        self.opt_options_count = count
+
     def update_simulator_options(self):
         # Clear existing dynamic options using takeRow + deleteLater
         for _ in range(self.sim_options_count):
@@ -610,58 +679,72 @@ class MainWindow(QMainWindow):
         sim_cls = self.simulator_combo.currentData()
         if not sim_cls:
             return
-        
-        # Inspect __init__ to find arguments
-        try:
-            sig = inspect.signature(sim_cls.__init__)
-        except ValueError:
-            return
 
         idx = self.sim_options_insert_pos
         count = 0
 
-        for name, param in sig.parameters.items():
-            if name == 'self': continue
-            if name == 'args' or name == 'kwargs': continue
-            
-            annotation = param.annotation
-            default = param.default
-            
-            widget = None
-            
-            # Create appropriate widget based on type annotation or default value type
-            if annotation == bool or isinstance(default, bool):
-                widget = QCheckBox()
-                if isinstance(default, bool):
-                    widget.setChecked(default)
-                
-            elif annotation == int or isinstance(default, int):
-                widget = QSpinBox()
-                widget.setRange(-1000000, 1000000)
-                if isinstance(default, int):
-                    widget.setValue(default)
-                    
-            elif annotation == float or isinstance(default, float):
-                widget = QDoubleSpinBox()
-                widget.setRange(-1e9, 1e9)
-                if isinstance(default, float):
-                    widget.setValue(default)
-                    
-            else:
-                # Default to line edit for strings or unknown types
-                widget = QLineEdit()
-                if default != inspect.Parameter.empty:
-                    widget.setText(str(default))
-            
-            # Improve label readability
-            label_text = name.replace("_", " ").title()
-            self.config_form_layout.insertRow(idx, label_text + ":", widget)
-            self.simulator_widgets[name] = widget
-            
-            idx += 1
-            count += 1
-            
+        # Prefer _settings list (CobraSetting descriptors) for rich metadata.
+        # Fall back to inspect.signature for classes that don't declare _settings.
+        cobra_settings = getattr(sim_cls, "_settings", None)
+
+        if cobra_settings:
+            for setting in cobra_settings:
+                widget = self._widget_for_setting(setting.dtype, setting.default, setting.choices)
+                widget.setToolTip(setting.description)
+                label_text = setting.name.replace("_", " ").title()
+                self.config_form_layout.insertRow(idx, label_text + ":", widget)
+                self.simulator_widgets[setting.name] = widget
+                idx += 1
+                count += 1
+        else:
+            try:
+                sig = inspect.signature(sim_cls.__init__)
+            except ValueError:
+                return
+            for name, param in sig.parameters.items():
+                if name in ("self", "args", "kwargs"):
+                    continue
+                widget = self._widget_for_setting(param.annotation, param.default)
+                label_text = name.replace("_", " ").title()
+                self.config_form_layout.insertRow(idx, label_text + ":", widget)
+                self.simulator_widgets[name] = widget
+                idx += 1
+                count += 1
+
         self.sim_options_count = count
+
+    @staticmethod
+    def _widget_for_setting(dtype, default, choices=None) -> "QWidget":
+        """Return the appropriate input widget for a given type, default value, and choices."""
+        if choices is not None:
+            widget = QComboBox()
+            for label, value in choices:
+                widget.addItem(label, value)
+            # Pre-select the item matching the default value
+            for i in range(widget.count()):
+                if widget.itemData(i) == default:
+                    widget.setCurrentIndex(i)
+                    break
+            return widget
+        if dtype == bool or isinstance(default, bool):
+            widget = QCheckBox()
+            if isinstance(default, bool):
+                widget.setChecked(default)
+        elif dtype == int or (isinstance(default, int) and not isinstance(default, bool)):
+            widget = QSpinBox()
+            widget.setRange(-1_000_000, 1_000_000)
+            if isinstance(default, int):
+                widget.setValue(default)
+        elif dtype == float or isinstance(default, float):
+            widget = QDoubleSpinBox()
+            widget.setRange(-1e9, 1e9)
+            if isinstance(default, float):
+                widget.setValue(default)
+        else:
+            widget = QLineEdit()
+            if default is not inspect.Parameter.empty and default is not None:
+                widget.setText(str(default))
+        return widget
 
     def on_finetune_toggled(self, checked):
         self.palace_label.setVisible(checked)
@@ -734,6 +817,9 @@ class MainWindow(QMainWindow):
                 sim_label += f"  ({num_ports} port{'s' if num_ports != 1 else ''})"
             self.sim_type_value_label.setText(sim_label)
 
+            # Populate editable simulation-parameter fields
+            self._populate_sim_param_widgets(parser.simulation_directives)
+
             if components:
                 # New workflow: show component-based ONNX/Touchstone selectors
                 self.update_component_onnx_selectors(components, netlist_path)
@@ -745,7 +831,51 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
             self.clear_component_onnx_selectors()
+            self._populate_sim_param_widgets([])
     
+    def _populate_sim_param_widgets(self, directives) -> None:
+        """Create editable fields for each tweakable simulation directive parameter."""
+        # Clear previous widgets
+        while self.sim_params_form.rowCount() > 0:
+            self.sim_params_form.removeRow(0)
+        self._sim_param_edits.clear()
+
+        for directive in directives:
+            sim_type = SimulationType.from_directive(directive.directive)
+            param_names = sim_type.positional_param_names()
+            descriptions = sim_type.positional_param_descriptions()
+            # Only show positional params (skip index 0 = sweep_type for .AC – not useful to edit)
+            skip = {"sweep_type", "src_name"}
+            for i, name in enumerate(param_names):
+                if name in skip:
+                    continue
+                if i >= len(directive.positional):
+                    continue
+                value = directive.positional[i]
+                key = f"{directive.directive.upper()}:{name}"
+                edit = QLineEdit(value)
+                if name in descriptions:
+                    edit.setToolTip(descriptions[name])
+                label = name.replace("_", " ").title()
+                self.sim_params_form.addRow(f"{directive.directive} {label}:", edit)
+                self._sim_param_edits[key] = edit
+
+        self.sim_params_container.setVisible(bool(self._sim_param_edits))
+
+    def _apply_simulation_parameters(self, parser) -> None:
+        """Apply GUI-edited simulation parameters to an in-memory parser."""
+        # Group edits by directive keyword
+        updates: Dict[str, Dict[str, str]] = {}
+        for key, edit in self._sim_param_edits.items():
+            directive, param_name = key.split(":", 1)
+            updates.setdefault(directive, {})[param_name] = edit.text().strip()
+
+        for directive, params in updates.items():
+            try:
+                parser.update_simulation_directive(directive, params)
+            except Exception as e:
+                print(f"Warning: Could not update directive {directive}: {e}")
+
     def update_component_onnx_selectors(self, components: Dict, netlist_path: str):
         """Create ONNX/Touchstone selectors for each detected component."""
         # Clear existing component selectors if any
@@ -1110,6 +1240,9 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
             return
+
+        # Apply any GUI-edited simulation parameters (start/stop freq, points, etc.)
+        self._apply_simulation_parameters(netlist_parser)
         
         # Get detected components
         components = netlist_parser.components
@@ -1146,11 +1279,25 @@ class MainWindow(QMainWindow):
 
         optimizer_cls = self.optimizer_combo.currentData()
         simulator_cls = self.simulator_combo.currentData()
-        optimizer_kwargs = {}
 
-        if optimizer_cls is OptunaOptimizer:
-            optimizer_kwargs["sampler"] = self.optuna_sampler_combo.currentData()
-            optimizer_kwargs["pruner"] = self.optuna_pruner_combo.currentData()
+        # Gather optimizer kwargs from dynamically-created CobraSetting widgets
+        optimizer_kwargs = {}
+        for name, widget in self.optimizer_widgets.items():
+            if isinstance(widget, QComboBox):
+                optimizer_kwargs[name] = widget.currentData()
+            elif isinstance(widget, QCheckBox):
+                optimizer_kwargs[name] = widget.isChecked()
+            elif isinstance(widget, QSpinBox):
+                val = widget.value()
+                # -1 is the sentinel meaning "no seed" for int | None params
+                if name == "random_seed" and val == -1:
+                    optimizer_kwargs[name] = None
+                else:
+                    optimizer_kwargs[name] = val
+            elif isinstance(widget, QDoubleSpinBox):
+                optimizer_kwargs[name] = widget.value()
+            elif isinstance(widget, QLineEdit):
+                optimizer_kwargs[name] = widget.text()
         
         # Gather simulator kwargs
         sim_kwargs = {}

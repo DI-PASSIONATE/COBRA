@@ -6,6 +6,7 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import (
     Component,
     Include,
     NetlistElement,
+    SimulationDirective,
 )
 from cobra.spice_sim.simulation_type import SimulationType
 
@@ -271,6 +272,19 @@ class XyceNetlistParser(BaseNetlistParser):
                     # First non-LIN directive wins only if nothing has been set yet.
                     self._simulation_type = detected
 
+                # Store the full directive so it can be inspected and edited later.
+                tokens_sim = stripped.split()
+                directive_kw = tokens_sim[0]  # e.g. ".AC", ".LIN"
+                remaining = tokens_sim[1:]
+                positional = [t for t in remaining if not self._kv_re.match(t)]
+                kv = self._collect_params(remaining)
+                self._simulation_directives.append(SimulationDirective(
+                    directive=directive_kw,
+                    positional=positional,
+                    kv_params=kv,
+                    line_index=idx,
+                ))
+
             # Other dot-directives are preserved in the text but not parsed.
             if stripped.startswith("."):
                 continue
@@ -320,6 +334,58 @@ class XyceNetlistParser(BaseNetlistParser):
             # Count P-elements as netlist ports.
             if etype == "P":
                 self._num_ports += 1
+
+    # -------------------------------------------------------------------------
+    # Public: simulation directive editing
+    # -------------------------------------------------------------------------
+
+    def update_simulation_directive(self, directive: str, params: Dict[str, str]) -> None:
+        """
+        Update named parameters of a simulation directive in-place, then re-parse.
+
+        ``params`` keys can be:
+
+        * **Positional names** as returned by ``SimulationType.positional_param_names()``
+          (e.g. ``"start_freq"``, ``"stop_freq"``, ``"points"`` for ``.AC``).
+        * **Key=value names** already present on the directive line
+          (e.g. ``"format"`` for ``.LIN format=touchstone``).
+
+        Example::
+
+            parser.update_simulation_directive(".AC", {"start_freq": "100G", "stop_freq": "200G"})
+        """
+        directive_upper = directive.strip().upper()
+        target = next(
+            (d for d in self._simulation_directives if d.directive.upper() == directive_upper),
+            None,
+        )
+        if target is None:
+            raise KeyError(f"Directive '{directive}' not found in netlist.")
+
+        sim_type = SimulationType.from_directive(directive_upper)
+        param_names = sim_type.positional_param_names()
+
+        new_positional = list(target.positional)
+        new_kv = dict(target.kv_params)
+
+        for param_name, value in params.items():
+            if param_name in param_names:
+                idx = param_names.index(param_name)
+                while len(new_positional) <= idx:
+                    new_positional.append("")
+                new_positional[idx] = str(value)
+            else:
+                new_kv[param_name] = str(value)
+
+        tokens = [target.directive] + new_positional
+        for k, v in new_kv.items():
+            tokens.append(f"{k}={v}")
+
+        raw_line = self._lines[target.line_index]
+        had_newline = raw_line.endswith("\n")
+        _, inline_comment = self._split_inline_comment(raw_line)
+        self._lines[target.line_index] = self._format_line(tokens, inline_comment, had_newline)
+        self.parse_netlist()
 
     # -------------------------------------------------------------------------
     # Private: Qucs-S TSTONEFILE → X-subcircuit normalisation

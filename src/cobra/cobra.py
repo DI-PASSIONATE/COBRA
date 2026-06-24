@@ -3,6 +3,7 @@ import json
 
 import skrf as rf
 from cobra.optimizers import OptunaOptimizer
+from cobra.setting import CobraSetting
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator
@@ -34,6 +35,37 @@ class COBRA:
        >>> cobra = COBRA(netlist_parser=parser, 
        ...               component_onnx_mapping={"X1": "model.onnx"})
     """
+
+    # Settings for run() and __init__ parameters exposed in the GUI.
+    _settings = [
+        CobraSetting(
+            name="max_iterations",
+            dtype=int,
+            default=500,
+            description=(
+                "Maximum number of surrogate-model optimisation iterations.\n"
+                "The loop exits early once all design goals are satisfied."
+            ),
+        ),
+        CobraSetting(
+            name="fine_tuning_iterations",
+            dtype=int,
+            default=3,
+            description=(
+                "Number of EM fine-tuning iterations performed with Palace after the\n"
+                "surrogate optimisation loop. Only used when fine-tuning is enabled."
+            ),
+        ),
+        CobraSetting(
+            name="palace_fine_tuning_command",
+            dtype=str,
+            default="palace",
+            description=(
+                "Shell command used to invoke Palace for EM fine-tuning.\n"
+                "Can be a plain command name (if on PATH) or an absolute executable path."
+            ),
+        ),
+    ]
 
     def __init__(
         self,
