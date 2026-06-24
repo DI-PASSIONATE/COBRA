@@ -134,13 +134,19 @@ class MainWindow(QMainWindow):
         self.config_form_layout.addRow(self.netlist_label, h_net)
 
         self.sim_type_label = QLabel("Simulation Type:")
-        self.sim_type_value_label = QLabel("—")
-        self.sim_type_value_label.setToolTip(
-            "The primary analysis directive detected in the netlist "
-            "(e.g. .LIN, .AC, .HB, .TRAN).\n"
-            "This determines which design parameters are available."
+        self.sim_type_combo = QComboBox()
+        for st in [SimulationType.AC, SimulationType.HB,
+                   SimulationType.TRAN, SimulationType.DC]:
+            self.sim_type_combo.addItem(st.display_name, st)
+        self.sim_type_combo.setToolTip(
+            "The primary analysis directive used in the netlist (.AC, .HB, .TRAN, .DC).\n"
+            "For .AC simulations COBRA automatically adds a .LIN directive so that\n"
+            "Xyce writes Touchstone S-parameter files — no manual .LIN line is needed.\n"
+            "Changing this updates the sweep parameters below and the available design goals."
         )
-        self.config_form_layout.addRow(self.sim_type_label, self.sim_type_value_label)
+        self.config_form_layout.addRow(self.sim_type_label, self.sim_type_combo)
+        self.sim_type_label.setVisible(False)
+        self.sim_type_combo.setVisible(False)
 
         # Simulation Parameters — populated dynamically when a netlist is loaded.
         # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
@@ -376,7 +382,12 @@ class MainWindow(QMainWindow):
         self.fine_tuning_notification_shown = False
         self._available_parameters: List[str] = []  # populated from netlist on load
         self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name"
-        
+        self._parsed_directives: list = []  # last directives from netlist parse
+        self._num_ports: int = 0
+
+        # When the user manually changes the simulation type, rebuild param fields
+        self.sim_type_combo.currentIndexChanged.connect(self._on_sim_type_changed)
+
         apply_theme(self)
         self._set_action_button_state("start")
         self.update_simulator_options()
@@ -572,7 +583,7 @@ class MainWindow(QMainWindow):
                 f_start_hz = f_start * 1e9
                 f_end_hz = f_end * 1e9
                 
-                p_name = goal.parameter.value
+                p_name = goal.parameter_name
                 if p_name.startswith("S") and "_dB" in p_name:
                     if goal.min_value is not None:
                         # Draw line segment
@@ -807,15 +818,21 @@ class MainWindow(QMainWindow):
             parser = XyceNetlistParser().from_file(netlist_path)
             components = parser.components
 
-            # Update simulation type display and available parameter list
+            # Update simulation type combo and available parameter list
             sim_type = parser.simulation_type
-            num_ports = parser.num_ports
+            self._num_ports = parser.num_ports
+            self._parsed_directives = list(parser.simulation_directives)
             self._available_parameters = parser.available_design_parameters
 
-            sim_label = sim_type.display_name
-            if num_ports > 0:
-                sim_label += f"  ({num_ports} port{'s' if num_ports != 1 else ''})"
-            self.sim_type_value_label.setText(sim_label)
+            # Select matching item in the combo (block signal to avoid double rebuild)
+            self.sim_type_combo.blockSignals(True)
+            for i in range(self.sim_type_combo.count()):
+                if self.sim_type_combo.itemData(i) is sim_type:
+                    self.sim_type_combo.setCurrentIndex(i)
+                    break
+            self.sim_type_combo.blockSignals(False)
+            self.sim_type_label.setVisible(True)
+            self.sim_type_combo.setVisible(True)
 
             # Populate editable simulation-parameter fields
             self._populate_sim_param_widgets(parser.simulation_directives)
@@ -831,34 +848,79 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
             self.clear_component_onnx_selectors()
+            self.sim_type_label.setVisible(False)
+            self.sim_type_combo.setVisible(False)
             self._populate_sim_param_widgets([])
     
-    def _populate_sim_param_widgets(self, directives) -> None:
-        """Create editable fields for each tweakable simulation directive parameter."""
-        # Clear previous widgets
+    def _on_sim_type_changed(self) -> None:
+        """Called when the user manually picks a different simulation type in the combo."""
+        new_type = self.sim_type_combo.currentData()
+        if new_type is None:
+            return
+        # Update available design parameters for the new type
+        self._available_parameters = new_type.available_parameters(self._num_ports)
+        # Rebuild param widgets: use parsed values where they match, else defaults
+        self._populate_sim_param_widgets(self._parsed_directives, override_type=new_type)
+
+    def _populate_sim_param_widgets(self, directives, override_type: "SimulationType | None" = None) -> None:
+        """Create editable fields for each tweakable simulation directive parameter.
+
+        When *override_type* is given (user changed the combo manually), the
+        directive matching that type is used if present in *directives*; otherwise
+        sensible defaults from ``positional_param_defaults()`` are shown.
+        """
         while self.sim_params_form.rowCount() > 0:
             self.sim_params_form.removeRow(0)
         self._sim_param_edits.clear()
 
-        for directive in directives:
-            sim_type = SimulationType.from_directive(directive.directive)
-            param_names = sim_type.positional_param_names()
-            descriptions = sim_type.positional_param_descriptions()
-            # Only show positional params (skip index 0 = sweep_type for .AC – not useful to edit)
-            skip = {"sweep_type", "src_name"}
-            for i, name in enumerate(param_names):
+        skip = {"sweep_type", "src_name"}
+
+        if override_type is not None:
+            # Build a name→value map: start with defaults, then overlay parsed values
+            defaults = override_type.positional_param_defaults()
+            param_names = override_type.positional_param_names()
+            descriptions = override_type.positional_param_descriptions()
+
+            # Try to pull values from the parsed directive that matches the type
+            parsed_values: dict[str, str] = {}
+            directive_key = override_type.value.upper()  # e.g. ".AC"
+            for d in directives:
+                if d.directive.upper() == directive_key:
+                    for i, name in enumerate(param_names):
+                        if i < len(d.positional):
+                            parsed_values[name] = d.positional[i]
+                    break
+
+            for name in param_names:
                 if name in skip:
                     continue
-                if i >= len(directive.positional):
-                    continue
-                value = directive.positional[i]
-                key = f"{directive.directive.upper()}:{name}"
+                value = parsed_values.get(name, defaults.get(name, ""))
+                key = f"{directive_key}:{name}"
                 edit = QLineEdit(value)
                 if name in descriptions:
                     edit.setToolTip(descriptions[name])
                 label = name.replace("_", " ").title()
-                self.sim_params_form.addRow(f"{directive.directive} {label}:", edit)
+                self.sim_params_form.addRow(f"{directive_key} {label}:", edit)
                 self._sim_param_edits[key] = edit
+        else:
+            # Normal path: render all directives found in the netlist
+            for directive in directives:
+                sim_type = SimulationType.from_directive(directive.directive)
+                param_names = sim_type.positional_param_names()
+                descriptions = sim_type.positional_param_descriptions()
+                for i, name in enumerate(param_names):
+                    if name in skip:
+                        continue
+                    if i >= len(directive.positional):
+                        continue
+                    value = directive.positional[i]
+                    key = f"{directive.directive.upper()}:{name}"
+                    edit = QLineEdit(value)
+                    if name in descriptions:
+                        edit.setToolTip(descriptions[name])
+                    label = name.replace("_", " ").title()
+                    self.sim_params_form.addRow(f"{directive.directive} {label}:", edit)
+                    self._sim_param_edits[key] = edit
 
         self.sim_params_container.setVisible(bool(self._sim_param_edits))
 
@@ -1477,7 +1539,7 @@ class MainWindow(QMainWindow):
             # print(f"Updating Goal Table with metrics: {metrics} and losses: {losses}")
             
             for i, goal in enumerate(self.goals):
-                p_name = goal.parameter.value
+                p_name = goal.parameter_name
                 # Get value from metrics
                 # metrics contains arrays usually, we might want mean/min/max or just show range
                 val_array = metrics.get(p_name)

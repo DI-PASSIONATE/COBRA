@@ -15,19 +15,19 @@ class SimulationType(Enum):
     """
     Primary simulation mode inferred from the netlist directives.
 
-    In Xyce/SPICE, ``.AC`` performs an AC frequency sweep and ``.LIN`` is a
-    *post-processing* directive (not a separate simulation) that enables
-    S-parameter / Touchstone extraction from that sweep.  When both are
-    present in the same netlist, ``.LIN`` takes priority here because it is
-    the more specific indicator of an RF / S-parameter simulation.
+    In Xyce/SPICE, ``.AC`` performs a small-signal AC frequency sweep.
+    ``.LIN`` is a *post-processing* directive that sits alongside ``.AC`` and
+    instructs Xyce to extract S-parameters and write a Touchstone (``.s*p``)
+    file — it is not a separate simulation.  Both directives map to
+    ``SimulationType.AC`` here, since they share the same sweep parameters
+    and produce compatible outputs.
 
     ``HB``  — Harmonic Balance (periodic steady-state, non-linear).
     ``TRAN``— Transient time-domain simulation.
     ``DC``  — DC operating-point sweep.
     """
 
-    LIN     = ".LIN"   # AC sweep + S-parameter extraction (Touchstone output)
-    AC      = ".AC"    # Plain AC frequency sweep (no explicit S-param output)
+    AC      = ".AC"    # AC frequency sweep; COBRA always pairs this with .LIN for S-parameter (Touchstone) output
     HB      = ".HB"    # Harmonic Balance
     TRAN    = ".TRAN"  # Transient
     DC      = ".DC"    # DC sweep
@@ -40,13 +40,14 @@ class SimulationType(Enum):
     @classmethod
     def from_directive(cls, directive: str) -> "SimulationType":
         """
-        Convert a raw dot-directive string (e.g. ``.LIN``, ``.tran``) to the
-        corresponding ``SimulationType``.  Unrecognised directives map to
-        ``UNKNOWN``.
+        Convert a raw dot-directive string (e.g. ``.AC``, ``.tran``) to the
+        corresponding ``SimulationType``.  Both ``.AC`` and ``.LIN`` map to
+        ``SimulationType.AC`` because ``.LIN`` is a post-processor on ``.AC``,
+        not a separate simulation.  Unrecognised directives map to ``UNKNOWN``.
         """
         normalized = directive.strip().upper()
         _map: dict[str, "SimulationType"] = {
-            ".LIN":  cls.LIN,
+            ".LIN":  cls.AC,   # .LIN post-processes .AC results; treat as the same type
             ".AC":   cls.AC,
             ".HB":   cls.HB,
             ".TRAN": cls.TRAN,
@@ -104,6 +105,16 @@ class SimulationType(Enum):
         }
         return dict(_map.get(self, {}))
 
+    def positional_param_defaults(self) -> dict[str, str]:
+        """Sensible default values for each positional parameter slot."""
+        _map: dict = {
+            SimulationType.AC:   {"sweep_type": "LIN", "points": "500", "start_freq": "1G", "stop_freq": "10G"},
+            SimulationType.TRAN: {"step": "1n", "stop_time": "100n", "start_time": "0", "max_step": "1n"},
+            SimulationType.HB:   {"fund_freq": "1G"},
+            SimulationType.DC:   {"src_name": "V1", "start": "0", "stop": "1", "incr": "0.01"},
+        }
+        return dict(_map.get(self, {}))
+
     # ------------------------------------------------------------------
     # Parameter discovery
     # ------------------------------------------------------------------
@@ -123,7 +134,7 @@ class SimulationType(Enum):
 
         Other simulation types are not yet implemented and return an empty list.
         """
-        if self in (SimulationType.LIN, SimulationType.AC):
+        if self is SimulationType.AC:
             if num_ports < 1:
                 return []
             params: List[str] = []

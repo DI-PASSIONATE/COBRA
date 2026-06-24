@@ -259,17 +259,15 @@ class XyceNetlistParser(BaseNetlistParser):
                 continue
 
             # Detect the primary simulation / analysis directive.
-            # .LIN (S-parameter extraction) takes priority over .AC because
-            # the two often coexist: .AC drives the sweep and .LIN enables
-            # Touchstone/S-parameter output. .LIN is the more specific indicator.
+            # Both .AC and .LIN map to SimulationType.AC (see SimulationType.from_directive).
+            # .LIN is a post-processing directive that sits alongside .AC to request
+            # Touchstone/S-parameter output — it is not a separate simulation type.
+            # The first recognised directive wins; subsequent ones are stored but
+            # do not override _simulation_type.
             m_sim = self._sim_directive_re.match(stripped)
             if m_sim:
                 detected = SimulationType.from_directive(m_sim.group(1))
-                if detected is SimulationType.LIN:
-                    # .LIN always wins – it is more specific than a plain .AC sweep.
-                    self._simulation_type = SimulationType.LIN
-                elif self._simulation_type is SimulationType.UNKNOWN:
-                    # First non-LIN directive wins only if nothing has been set yet.
+                if self._simulation_type is SimulationType.UNKNOWN:
                     self._simulation_type = detected
 
                 # Store the full directive so it can be inspected and edited later.
