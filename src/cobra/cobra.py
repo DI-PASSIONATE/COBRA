@@ -102,28 +102,28 @@ class COBRA:
             raise TypeError("netlist_parser must be an instance of BaseNetlistParser")
         
         components = netlist_parser.components
-        if not components:
-            raise ValueError("NetlistParser contains no components (X instances) requiring surrogates")
-        
         if component_onnx_mapping is None:
-            raise ValueError("component_onnx_mapping is required when using netlist_parser")
-        
-        # Validate that all components have models
-        missing_components = set(components.keys()) - set(component_onnx_mapping.keys())
+            component_onnx_mapping = {}
+
+        # Validate that all components that have models are present in the netlist
+        missing_components = set(component_onnx_mapping.keys()) - set(components.keys())
         if missing_components:
             raise ValueError(
-                f"Missing model files for components: {missing_components}. "
-                f"Available components: {set(components.keys())}"
+                f"component_onnx_mapping references unknown components: {missing_components}. "
+                f"Components found in netlist: {set(components.keys())}"
             )
-        
+
         self.netlist_parser = netlist_parser
         self.component_onnx_mapping = component_onnx_mapping
 
-        # Pass all components 
-        self.em_surrogate_stage = EMSurrogateStage(
-            em_surrogate_model=[component_onnx_mapping[comp] for comp in components],
-            component_names=list(components.keys())
-        )
+        # Only create a surrogate stage when there are components with models
+        if components and component_onnx_mapping:
+            self.em_surrogate_stage = EMSurrogateStage(
+                em_surrogate_model=[component_onnx_mapping[comp] for comp in components if comp in component_onnx_mapping],
+                component_names=[comp for comp in components if comp in component_onnx_mapping]
+            )
+        else:
+            self.em_surrogate_stage = None
         
         self.optimizer_stage = OptimizerStage(optimizer)
         self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
@@ -203,6 +203,7 @@ class COBRA:
 
         context = {
             "netlist": netlist,
+            "native_sim_type": netlist_parser.simulation_type,
             "design_goal_checker": design_goal_checker,
             "optimization_parameters": optimization_parameters,
             "goal_achieved": False,
@@ -239,7 +240,10 @@ class COBRA:
 
             # Perform EM simulations / s parameter prediction using surrogate model from ORCA
             t2 = time.time()
-            context = self.em_surrogate_stage.run(context)
+            if self.em_surrogate_stage is not None:
+                context = self.em_surrogate_stage.run(context)
+            else:
+                context.setdefault("predicted_networks", [])
 
             # Perform circuit-level simulation
             t3 = time.time()
@@ -285,7 +289,7 @@ class COBRA:
             print(f"Design goals achieved at iteration {context['iteration']}.")
         
         # Save the surrogate model's predicted S-parameters to the results directory for the user
-        ntwks: List[rf.Network] = context["predicted_networks"]
+        ntwks: List[rf.Network] = context.get("predicted_networks", [])
         for i, ntwk in enumerate(ntwks):
             name_suffix = f"_{ntwk.name}" if ntwk.name else f"_{i+1}"
             surrogate_file = results_dir / f"surrogate_s_params{name_suffix}.s{ntwk.nports}p"
@@ -344,7 +348,8 @@ class COBRA:
                 
             # Rerun simulation to update context with best result
             print("Re-simulating with best parameters...")
-            context = self.em_surrogate_stage.run(context)
+            if self.em_surrogate_stage is not None:
+                context = self.em_surrogate_stage.run(context)
             context = self.circuit_simulation_stage.run(context)
             context = design_goal_checker.check_goals(context)
         
@@ -360,18 +365,19 @@ class COBRA:
         orca_geometries = context.get("orca_geometries") or {}
 
         # Validate that every ONNX-based component has a geometry
-        onnx_components = [
-            comp for comp, is_ts in zip(
-                self.em_surrogate_stage.component_names, self.em_surrogate_stage.is_touchstone
-            )
-            if not is_ts
-        ]
-        missing = [c for c in onnx_components if c not in orca_geometries]
-        if missing:
-            raise ValueError(
-                f"No ORCA geometry provided for component(s): {missing}. "
-                "Cannot perform EM fine-tuning without geometry information."
-            )
+        if self.em_surrogate_stage is not None:
+            onnx_components = [
+                comp for comp, is_ts in zip(
+                    self.em_surrogate_stage.component_names, self.em_surrogate_stage.is_touchstone
+                )
+                if not is_ts
+            ]
+            missing = [c for c in onnx_components if c not in orca_geometries]
+            if missing:
+                raise ValueError(
+                    f"No ORCA geometry provided for component(s): {missing}. "
+                    "Cannot perform EM fine-tuning without geometry information."
+                )
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
         fine_tuning_optimizer_stage = self._build_fine_tuning_optimizer_stage()

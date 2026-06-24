@@ -28,9 +28,16 @@ class CircuitSimulationStage(COBRABaseStage):
             out_name = os.path.join(results_dir, n.name if n.name else "cobra_output")
             self.simulator.preprocess_ntwk(n, name=out_name)
 
-        # Determine which simulation types are needed from the design goals
-        design_goal_checker = context.get("design_goal_checker")
+        # Determine which simulation types to run:
+        # 1. Always run the netlist's native simulation type.
+        # 2. Also run any type required by a design goal (e.g. AC for S-params
+        #    when the native type is HB).
+        native_sim_type: SimulationType = context.get("native_sim_type", SimulationType.UNKNOWN)
         required_types: Set[SimulationType] = set()
+        if native_sim_type is not SimulationType.UNKNOWN:
+            required_types.add(native_sim_type)
+
+        design_goal_checker = context.get("design_goal_checker")
         if design_goal_checker:
             for goal in design_goal_checker.design_goals:
                 st = goal.required_simulation_type
@@ -91,19 +98,54 @@ class CircuitSimulationStage(COBRABaseStage):
         defaults = sim_type.positional_param_defaults()
         merged = {**defaults, **sim_params}
 
-        # Directive not in netlist yet — inject it.
-        # Build the positional token string in the correct order.
+        # Build the new directive line(s).
         tokens = [sim_type.value]
         for param_name in sim_type.positional_param_names():
             tokens.append(merged.get(param_name, ""))
-        new_line = " ".join(t for t in tokens if t) + "\n"
-        # Insert before the first .end / .END line, or append
-        lines = parser._lines  # access internal line list
-        end_idx = next(
-            (i for i, l in enumerate(lines) if l.strip().upper() in {".END", ".ENDS"}),
-            len(lines),
-        )
-        lines.insert(end_idx, new_line)
+        new_directive = " ".join(t for t in tokens if t) + "\n"
 
+        # For AC we also need .LIN so Xyce writes a Touchstone file.
+        extra_lines = []
+        if sim_type is SimulationType.AC:
+            extra_lines.append(".LIN format=touchstone sparcalc=1\n")
+
+        # Work on a copy of the raw lines.
+        lines = parser._lines[:]
+
+        # Remove all existing top-level simulation directives and their
+        # companion lines (.PRINT, .options hbint, etc.) that belong to
+        # a different analysis — they must not appear in the copy netlist.
+        # Track subckt nesting so we only remove top-level directives.
+        _SIM_PREFIXES = {".hb", ".tran", ".dc", ".ac", ".lin",
+                         ".print", ".options", ".measure", ".four"}
+        pruned: list[str] = []
+        depth = 0
+        for raw in lines:
+            stripped = raw.strip().lower()
+            if stripped.startswith(".subckt"):
+                depth += 1
+                pruned.append(raw)
+                continue
+            if stripped.startswith(".ends"):
+                if depth > 0:
+                    depth -= 1
+                pruned.append(raw)
+                continue
+            # At top level: drop lines that start with a simulation directive
+            if depth == 0 and any(stripped.startswith(p) for p in _SIM_PREFIXES):
+                continue
+            pruned.append(raw)
+
+        # Insert new directive(s) before the top-level .END line.
+        end_idx = next(
+            (i for i, l in enumerate(pruned)
+             if l.strip().upper() == ".END"),
+            len(pruned),
+        )
+        for extra in reversed(extra_lines):
+            pruned.insert(end_idx, extra)
+        pruned.insert(end_idx, new_directive)
+
+        parser._lines = pruned
         parser.save(dest)
         return dest

@@ -135,19 +135,15 @@ class MainWindow(QMainWindow):
         self.config_form_layout.addRow(self.netlist_label, h_net)
 
         self.sim_type_label = QLabel("Simulation Type:")
-        self.sim_type_combo = QComboBox()
-        for st in [SimulationType.AC, SimulationType.HB,
-                   SimulationType.TRAN, SimulationType.DC]:
-            self.sim_type_combo.addItem(st.display_name, st)
-        self.sim_type_combo.setToolTip(
-            "The primary analysis directive used in the netlist (.AC, .HB, .TRAN, .DC).\n"
-            "For .AC simulations COBRA automatically adds a .LIN directive so that\n"
-            "Xyce writes Touchstone S-parameter files — no manual .LIN line is needed.\n"
-            "Changing this updates the sweep parameters below and the available design goals."
+        self.sim_type_value_label = QLabel()
+        self.sim_type_value_label.setToolTip(
+            "Primary analysis directive detected from the loaded netlist.\n"
+            "If any design goal requires an .AC S-parameter simulation and the netlist\n"
+            "does not already contain .AC, COBRA will add it automatically."
         )
-        self.config_form_layout.addRow(self.sim_type_label, self.sim_type_combo)
+        self.config_form_layout.addRow(self.sim_type_label, self.sim_type_value_label)
         self.sim_type_label.setVisible(False)
-        self.sim_type_combo.setVisible(False)
+        self.sim_type_value_label.setVisible(False)
 
         # Simulation Parameters — populated dynamically when a netlist is loaded.
         # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
@@ -385,9 +381,7 @@ class MainWindow(QMainWindow):
         self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name"
         self._parsed_directives: list = []  # last directives from netlist parse
         self._num_ports: int = 0
-
-        # When the user manually changes the simulation type, rebuild param fields
-        self.sim_type_combo.currentIndexChanged.connect(self._on_sim_type_changed)
+        self._netlist_sim_type: "SimulationType | None" = None
 
         apply_theme(self)
         self._set_action_button_state("start")
@@ -825,15 +819,10 @@ class MainWindow(QMainWindow):
             self._parsed_directives = list(parser.simulation_directives)
             self._available_parameters = get_available_parameters(self._num_ports)
 
-            # Select matching item in the combo (block signal to avoid double rebuild)
-            self.sim_type_combo.blockSignals(True)
-            for i in range(self.sim_type_combo.count()):
-                if self.sim_type_combo.itemData(i) is sim_type:
-                    self.sim_type_combo.setCurrentIndex(i)
-                    break
-            self.sim_type_combo.blockSignals(False)
+            self._netlist_sim_type = sim_type
+            self.sim_type_value_label.setText(sim_type.display_name)
             self.sim_type_label.setVisible(True)
-            self.sim_type_combo.setVisible(True)
+            self.sim_type_value_label.setVisible(True)
 
             # Populate editable simulation-parameter fields for required sim types
             self._refresh_sim_params_for_goals()
@@ -849,28 +838,28 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
             self.clear_component_onnx_selectors()
+            self._netlist_sim_type = None
             self.sim_type_label.setVisible(False)
-            self.sim_type_combo.setVisible(False)
+            self.sim_type_value_label.setVisible(False)
             self._populate_sim_param_widgets(set())
     
-    def _on_sim_type_changed(self) -> None:
-        """Called when the user manually picks a different simulation type in the combo."""
-        # Rebuild param widgets for the now-required sim types
-        self._refresh_sim_params_for_goals()
-
     def _refresh_sim_params_for_goals(self) -> None:
-        """Rebuild sim-param widgets for all types required by the current goals + combo type."""
+        """Rebuild sim-param widgets for the native sim type and any goal-required additions."""
         required: set = set()
+        # Native sim type (from netlist) is always shown and always run
+        if self._netlist_sim_type is not None:
+            required.add(self._netlist_sim_type)
+        # Add any additional types required by goals (e.g. AC for S-parameter goals
+        # when the native type is HB)
         for goal in self.goals:
             st = goal.required_simulation_type
             if st is not SimulationType.UNKNOWN:
                 required.add(st)
-        # Always include the primary type from the combo (or AC as default)
-        combo_type = self.sim_type_combo.currentData() if self.sim_type_combo.isVisible() else None
-        if combo_type:
-            required.add(combo_type)
         if not required:
             required = {SimulationType.AC}
+        # Update the displayed simulation type label to reflect all required types
+        all_types_str = ", ".join(st.display_name for st in sorted(required, key=lambda t: t.value))
+        self.sim_type_value_label.setText(all_types_str)
         self._populate_sim_param_widgets(required)
 
     def _populate_sim_param_widgets(self, sim_types: "set[SimulationType]") -> None:
@@ -917,11 +906,23 @@ class MainWindow(QMainWindow):
         self.sim_params_container.setVisible(bool(self._sim_param_edits))
 
     def _apply_simulation_parameters(self, parser) -> None:
-        """Apply GUI-edited simulation parameters to an in-memory parser."""
-        # Group edits by directive keyword
+        """Apply GUI-edited simulation parameters to an in-memory parser.
+
+        Only updates directives that already exist in the netlist.  Directives
+        that are absent (e.g. .AC when the native type is .HB) will be injected
+        with the correct parameters by CircuitSimulationStage at run-time.
+        """
+        existing_directives = {
+            SimulationType.from_directive(d.directive)
+            for d in self._parsed_directives
+        }
+
         updates: Dict[str, Dict[str, str]] = {}
         for key, edit in self._sim_param_edits.items():
             directive, param_name = key.split(":", 1)
+            st = SimulationType.from_directive(directive)
+            if st not in existing_directives:
+                continue  # will be injected at run-time — skip
             updates.setdefault(directive, {})[param_name] = edit.text().strip()
 
         for directive, params in updates.items():
@@ -1322,8 +1323,8 @@ class MainWindow(QMainWindow):
                     return
                 component_onnx_mapping[comp_name] = onnx_path
         else:
-            QMessageBox.warning(self, "No Components Found", "No surrogatecomponents (X instances) found in netlist.")
-            return
+            # No surrogate components — optimization-only mode (e.g. pure HB)
+            component_onnx_mapping = {}
 
         orca_geometries = {}
         if self.finetune_cb.isChecked():

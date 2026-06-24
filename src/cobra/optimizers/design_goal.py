@@ -9,10 +9,10 @@ import skrf as rf
 
 from cobra.spice_sim.simulation_type import SimulationType
 
-
 # ---------------------------------------------------------------------------
 # DesignParameter — an object-oriented descriptor for a single measurable goal
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DesignParameter:
@@ -54,6 +54,7 @@ class DesignParameter:
 # Helper: Z-matrix accessor used by several lumped-parameter formulas
 # ---------------------------------------------------------------------------
 
+
 def _mm_z(ntwk: rf.Network):
     """Return (mm_ntwk, z11, z22, z21, omega) after mixed-mode conversion if ≥ 4 ports."""
     mm = ntwk.copy()
@@ -66,33 +67,41 @@ def _mm_z(ntwk: rf.Network):
 # Predefined lumped-element parameters (AC/Z-matrix based)
 # ---------------------------------------------------------------------------
 
+
 def _lp(ntwk):
     _, z11, *_, omega = _mm_z(ntwk)
     return np.imag(z11) / omega * 1e9
+
 
 def _ls(ntwk):
     _, _, z22, *_, omega = _mm_z(ntwk)
     return np.imag(z22) / omega * 1e9
 
+
 def _rp(ntwk):
     _, z11, *_ = _mm_z(ntwk)
     return np.real(z11)
+
 
 def _rs(ntwk):
     _, _, z22, *_ = _mm_z(ntwk)
     return np.real(z22)
 
+
 def _qp(ntwk):
     _, z11, *_ = _mm_z(ntwk)
     return np.imag(z11) / np.real(z11)
+
 
 def _qs(ntwk):
     _, _, z22, *_ = _mm_z(ntwk)
     return np.imag(z22) / np.real(z22)
 
+
 def _k(ntwk):
     _, z11, z22, z21, _ = _mm_z(ntwk)
     return np.abs(np.imag(z21) / np.sqrt(np.imag(z11) * np.imag(z22)))
+
 
 def _srf(ntwk):
     _, z11, *_ = _mm_z(ntwk)
@@ -101,26 +110,56 @@ def _srf(ntwk):
     return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else None
 
 
-# All single-port lumped parameters
-_SINGLE_PORT_LUMPED: list[DesignParameter] = [
-    DesignParameter("Lp",  SimulationType.AC, _lp,  "Primary (single-port) inductance in nH.",  min_ports=1),
-    DesignParameter("Rp",  SimulationType.AC, _rp,  "Primary (single-port) series resistance in Ω.", min_ports=1),
-    DesignParameter("Qp",  SimulationType.AC, _qp,  "Primary quality factor (Im(Z₁₁) / Re(Z₁₁)).", min_ports=1),
-    DesignParameter("SRF", SimulationType.AC, _srf, "Self-resonance frequency in GHz.",          min_ports=1),
-]
+# ---------------------------------------------------------------------------
+# Two-port stability figures (small-signal, AC)
+# ---------------------------------------------------------------------------
 
-# Two-port lumped parameters (secondary winding / coupling)
-_TWO_PORT_LUMPED: list[DesignParameter] = [
-    DesignParameter("Ls",  SimulationType.AC, _ls, "Secondary (two-port) inductance in nH.", min_ports=2),
-    DesignParameter("Rs",  SimulationType.AC, _rs, "Secondary (two-port) series resistance in Ω.", min_ports=2),
-    DesignParameter("Qs",  SimulationType.AC, _qs, "Secondary quality factor (Im(Z₂₂) / Re(Z₂₂)).", min_ports=2),
-    DesignParameter("k",   SimulationType.AC, _k,  "Magnetic coupling coefficient between primary and secondary.", min_ports=2),
-]
+
+def _stability_terms(ntwk: rf.Network):
+    """Return (s11, s12, s21, s22, delta) for a 2-port network."""
+    s11 = ntwk.s[:, 0, 0]
+    s12 = ntwk.s[:, 0, 1]
+    s21 = ntwk.s[:, 1, 0]
+    s22 = ntwk.s[:, 1, 1]
+    delta = s11 * s22 - s12 * s21
+    return s11, s12, s21, s22, delta
+
+
+def _mu(ntwk):
+    s11, s12, s21, s22, delta = _stability_terms(ntwk)
+    return (1 - np.abs(s11) ** 2) / (
+        np.abs(s22 - delta * np.conj(s11)) + np.abs(s12 * s21)
+    )
+
+
+def _mu_prime(ntwk):
+    s11, s12, s21, s22, delta = _stability_terms(ntwk)
+    return (1 - np.abs(s22) ** 2) / (
+        np.abs(s11 - delta * np.conj(s22)) + np.abs(s12 * s21)
+    )
+
+
+def _rollett_k(ntwk):
+    s11, s12, s21, s22, delta = _stability_terms(ntwk)
+    return (1 - np.abs(s11) ** 2 - np.abs(s22) ** 2 + np.abs(delta) ** 2) / (
+        2 * np.abs(s12 * s21)
+    )
+
+
+def _gmax(ntwk):
+    s11, s12, s21, s22, delta = _stability_terms(ntwk)
+    K = (1 - np.abs(s11) ** 2 - np.abs(s22) ** 2 + np.abs(delta) ** 2) / (
+        2 * np.abs(s12 * s21)
+    )
+    ratio = np.abs(s21 / s12)
+    # Gmax is only defined where K ≥ 1; clamp K² - 1 at 0 to avoid NaN
+    return ratio * (K - np.sqrt(np.maximum(K**2 - 1, 0)))
 
 
 # ---------------------------------------------------------------------------
 # Factory for dynamic S-parameter DesignParameters
 # ---------------------------------------------------------------------------
+
 
 def make_s_param_db(i: int, j: int) -> DesignParameter:
     """Return a ``S{i}{j}_dB`` DesignParameter (dB magnitude)."""
@@ -144,6 +183,103 @@ def make_s_param_linear(i: int, j: int) -> DesignParameter:
     )
 
 
+# --------------------------------------------------------------------------
+# DesignParameter catalogue 
+# --------------------------------------------------------------------------
+
+# All single-port lumped parameters
+_SINGLE_PORT_LUMPED: list[DesignParameter] = [
+    DesignParameter(
+        "Lp",
+        SimulationType.AC,
+        _lp,
+        "Primary (single-port) inductance in nH.",
+        min_ports=1,
+    ),
+    DesignParameter(
+        "Rp",
+        SimulationType.AC,
+        _rp,
+        "Primary (single-port) series resistance in Ω.",
+        min_ports=1,
+    ),
+    DesignParameter(
+        "Qp",
+        SimulationType.AC,
+        _qp,
+        "Primary quality factor (Im(Z₁₁) / Re(Z₁₁)).",
+        min_ports=1,
+    ),
+    DesignParameter(
+        "SRF", SimulationType.AC, _srf, "Self-resonance frequency in GHz.", min_ports=1
+    ),
+]
+
+# Two-port lumped parameters (secondary winding / coupling)
+_TWO_PORT_LUMPED: list[DesignParameter] = [
+    DesignParameter(
+        "Ls",
+        SimulationType.AC,
+        _ls,
+        "Secondary (two-port) inductance in nH.",
+        min_ports=2,
+    ),
+    DesignParameter(
+        "Rs",
+        SimulationType.AC,
+        _rs,
+        "Secondary (two-port) series resistance in Ω.",
+        min_ports=2,
+    ),
+    DesignParameter(
+        "Qs",
+        SimulationType.AC,
+        _qs,
+        "Secondary quality factor (Im(Z₂₂) / Re(Z₂₂)).",
+        min_ports=2,
+    ),
+    DesignParameter(
+        "k",
+        SimulationType.AC,
+        _k,
+        "Magnetic coupling coefficient between primary and secondary.",
+        min_ports=2,
+    ),
+]
+
+
+_STABILITY: list[DesignParameter] = [
+    DesignParameter(
+        "mu",
+        SimulationType.AC,
+        _mu,
+        "Mu stability factor (source). > 1 indicates unconditional small-signal stability.",
+        min_ports=2,
+    ),
+    DesignParameter(
+        "mu_prime",
+        SimulationType.AC,
+        _mu_prime,
+        "Mu' stability factor (load). > 1 indicates unconditional small-signal stability.",
+        min_ports=2,
+    ),
+    DesignParameter(
+        "K",
+        SimulationType.AC,
+        _rollett_k,
+        "Rollett stability factor. K > 1 together with |Δ| < 1 guarantees unconditional stability.",
+        min_ports=2,
+    ),
+    DesignParameter(
+        "Gmax",
+        SimulationType.AC,
+        _gmax,
+        "Maximum available / stable gain |S21/S12| · (K − √(K²−1)), defined where K ≥ 1.",
+        min_ports=2,
+    ),
+]
+
+
 # ---------------------------------------------------------------------------
 # Global catalogue — all known DesignParameters up to MAX_PORTS S-param ports.
 # Use get_available_parameters() to obtain the subset valid for a given netlist.
@@ -152,10 +288,19 @@ def make_s_param_linear(i: int, j: int) -> DesignParameter:
 MAX_PORTS: int = 8
 
 _ALL_PARAMETERS: list[DesignParameter] = (
-    [make_s_param_db(i, j)     for i in range(1, MAX_PORTS + 1) for j in range(1, MAX_PORTS + 1)]
-    + [make_s_param_linear(i, j) for i in range(1, MAX_PORTS + 1) for j in range(1, MAX_PORTS + 1)]
+    [
+        make_s_param_db(i, j)
+        for i in range(1, MAX_PORTS + 1)
+        for j in range(1, MAX_PORTS + 1)
+    ]
+    + [
+        make_s_param_linear(i, j)
+        for i in range(1, MAX_PORTS + 1)
+        for j in range(1, MAX_PORTS + 1)
+    ]
     + _SINGLE_PORT_LUMPED
     + _TWO_PORT_LUMPED
+    + _STABILITY
 )
 
 
@@ -178,7 +323,8 @@ def get_available_parameters(
     if num_ports < 1:
         return []
     return [
-        p for p in _ALL_PARAMETERS
+        p
+        for p in _ALL_PARAMETERS
         if p.min_ports <= num_ports
         and (simulation_type is None or p.simulation_type is simulation_type)
     ]
@@ -195,6 +341,7 @@ def find_parameter(name: str) -> Optional[DesignParameter]:
 # ---------------------------------------------------------------------------
 # DesignGoal — a constraint on a DesignParameter over a frequency range
 # ---------------------------------------------------------------------------
+
 
 class DesignGoal:
     """
@@ -238,11 +385,15 @@ class DesignGoal:
             below_mask = values < self.min_value
             above_mask = values > self.max_value
             if np.any(below_mask):
-                diff = (self.min_value - values[below_mask]) / (np.abs(self.min_value) + self._eps)
-                loss_val += np.sum(diff ** 2)
+                diff = (self.min_value - values[below_mask]) / (
+                    np.abs(self.min_value) + self._eps
+                )
+                loss_val += np.sum(diff**2)
             if np.any(above_mask):
-                diff = (values[above_mask] - self.max_value) / (np.abs(self.max_value) + self._eps)
-                loss_val += np.sum(diff ** 2)
+                diff = (values[above_mask] - self.max_value) / (
+                    np.abs(self.max_value) + self._eps
+                )
+                loss_val += np.sum(diff**2)
             return loss_val
 
         elif self.min_value is not None:
@@ -265,6 +416,7 @@ class DesignGoal:
 # ---------------------------------------------------------------------------
 # DesignGoalChecker — evaluates all goals against simulation results
 # ---------------------------------------------------------------------------
+
 
 class DesignGoalChecker:
     """Evaluates a list of DesignGoals against one or more simulation results."""
@@ -321,7 +473,9 @@ class DesignGoalChecker:
 
             values = goal.parameter.formula(ntwk_sliced)
             if values is None:
-                raise ValueError(f"Formula returned None for parameter '{goal.parameter_name}'.")
+                raise ValueError(
+                    f"Formula returned None for parameter '{goal.parameter_name}'."
+                )
 
             design_state[goal.parameter_name] = values
             penalties.append(goal.penalty(values) * goal.weight)
@@ -335,5 +489,3 @@ class DesignGoalChecker:
             for g in self.design_goals
         ]
         return "Design Goals: " + " | ".join(parts)
-
-
