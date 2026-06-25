@@ -54,7 +54,8 @@ class CircuitSimulationStage(COBRABaseStage):
 
         for sim_type in required_types:
             prepared = self._prepare_netlist_for_type(
-                netlist_path, sim_type, sim_params_by_type.get(sim_type, {}), results_dir
+                netlist_path, sim_type, sim_params_by_type.get(sim_type, {}), results_dir,
+                simulator=self.simulator,
             )
             ntwk_result = self.simulator.run_simulation(prepared)
             if ntwk_result is not None:
@@ -70,6 +71,7 @@ class CircuitSimulationStage(COBRABaseStage):
         sim_type: SimulationType,
         sim_params: Dict[str, str],
         results_dir: str,
+        simulator: "BaseSimulator",
     ) -> str:
         """
         Return the path to a netlist ready for *sim_type*.
@@ -94,14 +96,18 @@ class CircuitSimulationStage(COBRABaseStage):
         name, ext = os.path.splitext(base)
         dest = os.path.join(results_dir, f"{name}_{sim_type.name.lower()}{ext}")
 
-        # Merge GUI params over built-in defaults
-        defaults = sim_type.positional_param_defaults()
+        # Merge GUI params over built-in defaults from the simulator
+        meta = simulator.get_simulation_metadata(sim_type)
+        defaults = meta.positional_param_defaults
         merged = {**defaults, **sim_params}
 
         # Build the new directive line(s).
         tokens = [sim_type.value]
-        for param_name in sim_type.positional_param_names():
-            tokens.append(merged.get(param_name, ""))
+        for param_name in meta.positional_param_names:
+            # A param value may contain multiple space-separated tokens
+            # (e.g. HB frequencies = "95E9 10E9") — expand them individually.
+            raw = merged.get(param_name, "")
+            tokens.extend(t for t in raw.split() if t)
         new_directive = " ".join(t for t in tokens if t) + "\n"
 
         # For AC we also need .LIN so Xyce writes a Touchstone file.

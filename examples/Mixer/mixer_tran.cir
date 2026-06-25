@@ -1,7 +1,7 @@
 * Qucs 26.1.0  /home/users/simone/Hiwi/MixerExample/Example_schematic_Mixer_COBRA_xyce.sch
-.INCLUDE "/usr/local/share/qucs-s/spicelibrary/xfmr.cir"
-.LIB "/home/users/simone/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerHBT.lib" hbt_typ
-.LIB "/home/users/simone/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/resistors_mod.lib" hbt_typ
+.INCLUDE "/usr/share/qucs-s/spicelibrary/xfmr.cir"
+.LIB "/home/david/Documents/git/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerHBT.lib" hbt_typ
+.LIB "/home/david/Documents/git/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/resistors_mod.lib" hbt_typ
 
 .SUBCKT IHP_PDK_nonlinear_components_npn13G2  gnd c b e bn Nx=1  
 X1 c b e bn npn13G2 Nx={Nx} 
@@ -4864,5 +4864,5 @@ LM_pos8 _net16 VdcRF  1
 P1 _net29 0 port=2  z0=100  AC 0.28284271  SIN 0 0.28284271 95G
 P2 _net28 0 port=1  z0=100  AC 0.089442719  SIN 0 0.089442719 130G
 .tran 1.001e-12 1e-09 0 1.001e-12
-.PRINT  tran format=raw file=spice4qucs.tran.plot I(VIF_CM) I(VIF_neg) I(VIF_pos) I(VLO_CM) I(VLO_IN) I(VLO_neg) I(VLO_pos) I(VOut) I(VRF_CM) I(VRF_IN) I(VRF_M_n) I(VRF_M_p) I(VRF_neg) I(VRF_pos) v(IF_COM) v(IF_M_n) v(IF_M_p) v(IF_neg) v(IF_pos) v(LO_CM) v(LO_M_n) v(LO_M_p) v(LO_in) v(LO_neg) v(LO_pos) v(Out) v(RF_CM) v(RF_M_n) v(RF_M_p) v(RF_in) v(RF_neg) v(RF_pos) v(Vcoll2) v(VdcRF) v(Vdd) v(Vdd2) v(sub) v(v_coll) 
+.PRINT  tran file=spice4qucs.tran.plot I(VIF_CM) I(VIF_neg) I(VIF_pos) I(VLO_CM) I(VLO_IN) I(VLO_neg) I(VLO_pos) I(VOut) I(VRF_CM) I(VRF_IN) I(VRF_M_n) I(VRF_M_p) I(VRF_neg) I(VRF_pos) v(IF_COM) v(IF_M_n) v(IF_M_p) v(IF_neg) v(IF_pos) v(LO_CM) v(LO_M_n) v(LO_M_p) v(LO_in) v(LO_neg) v(LO_pos) v(Out) v(RF_CM) v(RF_M_n) v(RF_M_p) v(RF_in) v(RF_neg) v(RF_pos) v(Vcoll2) v(VdcRF) v(Vdd) v(Vdd2) v(sub) v(v_coll) 
 .END

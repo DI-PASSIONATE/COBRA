@@ -56,6 +56,9 @@ class XyceNetlistParser(BaseNetlistParser):
         r"^\s*\.include\s+[\"']?([^\s\"']+)[\"']?\s*$",               re.IGNORECASE
     )
 
+    # .options lines: ".options <category> [key=val ...]"
+    _options_re      = re.compile(r"^\s*\.options\b",                  re.IGNORECASE)
+
     # -------------------------------------------------------------------------
     # Constructor
     # -------------------------------------------------------------------------
@@ -65,6 +68,8 @@ class XyceNetlistParser(BaseNetlistParser):
         # Maps rewritten X-instance names → original TSTONEFILE paths so the
         # GUI can display them even after the Y→X conversion.
         self._tstonefile_map: Dict[str, str] = {}
+        # Parsed .options lines: category_lower → {param: value, "_line_index": int}
+        self._options_lines: Dict[str, Dict] = {}
 
     # -------------------------------------------------------------------------
     # Public mutators
@@ -193,6 +198,7 @@ class XyceNetlistParser(BaseNetlistParser):
         """
         self._normalize_tstonefile_subcircuits()
         self._reset_state()
+        self._options_lines = {}
 
         subckt_depth = 0  # > 0 while inside a .SUBCKT definition block
 
@@ -283,6 +289,14 @@ class XyceNetlistParser(BaseNetlistParser):
                     line_index=idx,
                 ))
 
+            # Parse .options lines (e.g. ".options hbint numfreq=3 STARTUPPERIODS=2").
+            if self._options_re.match(stripped):
+                tokens_opt = stripped.split()
+                if len(tokens_opt) >= 2:
+                    category = tokens_opt[1].lower()
+                    opt_params = self._collect_params(tokens_opt[2:])
+                    self._options_lines[category] = {"_line_index": idx, **opt_params}
+
             # Other dot-directives are preserved in the text but not parsed.
             if stripped.startswith("."):
                 continue
@@ -337,6 +351,38 @@ class XyceNetlistParser(BaseNetlistParser):
     # Public: simulation directive editing
     # -------------------------------------------------------------------------
 
+    @property
+    def options_directives(self) -> Dict[str, Dict[str, str]]:
+        """Parsed ``.options`` lines, keyed by category name (e.g. ``'hbint'``).
+
+        Returns a copy with the internal ``_line_index`` key stripped out.
+        """
+        return {
+            cat: {k: v for k, v in params.items() if k != "_line_index"}
+            for cat, params in self._options_lines.items()
+        }
+
+    def update_options_directive(self, category: str, params: Dict[str, str]) -> None:
+        """Update key=value parameters on a ``.options <category>`` line in-place.
+
+        Example::
+
+            parser.update_options_directive("hbint", {"numfreq": "5"})
+        """
+        cat_lower = category.lower()
+        entry = self._options_lines.get(cat_lower)
+        if entry is None:
+            raise KeyError(f".options {category} not found in netlist.")
+        line_idx = entry["_line_index"]
+        merged = {k: v for k, v in entry.items() if k != "_line_index"}
+        merged.update(params)
+        tokens = [".options", category] + [f"{k}={v}" for k, v in merged.items()]
+        raw_line = self._lines[line_idx]
+        had_newline = raw_line.endswith("\n")
+        _, inline_comment = self._split_inline_comment(raw_line)
+        self._lines[line_idx] = self._format_line(tokens, inline_comment, had_newline)
+        self.parse_netlist()
+
     def update_simulation_directive(self, directive: str, params: Dict[str, str]) -> None:
         """
         Update named parameters of a simulation directive in-place, then re-parse.
@@ -361,7 +407,9 @@ class XyceNetlistParser(BaseNetlistParser):
             raise KeyError(f"Directive '{directive}' not found in netlist.")
 
         sim_type = SimulationType.from_directive(directive_upper)
-        param_names = sim_type.positional_param_names()
+        # Lazy import avoids circular dependency: XyceNetlistParser ← XyceSimulator ← XyceNetlistParser
+        from cobra.spice_sim.xyce_simulator import XyceSimulator
+        param_names = XyceSimulator.get_simulation_metadata(sim_type).positional_param_names
 
         new_positional = list(target.positional)
         new_kv = dict(target.kv_params)
@@ -369,9 +417,16 @@ class XyceNetlistParser(BaseNetlistParser):
         for param_name, value in params.items():
             if param_name in param_names:
                 idx = param_names.index(param_name)
-                while len(new_positional) <= idx:
-                    new_positional.append("")
-                new_positional[idx] = str(value)
+                # Special case: a param whose value may contain multiple space-separated
+                # tokens (e.g. HB "frequencies" = "95E9 10E9") — expand into individual
+                # positional slots starting at idx.
+                sub_tokens = str(value).split()
+                for offset, tok in enumerate(sub_tokens):
+                    while len(new_positional) <= idx + offset:
+                        new_positional.append("")
+                    new_positional[idx + offset] = tok
+                # Truncate any extra positional slots that no longer exist
+                new_positional = new_positional[:idx + len(sub_tokens)]
             else:
                 new_kv[param_name] = str(value)
 

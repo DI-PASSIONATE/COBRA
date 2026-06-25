@@ -148,8 +148,9 @@ class MainWindow(QMainWindow):
         # Simulation Parameters — populated dynamically when a netlist is loaded.
         # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
         self.sim_params_container = QWidget()
-        self.sim_params_form = QFormLayout(self.sim_params_container)
-        self.sim_params_form.setContentsMargins(0, 0, 0, 0)
+        self.sim_params_layout = QVBoxLayout(self.sim_params_container)
+        self.sim_params_layout.setContentsMargins(0, 0, 0, 0)
+        self.sim_params_layout.setSpacing(6)
         self.sim_params_container.setVisible(False)
         self.config_form_layout.addRow("", self.sim_params_container)
 
@@ -378,10 +379,15 @@ class MainWindow(QMainWindow):
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
         self._available_parameters: "List[DesignParameter]" = []  # populated from netlist on load
-        self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name"
+        self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name" or ".OPTIONS:<cat>:<param>"
         self._parsed_directives: list = []  # last directives from netlist parse
+        self._parsed_options: Dict[str, Dict[str, str]] = {}  # category → {param: value}
         self._num_ports: int = 0
         self._netlist_sim_type: "SimulationType | None" = None
+        self._simulator_cls = self.simulator_combo.currentData() or XyceSimulator
+        self.simulator_combo.currentIndexChanged.connect(
+            lambda: setattr(self, "_simulator_cls", self.simulator_combo.currentData() or XyceSimulator)
+        )
 
         apply_theme(self)
         self._set_action_button_state("start")
@@ -817,6 +823,7 @@ class MainWindow(QMainWindow):
             sim_type = parser.simulation_type
             self._num_ports = parser.num_ports
             self._parsed_directives = list(parser.simulation_directives)
+            self._parsed_options = dict(parser.options_directives)
             self._available_parameters = get_available_parameters(self._num_ports)
 
             self._netlist_sim_type = sim_type
@@ -865,22 +872,31 @@ class MainWindow(QMainWindow):
     def _populate_sim_param_widgets(self, sim_types: "set[SimulationType]") -> None:
         """Create editable fields for each sim type in *sim_types*.
 
-        For each type, existing parsed values are used where available;
-        missing slots are filled from ``positional_param_defaults()``.
+        Each simulation type is rendered as a QGroupBox so the sections look
+        consistent with the rest of the GUI (Design Goals, Optimization Parameters).
         """
-        while self.sim_params_form.rowCount() > 0:
-            self.sim_params_form.removeRow(0)
+        # Clear all child widgets from the container
+        while self.sim_params_layout.count():
+            item = self.sim_params_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         self._sim_param_edits.clear()
 
         skip = {"sweep_type", "src_name"}
 
         for sim_type in sorted(sim_types, key=lambda t: t.value):
-            param_names = sim_type.positional_param_names()
-            if not param_names:
+            meta = self._simulator_cls.get_simulation_metadata(sim_type)
+            param_names = meta.positional_param_names
+            options_cat = meta.options_category
+            options_params = self._parsed_options.get(options_cat, {}) if options_cat else {}
+            visible_params = [n for n in param_names if n not in skip]
+
+            if not visible_params and not options_params:
                 continue
-            descriptions = sim_type.positional_param_descriptions()
-            defaults = sim_type.positional_param_defaults()
-            directive_key = sim_type.value.upper()  # e.g. ".AC"
+
+            directive_key = sim_type.value.upper()
+            descriptions = meta.positional_param_descriptions
+            defaults = meta.positional_param_defaults
 
             # Pull values from the parsed directive that matches this type
             parsed_values: dict = {}
@@ -888,20 +904,42 @@ class MainWindow(QMainWindow):
                 if SimulationType.from_directive(d.directive) is sim_type:
                     for i, name in enumerate(param_names):
                         if i < len(d.positional):
-                            parsed_values[name] = d.positional[i]
+                            # For the last named param, absorb all remaining positional
+                            # tokens (handles multi-tone HB: .HB 95E9 10E9).
+                            if i == len(param_names) - 1:
+                                parsed_values[name] = " ".join(d.positional[i:])
+                            else:
+                                parsed_values[name] = d.positional[i]
                     break
 
-            for name in param_names:
-                if name in skip:
-                    continue
+            # --- Main directive group box ---
+            group = QGroupBox(f"{sim_type.value} Parameters")
+            form = QFormLayout(group)
+            for name in visible_params:
                 value = parsed_values.get(name, defaults.get(name, ""))
                 key = f"{directive_key}:{name}"
                 edit = QLineEdit(value)
                 if name in descriptions:
                     edit.setToolTip(descriptions[name])
                 label = name.replace("_", " ").title()
-                self.sim_params_form.addRow(f"{directive_key} {label}:", edit)
+                form.addRow(f"{label}:", edit)
                 self._sim_param_edits[key] = edit
+            self.sim_params_layout.addWidget(group)
+
+            # --- .options group box (if relevant params exist) ---
+            if options_params:
+                opt_group = QGroupBox(f".OPTIONS {options_cat.upper()}")
+                opt_form = QFormLayout(opt_group)
+                opt_descriptions = meta.options_param_descriptions
+                for opt_name, opt_value in options_params.items():
+                    key = f".OPTIONS:{options_cat}:{opt_name}"
+                    edit = QLineEdit(opt_value)
+                    if opt_name.lower() in opt_descriptions:
+                        edit.setToolTip(opt_descriptions[opt_name.lower()])
+                    label = opt_name.replace("_", " ").title()
+                    opt_form.addRow(f"{label}:", edit)
+                    self._sim_param_edits[key] = edit
+                self.sim_params_layout.addWidget(opt_group)
 
         self.sim_params_container.setVisible(bool(self._sim_param_edits))
 
@@ -918,18 +956,30 @@ class MainWindow(QMainWindow):
         }
 
         updates: Dict[str, Dict[str, str]] = {}
+        options_updates: Dict[str, Dict[str, str]] = {}
         for key, edit in self._sim_param_edits.items():
-            directive, param_name = key.split(":", 1)
-            st = SimulationType.from_directive(directive)
-            if st not in existing_directives:
-                continue  # will be injected at run-time — skip
-            updates.setdefault(directive, {})[param_name] = edit.text().strip()
+            if key.startswith(".OPTIONS:"):
+                # Format: ".OPTIONS:<category>:<param>"
+                _, category, param_name = key.split(":", 2)
+                options_updates.setdefault(category, {})[param_name] = edit.text().strip()
+            else:
+                directive, param_name = key.split(":", 1)
+                st = SimulationType.from_directive(directive)
+                if st not in existing_directives:
+                    continue  # will be injected at run-time — skip
+                updates.setdefault(directive, {})[param_name] = edit.text().strip()
 
         for directive, params in updates.items():
             try:
                 parser.update_simulation_directive(directive, params)
             except Exception as e:
                 print(f"Warning: Could not update directive {directive}: {e}")
+
+        for category, params in options_updates.items():
+            try:
+                parser.update_options_directive(category, params)
+            except Exception as e:
+                print(f"Warning: Could not update .options {category}: {e}")
 
     def update_component_onnx_selectors(self, components: Dict, netlist_path: str):
         """Create ONNX/Touchstone selectors for each detected component."""

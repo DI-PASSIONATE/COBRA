@@ -4,10 +4,22 @@ import math
 import skrf as rf
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 
 @dataclass
 class BaseSimulator(ABC):
     netlist_parser: BaseNetlistParser
+
+    @classmethod
+    def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
+        """Return simulator-specific metadata for *sim_type*.
+
+        Override in concrete simulator subclasses to provide parameter names,
+        descriptions, defaults, and ``.options`` category information.
+        The base implementation returns an empty metadata object so that
+        unknown simulators degrade gracefully.
+        """
+        return SimulationTypeMetadata()
     
     @abstractmethod
     def run_simulation(self, netlist_name: str) -> rf.Network:

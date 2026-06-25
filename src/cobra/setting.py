@@ -13,7 +13,7 @@ Example::
     class MySimulator(BaseSimulator):
         _settings = [
             CobraSetting("xyce_command", str,  "Xyce",  "Path or command name to invoke Xyce."),
-            CobraSetting("parallel",     bool, False,   "Run Xyce in parallel using MPI (mpirun)."),
+            CobraSetting("parallel",     bool, False,   "Run Xyce in parallel using MPI (mpirun). Requires an MPI-enabled Xyce build and mpirun on PATH. WARNING: Usually a lot slower than single-core Xyce for small and medium-sized circuits."),
         ]
 
         def __init__(self, xyce_command: str = "Xyce", parallel: bool = False):

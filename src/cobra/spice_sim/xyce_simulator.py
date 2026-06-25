@@ -4,12 +4,82 @@ from cobra.setting import CobraSetting
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 from cobra.spice_sim.vector_fit import vector_fit
 import skrf as rf
 import glob, os
 
+# ---------------------------------------------------------------------------
+# Xyce-specific simulation metadata
+# ---------------------------------------------------------------------------
+
+_XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
+    SimulationType.AC: SimulationTypeMetadata(
+        positional_param_names=["sweep_type", "points", "start_freq", "stop_freq"],
+        positional_param_descriptions={
+            "sweep_type": "Frequency sweep spacing: LIN (linear), DEC (decade), or OCT (octave).",
+            "points":     "Number of frequency points in the sweep.",
+            "start_freq": "Start frequency (e.g. 100G for 100 GHz).",
+            "stop_freq":  "Stop frequency (e.g. 200G for 200 GHz).",
+        },
+        positional_param_defaults={"sweep_type": "LIN", "points": "500", "start_freq": "1G", "stop_freq": "10G"},
+    ),
+    SimulationType.HB: SimulationTypeMetadata(
+        positional_param_names=["frequencies"],
+        positional_param_descriptions={
+            "frequencies": "Space-separated list of fundamental frequencies for the Harmonic Balance analysis.\n"
+                           "Single tone: e.g. 130G. Multi-tone: e.g. 95E9 10E9.",
+        },
+        positional_param_defaults={"frequencies": "1G"},
+        options_category="hbint",
+        options_param_descriptions={
+            "numfreq":        "Number of harmonic frequencies (e.g. 3 = DC + 2 harmonics).",
+            "startupperiods": "Transient startup periods before HB steady-state. Increase if convergence is difficult.",
+            "freq":           "Fundamental frequency (alternative to the positional .HB argument).",
+            "maxsteps":       "Maximum Newton iterations per HB solve.",
+            "abstol":         "Absolute convergence tolerance for the HB residual.",
+            "reltol":         "Relative convergence tolerance for the HB residual.",
+            "voltlim":        "Enable voltage limiting during HB Newton iterations (0 = off, 1 = on).",
+        },
+    ),
+    SimulationType.TRAN: SimulationTypeMetadata(
+        positional_param_names=["step", "stop_time", "start_time", "max_step"],
+        positional_param_descriptions={
+            "step":       "Print/output time step.",
+            "stop_time":  "Total simulation stop time.",
+            "start_time": "Time at which output begins (default 0).",
+            "max_step":   "Maximum internal time step (optional).",
+        },
+        positional_param_defaults={"step": "1n", "stop_time": "100n", "start_time": "0", "max_step": "1n"},
+        options_category="timeint",
+        options_param_descriptions={
+            "abstol":  "Absolute local truncation error tolerance for the time integrator.",
+            "reltol":  "Relative local truncation error tolerance for the time integrator.",
+            "method":  "Integration method: gear or trap (trapezoid).",
+            "maxord":  "Maximum order for the Gear integration method (1–6).",
+            "newlte":  "Enable new local truncation error algorithm (0 = off, 1 = on).",
+            "delmax":  "Maximum allowed internal time step size.",
+        },
+    ),
+    SimulationType.DC: SimulationTypeMetadata(
+        positional_param_names=["src_name", "start", "stop", "incr"],
+        positional_param_descriptions={
+            "src_name": "Name of the voltage/current source to sweep.",
+            "start":    "Sweep start value.",
+            "stop":     "Sweep stop value.",
+            "incr":     "Sweep increment step.",
+        },
+        positional_param_defaults={"src_name": "V1", "start": "0", "stop": "1", "incr": "0.01"},
+    ),
+}
+
 class XyceSimulator(BaseSimulator):
     netlist_parser: BaseNetlistParser = XyceNetlistParser()
+
+    @classmethod
+    def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
+        """Return Xyce-specific metadata for *sim_type*."""
+        return _XYCE_METADATA.get(sim_type, SimulationTypeMetadata())
 
     _settings = [
         CobraSetting(
@@ -28,7 +98,8 @@ class XyceSimulator(BaseSimulator):
             default=False,
             description=(
                 "Run Xyce in parallel using MPI (mpirun -np 8).\n"
-                "Requires an MPI-enabled Xyce build and mpirun on PATH."
+                "Requires an MPI-enabled Xyce build and mpirun on PATH.\n"
+                "WARNING: Usually a lot slower than single-core Xyce for small and medium-sized circuits."
             ),
         ),
         CobraSetting(
