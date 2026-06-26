@@ -2,7 +2,7 @@ import numpy as np
 import skrf as rf
 from typing import Callable, Optional, Union
 
-from cobra.optimizers.design_goal import DesignGoalChecker, DesignParameter
+from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker, DesignParameter
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
 
@@ -11,11 +11,11 @@ from cobra.spice_sim.simulation_type import SimulationType
 # ---------------------------------------------------------------------------
 
 
-def _mm_z(sim_result: SimulationResult):
+def _mm_z(sim_result: SimulationResult, frequency_range: Optional[str] = None):
     """Return (mm_ntwk, z11, z22, z21, omega) after mixed-mode conversion if ≥ 4 ports."""
     if sim_result.network is None:
         raise ValueError("Simulation result does not contain a network.")
-    ntwk = sim_result.network
+    ntwk = sim_result.network[frequency_range] if frequency_range else sim_result.network
     mm = ntwk.copy()
     if mm.nports >= 4:
         mm.se2gmm(p=2)
@@ -27,49 +27,106 @@ def _mm_z(sim_result: SimulationResult):
 # ---------------------------------------------------------------------------
 
 
-def _lp(sim_result: SimulationResult):
-    _, z11, *_, omega = _mm_z(sim_result)
+def _lp(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, z11, *_, omega = _mm_z(sim_result, frequency_range)
     return np.imag(z11) / omega * 1e9
 
 
-def _ls(sim_result: SimulationResult):
-    _, _, z22, *_, omega = _mm_z(sim_result)
+def _ls(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, _, z22, *_, omega = _mm_z(sim_result, frequency_range)
     return np.imag(z22) / omega * 1e9
 
 
-def _rp(sim_result: SimulationResult):
-    _, z11, *_ = _mm_z(sim_result)
+def _rp(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, z11, *_ = _mm_z(sim_result, frequency_range)
     return np.real(z11)
 
 
-def _rs(sim_result: SimulationResult):
-    _, _, z22, *_ = _mm_z(sim_result)
+def _rs(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, _, z22, *_ = _mm_z(sim_result, frequency_range)
     return np.real(z22)
 
 
-def _qp(sim_result: SimulationResult):
-    _, z11, *_ = _mm_z(sim_result)
+def _qp(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, z11, *_ = _mm_z(sim_result, frequency_range)
     return np.imag(z11) / np.real(z11)
 
 
-def _qs(sim_result: SimulationResult):
-    _, _, z22, *_ = _mm_z(sim_result)
+def _qs(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, _, z22, *_ = _mm_z(sim_result, frequency_range)
     return np.imag(z22) / np.real(z22)
 
 
-def _k(sim_result: SimulationResult):
-    _, z11, z22, z21, _ = _mm_z(sim_result)
+def _k(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    _, z11, z22, z21, _ = _mm_z(sim_result, frequency_range)
     return np.abs(np.imag(z21) / np.sqrt(np.imag(z11) * np.imag(z22)))
 
 
-def _srf(sim_result: SimulationResult):
+def _srf(sim_result: SimulationResult, frequency_range: Optional[str] = None):
     if sim_result.network is None or sim_result.network.nports < 2:
         raise ValueError("SRF calculation requires a 2-port network in the simulation result.")
     ntwk: rf.Network = sim_result.network
-    _, z11, *_ = _mm_z(sim_result)
+    _, z11, *_ = _mm_z(sim_result, frequency_range)
     freq_ghz = ntwk.f / 1e9
     srf_idx = np.where(np.diff(np.sign(np.imag(z11))))[0]
     return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else np.nan
+
+def _power(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    """Isolation in dB for a HB analysis result"""
+    for df in sim_result.dataframes.values():
+        if "FREQ" in df.columns and "Re(V(OUT))" in df.columns and "Im(V(OUT))" in df.columns:
+            df = df.copy()
+            df.columns = df.columns.str.strip()
+
+            freq_range = DesignGoal.str_to_frequency_range(frequency_range)
+
+            # Change frequency column to float for comparison from scientific e notation
+            df["FREQ"] = df["FREQ"].astype(float)
+
+            df_filtered = df
+            if freq_range[0] is not None:
+                df_filtered = df_filtered[df_filtered["FREQ"] >= freq_range[0]]
+            if freq_range[1] is not None:
+                df_filtered = df_filtered[df_filtered["FREQ"] <= freq_range[1]]
+
+            df = df_filtered
+            if df.empty:
+                raise ValueError(f"No data points found in the specified frequency range: {frequency_range}")
+            
+            # Standardize to uppercase to match Xyce output convention
+            pt_upper = "OUT"
+            
+            # Construct target column names based on user example: V(Out) and I(VOut)
+            v_re_col = f"Re(V({pt_upper}))"
+            v_im_col = f"Im(V({pt_upper}))"
+            i_re_col = f"Re(I(V{pt_upper}))"
+            i_im_col = f"Im(I(V{pt_upper}))"
+            
+            # Validation check
+            missing_cols = [c for c in [v_re_col, v_im_col, i_re_col, i_im_col] if c not in df.columns]
+            if missing_cols:
+                raise KeyError(
+                    f"Could not find required columns for point 'OUT'. Missing: {missing_cols}\n"
+                    f"Available columns: {list(df.columns)}"
+                )
+            
+            # Recombine real and imaginary parts into complex phasors
+            v_pk = df[v_re_col] + 1j * df[v_im_col]
+            i_pk = df[i_re_col] + 1j * df[i_im_col]
+            
+            # Power formula matching hb_analysis.py:
+            # S = 2 * |V_pk * I_pk| due to two-sided phasor convention
+            p_w = 2 * np.abs(v_pk * i_pk)
+            
+            # Convert to dBm with a floor to prevent log10(0) runtime errors
+            p_dbm = 10 * np.log10(np.maximum(p_w / 1e-3, 1e-30))
+
+            # Convert to numpy array for consistency
+            p_dbm = np.array(p_dbm)
+            
+            return p_dbm
+    return np.nan  # Return NaN if no suitable dataframe is found
+    
 
 
 # ---------------------------------------------------------------------------
@@ -77,11 +134,13 @@ def _srf(sim_result: SimulationResult):
 # ---------------------------------------------------------------------------
 
 
-def _stability_terms(sim_result: SimulationResult):
+def _stability_terms(sim_result: SimulationResult, frequency_range: Optional[str] = None):
     """Return (s11, s12, s21, s22, delta) for a 2-port network."""
     if sim_result.network is None or sim_result.network.nports < 2:
         raise ValueError("Stability terms require a 2-port network in the simulation result.")
     ntwk: rf.Network = sim_result.network
+    if frequency_range:
+        ntwk = ntwk[frequency_range]
     s11 = ntwk.s[:, 0, 0]
     s12 = ntwk.s[:, 0, 1]
     s21 = ntwk.s[:, 1, 0]
@@ -90,29 +149,29 @@ def _stability_terms(sim_result: SimulationResult):
     return s11, s12, s21, s22, delta
 
 
-def _mu(sim_result: SimulationResult):
-    s11, s12, s21, s22, delta = _stability_terms(sim_result)
+def _mu(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    s11, s12, s21, s22, delta = _stability_terms(sim_result, frequency_range)
     return (1 - np.abs(s11) ** 2) / (
         np.abs(s22 - delta * np.conj(s11)) + np.abs(s12 * s21)
     )
 
 
-def _mu_prime(sim_result: SimulationResult):
-    s11, s12, s21, s22, delta = _stability_terms(sim_result)
+def _mu_prime(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    s11, s12, s21, s22, delta = _stability_terms(sim_result, frequency_range)
     return (1 - np.abs(s22) ** 2) / (
         np.abs(s11 - delta * np.conj(s22)) + np.abs(s12 * s21)
     )
 
 
-def _rollett_k(sim_result: SimulationResult):
-    s11, s12, s21, s22, delta = _stability_terms(sim_result)
+def _rollett_k(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    s11, s12, s21, s22, delta = _stability_terms(sim_result, frequency_range)
     return (1 - np.abs(s11) ** 2 - np.abs(s22) ** 2 + np.abs(delta) ** 2) / (
         2 * np.abs(s12 * s21)
     )
 
 
-def _gmax(sim_result: SimulationResult):
-    s11, s12, s21, s22, delta = _stability_terms(sim_result)
+def _gmax(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    s11, s12, s21, s22, delta = _stability_terms(sim_result, frequency_range)
     K = (1 - np.abs(s11) ** 2 - np.abs(s22) ** 2 + np.abs(delta) ** 2) / (
         2 * np.abs(s12 * s21)
     )
@@ -120,16 +179,12 @@ def _gmax(sim_result: SimulationResult):
     # Gmax is only defined where K ≥ 1; clamp K² - 1 at 0 to avoid NaN
     return ratio * (K - np.sqrt(np.maximum(K**2 - 1, 0)))
 
-
-# ---------------------------------------------------------------------------
-# Factory for dynamic S-parameter DesignParameters
-# ---------------------------------------------------------------------------
-def s_param_formula(i: int, j: int, in_db: bool = True) -> Callable[[SimulationResult], np.ndarray]:
+def s_param_formula(i: int, j: int, in_db: bool = True) -> Callable[[SimulationResult, Optional[str]], np.ndarray]:
     """Return a formula function for S{i}{j} or S{i}{j}_dB."""
     if in_db:
-        return lambda sim_result, _i=i, _j=j: sim_result.network.s_db[:, _i - 1, _j - 1]
+        return lambda sim_result, frequency_range=None, _i=i, _j=j: sim_result.network[frequency_range].s_db[:, _i - 1, _j - 1]
     else:
-        return lambda sim_result, _i=i, _j=j: np.abs(sim_result.network.s[:, _i - 1, _j - 1])
+        return lambda sim_result, frequency_range=None, _i=i, _j=j: np.abs(sim_result.network[frequency_range].s[:, _i - 1, _j - 1])
 
 def make_s_param_db(i: int, j: int) -> DesignParameter:
     """Return a ``S{i}{j}_dB`` DesignParameter (dB magnitude)."""
@@ -212,13 +267,14 @@ def calculate_array_penalty(min_value: Optional[float], max_value: Optional[floa
 
         raise ValueError("At least one of min_value or max_value must be provided.")
 
-
 # --------------------------------------------------------------------------
 # DesignParameter catalogue 
 # --------------------------------------------------------------------------
+MAX_PORTS: int = 8
 
-# All single-port lumped parameters
-_SINGLE_PORT_LUMPED: list[DesignParameter] = [
+_ALL_PARAMETERS: list[DesignParameter] = [
+    *(make_s_param_db(i, j) for i in range(1, MAX_PORTS + 1) for j in range(1, MAX_PORTS + 1)),
+    *(make_s_param_linear(i, j) for i in range(1, MAX_PORTS + 1) for j in range(1, MAX_PORTS + 1)),
     DesignParameter(
         "Lp",
         SimulationType.AC,
@@ -244,12 +300,13 @@ _SINGLE_PORT_LUMPED: list[DesignParameter] = [
         min_ports=1,
     ),
     DesignParameter(
-        "SRF", SimulationType.AC, _srf, calculate_array_penalty, "Self-resonance frequency in GHz.", min_ports=1
+        "SRF", 
+        SimulationType.AC, 
+        _srf, 
+        calculate_array_penalty, 
+        "Self-resonance frequency in GHz.", 
+        min_ports=1
     ),
-]
-
-# Two-port lumped parameters (secondary winding / coupling)
-_TWO_PORT_LUMPED: list[DesignParameter] = [
     DesignParameter(
         "Ls",
         SimulationType.AC,
@@ -282,10 +339,6 @@ _TWO_PORT_LUMPED: list[DesignParameter] = [
         "Magnetic coupling coefficient between primary and secondary.",
         min_ports=2,
     ),
-]
-
-
-_STABILITY: list[DesignParameter] = [
     DesignParameter(
         "mu",
         SimulationType.AC,
@@ -318,6 +371,14 @@ _STABILITY: list[DesignParameter] = [
         "Maximum available / stable gain |S21/S12| · (K − √(K²−1)), defined where K ≥ 1.",
         min_ports=2,
     ),
+    DesignParameter(
+        "Power_dBm",
+        SimulationType.HB,
+        _power,
+        calculate_array_penalty,
+        "Output power in dBm for a given circuit point.",
+        min_ports=1,
+    ),
 ]
 
 
@@ -328,23 +389,7 @@ _STABILITY: list[DesignParameter] = [
 
 MAX_PORTS: int = 8
 
-_ALL_PARAMETERS: list[DesignParameter] = (
-    [
-        make_s_param_db(i, j)
-        for i in range(1, MAX_PORTS + 1)
-        for j in range(1, MAX_PORTS + 1)
-    ]
-    + [
-        make_s_param_linear(i, j)
-        for i in range(1, MAX_PORTS + 1)
-        for j in range(1, MAX_PORTS + 1)
-    ]
-    + _SINGLE_PORT_LUMPED
-    + _TWO_PORT_LUMPED
-    + _STABILITY
-)
-
-
+ALL_PARAMETERS: dict[str, DesignParameter] = {p.name: p for p in _ALL_PARAMETERS}
 
 def get_available_parameters(
     num_ports: int,
@@ -374,12 +419,4 @@ def get_available_parameters(
 
 def find_parameter(name: str) -> Optional[DesignParameter]:
     """Resolve a parameter name to its DesignParameter descriptor from the global catalogue."""
-    for p in _ALL_PARAMETERS:
-        if p.name == name:
-            return p
-    return None
-
-
-# ---------------------------------------------------------------------------
-# DesignGoal — a constraint on a DesignParameter over a frequency range
-# ---------------------------------------------------------------------------
+    return ALL_PARAMETERS.get(name)

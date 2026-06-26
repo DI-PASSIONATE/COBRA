@@ -131,7 +131,6 @@ class XyceSimulator(BaseSimulator):
     def run_simulation(self, netlist_name: str) -> Optional[SimulationResult]:
         results_dir = os.path.dirname(netlist_name)
         netlist_base = os.path.basename(netlist_name)  # e.g. "circuit_hb.cir"
-        sp_output_name = "xyce_output"  # base name for Touchstone output via -o
 
         # --- Determine expected output files from the netlist -----------------
         parser = XyceNetlistParser().from_file(netlist_name)
@@ -149,7 +148,7 @@ class XyceSimulator(BaseSimulator):
         # --- Run Xyce --------------------------------------------------------
         parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
         command = parallel_command + [
-            self.xyce_command, netlist_base, "-o", sp_output_name
+            self.xyce_command, netlist_base
         ]
         proc = subprocess.run(command, capture_output=True, text=True, cwd=results_dir)
 
@@ -162,14 +161,16 @@ class XyceSimulator(BaseSimulator):
         found: list[str] = []
 
         if sim_type is SimulationType.AC:
-            # AC with sparcalc=1 writes a Touchstone file via the -o argument
-            found.extend(glob.glob(os.path.join(results_dir, f"{sp_output_name}.s*p")))
+            # AC sweep output is written to <netlist>.s*p (Touchstone) 
+            # To avoid .sp files we don't use * to match but rather use regex to match .s followed by a single digit and then p (e.g. .s1p, .s2p, etc.)
+            matched_files = glob.glob(os.path.join(results_dir, f"*.s[0-9]p"))
+            found.extend(matched_files)
 
         elif sim_type is SimulationType.HB:
             # Xyce HB writes <netlist>.HB.FD.prn (freq-domain) and
             # <netlist>.HB.TD.prn (time-domain)
-            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}.HB.FD.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}.HB.TD.prn")))
+            # found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.csv")))
 
         elif sim_type in (SimulationType.TRAN, SimulationType.DC):
             # Default PRN output for transient / DC sweeps
@@ -177,8 +178,8 @@ class XyceSimulator(BaseSimulator):
 
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
-            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}*.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, f"{sp_output_name}.s*p")))
+            found.extend(glob.glob(os.path.join(results_dir, f"*.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, f".s[0-9]p")))
 
         # Add any files explicitly named in .PRINT file= directives
         for path in custom_print_files:
@@ -200,11 +201,9 @@ class XyceSimulator(BaseSimulator):
         prn_files = [f for f in found if not re.search(r'\.s\d+p$', f, re.IGNORECASE)]
         for prn_path in prn_files:
             try:
-                df = pd.read_csv(prn_path, sep=r'\s+', engine="python")
+                df = pd.read_csv(prn_path)
                 # Xyce PRN files end with a trailing "End of Xyce(TM) Simulation" line;
                 # drop any rows where the Index column is not numeric.
-                idx_col = df.columns[0]
-                df = df[pd.to_numeric(df[idx_col], errors="coerce").notna()].reset_index(drop=True)
                 dataframes[prn_path] = df
             except Exception as exc:
                 print(f"Warning: could not parse {prn_path}: {exc}")

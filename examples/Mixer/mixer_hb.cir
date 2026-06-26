@@ -4865,5 +4865,5 @@ P1 _net29 0 port=2  z0=100  AC 0.28284271  SIN 0 0.28284271 95G
 P2 _net28 0 port=1  z0=100  AC 0.089442719  SIN 0 0.089442719 130G
 .options hbint numfreq=4,40 STARTUPPERIODS=2
 .HB 95E9 10E9
-.PRINT  hb I(VIF_CM) I(VIF_neg) I(VIF_pos) I(VLO_CM) I(VLO_IN) I(VLO_neg) I(VLO_pos) I(VOut) I(VRF_CM) I(VRF_IN) I(VRF_M_n) I(VRF_M_p) I(VRF_neg) I(VRF_pos) v(IF_COM) v(IF_M_n) v(IF_M_p) v(IF_neg) v(IF_pos) v(LO_CM) v(LO_M_n) v(LO_M_p) v(LO_in) v(LO_neg) v(LO_pos) v(Out) v(RF_CM) v(RF_M_n) v(RF_M_p) v(RF_in) v(RF_neg) v(RF_pos) v(Vcoll2) v(VdcRF) v(Vdd) v(Vdd2) v(sub) v(v_coll) 
+.PRINT  hb format=csv I(VIF_CM) I(VIF_neg) I(VIF_pos) I(VLO_CM) I(VLO_IN) I(VLO_neg) I(VLO_pos) I(VOut) I(VRF_CM) I(VRF_IN) I(VRF_M_n) I(VRF_M_p) I(VRF_neg) I(VRF_pos) v(IF_COM) v(IF_M_n) v(IF_M_p) v(IF_neg) v(IF_pos) v(LO_CM) v(LO_M_n) v(LO_M_p) v(LO_in) v(LO_neg) v(LO_pos) v(Out) v(RF_CM) v(RF_M_n) v(RF_M_p) v(RF_in) v(RF_neg) v(RF_pos) v(Vcoll2) v(VdcRF) v(Vdd) v(Vdd2) v(sub) v(v_coll) 
 .END

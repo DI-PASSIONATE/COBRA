@@ -1585,71 +1585,69 @@ class MainWindow(QMainWindow):
         # Update Goal Status Table
         sim_results = context.get("simulation_results") or {}
         networks = {st: r.network for st, r in sim_results.items() if r.network is not None}
-        primary_ntwk = next(iter(networks.values()), None)
-        if primary_ntwk is not None:
-            # Metrics are now pre-calculated in COBRA.run and stored in context
-            current_goals = context.get("goals", [])  # Update goals with latest values
-            
-            #metrics = context.get("goal_values", {})
-            
-            self.goal_table.setRowCount(0)
+        # Metrics are now pre-calculated in COBRA.run and stored in context
+        current_goals = context.get("goals", [])  # Update goals with latest values
+        
+        #metrics = context.get("goal_values", {})
+        
+        self.goal_table.setRowCount(0)
 
-            # print(f"Updating Goal Table with metrics: {metrics} and losses: {losses}")
+        # print(f"Updating Goal Table with metrics: {metrics} and losses: {losses}")
+        
+        for i, goal in enumerate(current_goals):
+            p_name = goal.parameter.name
+            # Get value from metrics
+            # metrics contains arrays usually, we might want mean/min/max or just show range
+            current_value_s = goal.current_value
             
-            for i, goal in enumerate(current_goals):
-                p_name = goal.parameter.name
-                # Get value from metrics
-                # metrics contains arrays usually, we might want mean/min/max or just show range
-                current_value_s = goal.current_value
-                
-                display_val = "N/A"
-                if current_value_s is not None:
-                     # Check if array
-                    if isinstance(current_value_s, (list, tuple, np.ndarray)):
-                        if len(current_value_s) > 0:
-                            v_min = np.min(current_value_s)
-                            v_max = np.max(current_value_s)
-                            display_val = f"[{v_min:.4f}, {v_max:.4f}]"
-                    else:
-                        # Scalar
-                        display_val = f"{current_value_s:.4f}"
+            display_val = "N/A"
+            if current_value_s is not None:
+                    # Check if array
+                if isinstance(current_value_s, (list, tuple, np.ndarray)):
+                    if len(current_value_s) > 0:
+                        v_min = np.min(current_value_s)
+                        v_max = np.max(current_value_s)
+                        display_val = f"[{v_min:.4f}, {v_max:.4f}]"
+                else:
+                    # Scalar float64
+                    display_val = f"{current_value_s:.4f}"
 
-                target_str = ""
-                if goal.min_value is not None and goal.max_value is not None:
-                    target_str = f"[{goal.min_value:.4f}, {goal.max_value:.4f}]"
-                elif goal.min_value is not None:
-                    target_str = f"> {goal.min_value:.4f}"
-                elif goal.max_value is not None:
-                    target_str = f"< {goal.max_value:.4f}"
-                
-                loss_val = goal.current_penalty if goal.current_penalty is not None else 0.0
+            target_str = ""
+            if goal.min_value is not None and goal.max_value is not None:
+                target_str = f"[{goal.min_value:.4f}, {goal.max_value:.4f}]"
+            elif goal.min_value is not None:
+                target_str = f"> {goal.min_value:.4f}"
+            elif goal.max_value is not None:
+                target_str = f"< {goal.max_value:.4f}"
+            
+            loss_val = goal.current_penalty if goal.current_penalty is not None else 0.0
 
-                r = self.goal_table.rowCount()
-                self.goal_table.insertRow(r)
-                
-                name_item = QTableWidgetItem(p_name)
-                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.goal_table.setItem(r, 0, name_item)
-                
-                target_item = QTableWidgetItem(target_str)
-                target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.goal_table.setItem(r, 1, target_item)
-                
-                val_item = QTableWidgetItem(f"{display_val} (Penalty={loss_val:.2f})")
-                val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.goal_table.setItem(r, 2, val_item)
-                
-                # Color-code the penalty cell based on loss value
-                item = self.goal_table.item(r, 2)
-                if item:
-                    if loss_val > 0:
-                        item.setBackground(Qt.GlobalColor.red)
-                    else:
-                        item.setBackground(Qt.GlobalColor.green)
+            r = self.goal_table.rowCount()
+            self.goal_table.insertRow(r)
+            
+            name_item = QTableWidgetItem(p_name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.goal_table.setItem(r, 0, name_item)
+            
+            target_item = QTableWidgetItem(target_str)
+            target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.goal_table.setItem(r, 1, target_item)
+            
+            val_item = QTableWidgetItem(f"{display_val} (Penalty={loss_val:.2f})")
+            val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.goal_table.setItem(r, 2, val_item)
+            
+            # Color-code the penalty cell based on loss value
+            item = self.goal_table.item(r, 2)
+            if item:
+                if loss_val > 0:
+                    item.setBackground(Qt.GlobalColor.red)
+                else:
+                    item.setBackground(Qt.GlobalColor.green)
 
 
         # 3. Update Loss Plot
-        losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in self.goals]
+        losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in current_goals]
 
         if self.loss_history:  # Ensure loss history is initialized
             for i, loss in enumerate(losses):

@@ -580,5 +580,5 @@ R4 0 _net10  100 tc1=0.0 tc2=0.0
 P2 _net10 0 port=2  z0=100  AC 0.89442719  SIN 0 0.89442719 0G
 .options hbint numfreq=3 STARTUPPERIODS=2
 .HB 130G
-.PRINT  hb I(VOut) v(Out) v(Vdd) v(ip) v(on) v(op) v(sub) 
+.PRINT hb format=csv I(VOut) v(Out) v(Vdd) v(ip) v(on) v(op) v(sub)
 .END
