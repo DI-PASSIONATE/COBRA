@@ -428,9 +428,11 @@ class DesignGoalChecker:
         """
         Evaluate all goals and update *context* with results.
 
-        Reads ``context["simulated_networks"]`` (``dict[SimulationType, rf.Network]``).
+        Reads ``context["simulation_results"]`` (``dict[SimulationType, SimulationResult]``).
         """
-        networks: dict = context.get("simulated_networks") or {}
+        from cobra.spice_sim.base_simulator import SimulationResult
+        sim_results: dict = context.get("simulation_results") or {}
+        networks = {st: r.network for st, r in sim_results.items() if r.network is not None}
 
         params, penalties = self.loss(networks)
         context["goal_achieved"] = all(p <= 0.0 for p in penalties)

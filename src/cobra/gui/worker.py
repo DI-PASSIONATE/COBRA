@@ -62,7 +62,8 @@ class OptimizationWorker(QThread):
                     context["max_iterations"] = self.max_iterations
 
                 # Update prev_network for next iteration
-                self.prev_network = next(iter(context["simulated_networks"].values()), None)
+                sim_results = context.get("simulation_results") or {}
+                self.prev_network = next((r.network for r in sim_results.values() if r.network is not None), None)
                 
                 return True
 

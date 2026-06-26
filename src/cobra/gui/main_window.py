@@ -1582,7 +1582,8 @@ class MainWindow(QMainWindow):
                 self._add_current_param_row(name, current_values[name])
 
         # Update Goal Status Table
-        networks = context.get("simulated_networks") or {}
+        sim_results = context.get("simulation_results") or {}
+        networks = {st: r.network for st, r in sim_results.items() if r.network is not None}
         primary_ntwk = next(iter(networks.values()), None)
         if primary_ntwk is not None:
             # Metrics are now pre-calculated in COBRA.run and stored in context
@@ -1662,7 +1663,8 @@ class MainWindow(QMainWindow):
         try:
             self.s_param_plot.clear()
 
-            ntwk_n = next(iter((context.get("simulated_networks") or {}).values()), None)
+            sim_results = context.get("simulation_results") or {}
+            ntwk_n = next((r.network for r in sim_results.values() if r.network is not None), None)
             ntwk_prev = context.get("prev_network")
             requested_sparams = self._goal_sparam_specs()
             color_map: Dict[str, Tuple[int, int, int]] = {

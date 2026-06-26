@@ -1,13 +1,18 @@
+import re
 import subprocess
+from typing import Optional
+import skrf as rf
+import glob, os
+import pandas as pd
 
 from cobra.setting import CobraSetting
-from cobra.spice_sim.base_simulator import BaseSimulator
+from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 from cobra.spice_sim.vector_fit import vector_fit
-import skrf as rf
-import glob, os
+
+_PRINT_FILE_RE = re.compile(r'\bfile=(\S+)', re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Xyce-specific simulation metadata
@@ -123,26 +128,85 @@ class XyceSimulator(BaseSimulator):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
         return vector_fit(ntwk, name=name, enforce_passivity=self.enforce_passivity)
 
-    def run_simulation(self, netlist_name: str) -> rf.Network:
+    def run_simulation(self, netlist_name: str) -> Optional[SimulationResult]:
         results_dir = os.path.dirname(netlist_name)
-        output_name = "xyce_output"
-        parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
-        command = parallel_command + [self.xyce_command, os.path.basename(netlist_name), "-o", output_name]
-        
-        result = subprocess.run(command, capture_output=True, text=True, cwd=results_dir)
-        
-        if result.returncode != 0:
-            print(f"Simulation Failed! Return code: {result.returncode}")
-            print(result.stderr)
-            return None
-        
-        # Xyce outputs a file with the extension .s*p, we need to find the exact filename
-        output_files = glob.glob(os.path.join(results_dir, f"{output_name}.s*p"))
-        if not output_files:
-            print("No output file found!")
-            return None
-        output_file = output_files[0]  # Assuming there's only one output file
+        netlist_base = os.path.basename(netlist_name)  # e.g. "circuit_hb.cir"
+        sp_output_name = "xyce_output"  # base name for Touchstone output via -o
 
-        # Load the output file using scikit-rf and return the network object
-        ntwk = rf.Network(output_file)
-        return ntwk
+        # --- Determine expected output files from the netlist -----------------
+        parser = XyceNetlistParser().from_file(netlist_name)
+        sim_type = parser.simulation_type  # SimulationType enum
+
+        # Collect any custom filenames declared via ".PRINT ... file=X"
+        custom_print_files: list[str] = []
+        for line in parser._lines:
+            stripped = line.strip()
+            if stripped.lower().startswith(".print"):
+                m = _PRINT_FILE_RE.search(stripped)
+                if m:
+                    custom_print_files.append(os.path.join(results_dir, m.group(1)))
+
+        # --- Run Xyce --------------------------------------------------------
+        parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
+        command = parallel_command + [
+            self.xyce_command, netlist_base, "-o", sp_output_name
+        ]
+        proc = subprocess.run(command, capture_output=True, text=True, cwd=results_dir)
+
+        if proc.returncode != 0:
+            print(f"Simulation Failed! Return code: {proc.returncode}")
+            print(proc.stderr)
+            return None
+
+        # --- Collect output files --------------------------------------------
+        found: list[str] = []
+
+        if sim_type is SimulationType.AC:
+            # AC with sparcalc=1 writes a Touchstone file via the -o argument
+            found.extend(glob.glob(os.path.join(results_dir, f"{sp_output_name}.s*p")))
+
+        elif sim_type is SimulationType.HB:
+            # Xyce HB writes <netlist>.HB.FD.prn (freq-domain) and
+            # <netlist>.HB.TD.prn (time-domain)
+            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}.HB.FD.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}.HB.TD.prn")))
+
+        elif sim_type in (SimulationType.TRAN, SimulationType.DC):
+            # Default PRN output for transient / DC sweeps
+            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}.prn")))
+
+        else:
+            # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
+            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}*.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, f"{sp_output_name}.s*p")))
+
+        # Add any files explicitly named in .PRINT file= directives
+        for path in custom_print_files:
+            if os.path.isfile(path) and path not in found:
+                found.append(path)
+
+        if not found:
+            print(f"Simulation completed but no output files were found for {sim_type} in {results_dir}")
+            return None
+
+        # --- Load Touchstone output as rf.Network (AC only) ------------------
+        network: Optional[rf.Network] = None
+        sp_files = [f for f in found if re.search(r'\.s\d+p$', f, re.IGNORECASE)]
+        if sp_files:
+            network = rf.Network(sp_files[0])
+
+        # --- Parse all PRN / table output files with pandas ------------------
+        dataframes: dict[str, pd.DataFrame] = {}
+        prn_files = [f for f in found if not re.search(r'\.s\d+p$', f, re.IGNORECASE)]
+        for prn_path in prn_files:
+            try:
+                df = pd.read_csv(prn_path, sep=r'\s+', engine="python")
+                # Xyce PRN files end with a trailing "End of Xyce(TM) Simulation" line;
+                # drop any rows where the Index column is not numeric.
+                idx_col = df.columns[0]
+                df = df[pd.to_numeric(df[idx_col], errors="coerce").notna()].reset_index(drop=True)
+                dataframes[prn_path] = df
+            except Exception as exc:
+                print(f"Warning: could not parse {prn_path}: {exc}")
+
+        return SimulationResult(output_files=found, network=network, dataframes=dataframes)
