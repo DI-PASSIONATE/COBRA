@@ -29,7 +29,8 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
-from cobra.optimizers.design_goal import get_available_parameters, DesignParameter
+from cobra.optimizers.design_goal import DesignParameter
+from cobra.optimizers.design_goal_collection import get_available_parameters
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
@@ -360,7 +361,7 @@ class MainWindow(QMainWindow):
         goal_group_viz = QGroupBox("Goal Status")
         goal_viz_layout = QVBoxLayout(goal_group_viz)
         self.goal_table = QTableWidget(0, 3)
-        self.goal_table.setHorizontalHeaderLabels(["Goal Param", "Target", "Current Value"])
+        self.goal_table.setHorizontalHeaderLabels(["Goal Param", "Target", "Current [Min, Max] (Penalty)"])
         self.goal_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         goal_viz_layout.addWidget(self.goal_table)
         tables_layout.addWidget(goal_group_viz)
@@ -1587,39 +1588,41 @@ class MainWindow(QMainWindow):
         primary_ntwk = next(iter(networks.values()), None)
         if primary_ntwk is not None:
             # Metrics are now pre-calculated in COBRA.run and stored in context
-            metrics = context.get("electrical_parameters", {})
+            current_goals = context.get("goals", [])  # Update goals with latest values
+            
+            #metrics = context.get("goal_values", {})
             
             self.goal_table.setRowCount(0)
-            losses = context.get("penalties", [])
 
             # print(f"Updating Goal Table with metrics: {metrics} and losses: {losses}")
             
-            for i, goal in enumerate(self.goals):
-                p_name = goal.parameter_name
+            for i, goal in enumerate(current_goals):
+                p_name = goal.parameter.name
                 # Get value from metrics
                 # metrics contains arrays usually, we might want mean/min/max or just show range
-                val_array = metrics.get(p_name)
+                current_value_s = goal.current_value
                 
                 display_val = "N/A"
-                if val_array is not None:
+                if current_value_s is not None:
                      # Check if array
-                    if isinstance(val_array, (list, tuple, np.ndarray)):
-                        if len(val_array) > 0:
-                            v_min = np.min(val_array)
-                            v_max = np.max(val_array)
-                            if np.isclose(v_min, v_max, atol=1e-6):
-                                display_val = f"{v_min:.4f}"
-                            else:
-                                display_val = f"[{v_min:.4f}, {v_max:.4f}]"
+                    if isinstance(current_value_s, (list, tuple, np.ndarray)):
+                        if len(current_value_s) > 0:
+                            v_min = np.min(current_value_s)
+                            v_max = np.max(current_value_s)
+                            display_val = f"[{v_min:.4f}, {v_max:.4f}]"
                     else:
                         # Scalar
-                        display_val = f"{val_array:.4f}"
+                        display_val = f"{current_value_s:.4f}"
 
                 target_str = ""
-                if goal.min_value is not None: target_str += f">{goal.min_value} "
-                if goal.max_value is not None: target_str += f"<{goal.max_value}"
+                if goal.min_value is not None and goal.max_value is not None:
+                    target_str = f"[{goal.min_value:.4f}, {goal.max_value:.4f}]"
+                elif goal.min_value is not None:
+                    target_str = f"> {goal.min_value:.4f}"
+                elif goal.max_value is not None:
+                    target_str = f"< {goal.max_value:.4f}"
                 
-                loss_val = losses[i] if i < len(losses) else 0.0
+                loss_val = goal.current_penalty if goal.current_penalty is not None else 0.0
 
                 r = self.goal_table.rowCount()
                 self.goal_table.insertRow(r)
@@ -1632,22 +1635,22 @@ class MainWindow(QMainWindow):
                 target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.goal_table.setItem(r, 1, target_item)
                 
-                val_item = QTableWidgetItem(f"{display_val} (L={loss_val:.2f})")
+                val_item = QTableWidgetItem(f"{display_val} (Penalty={loss_val:.2f})")
                 val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.goal_table.setItem(r, 2, val_item)
                 
-                # Add Loss Column if needed or color code
-                # Let's tint the background if loss > 0
+                # Color-code the penalty cell based on loss value
                 item = self.goal_table.item(r, 2)
                 if item:
-                    if loss_val > 1e-4:
+                    if loss_val > 0:
                         item.setBackground(Qt.GlobalColor.red)
                     else:
                         item.setBackground(Qt.GlobalColor.green)
 
 
         # 3. Update Loss Plot
-        losses = context.get("penalties", [])
+        losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in self.goals]
+
         if self.loss_history:  # Ensure loss history is initialized
             for i, loss in enumerate(losses):
                 if i in self.loss_history:

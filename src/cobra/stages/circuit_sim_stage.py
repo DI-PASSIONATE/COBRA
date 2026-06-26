@@ -6,13 +6,14 @@ from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.stages.base_stage import COBRABaseStage
+from cobra.optimizers.design_goal import DesignGoalChecker
 import skrf as rf
 
 
 class CircuitSimulationStage(COBRABaseStage):
     """
     Circuit Simulation Stage — runs one Xyce simulation per required analysis
-    type and stores all results in ``context["simulated_networks"]``.
+    type and stores all results in ``context["simulation_results"]``.
 
     """
 
@@ -37,31 +38,27 @@ class CircuitSimulationStage(COBRABaseStage):
         if native_sim_type is not SimulationType.UNKNOWN:
             required_types.add(native_sim_type)
 
-        design_goal_checker = context.get("design_goal_checker")
-        if design_goal_checker:
-            for goal in design_goal_checker.design_goals:
-                st = goal.required_simulation_type
-                if st is not SimulationType.UNKNOWN:
-                    required_types.add(st)
-        if not required_types:
-            required_types = {SimulationType.AC}  # sensible default
+        goal_types = context.get("design_goal_checker").design_goals.keys() 
+        required_types.update(goal_types)
 
         # Per-type simulation parameters from the GUI (e.g. sweep range edits)
         sim_params_by_type: Dict[SimulationType, Dict[str, str]] = context.get("sim_params_by_type", {})
 
         netlist_path: str = context["netlist"]
-        simulated_networks: Dict[SimulationType, rf.Network] = {}
 
+        # Run each required simulation type (e.g. AC, HB, TRAN) and store the results in context.
         for sim_type in required_types:
+            # Adjust the netlist to ensure it contains a directive for this simulation type.
             prepared = self._prepare_netlist_for_type(
                 netlist_path, sim_type, sim_params_by_type.get(sim_type, {}), results_dir,
                 simulator=self.simulator,
             )
-            ntwk_result = self.simulator.run_simulation(prepared)
-            if ntwk_result is not None:
-                simulated_networks[sim_type] = ntwk_result
+            # Run the simulation
+            sim_result = self.simulator.run_simulation(prepared)
 
-        context["simulated_networks"] = simulated_networks
+            # Store the results in context for later stages to use.
+            if sim_result is not None:
+                context.setdefault("simulation_results", {})[sim_type] = sim_result
 
         return context
 

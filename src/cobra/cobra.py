@@ -274,11 +274,13 @@ class COBRA:
                 pbar.total = context["max_iterations"]
                 pbar.refresh()
 
+            # Tells the optimizer about the current state and saves it to the context for logging
+            self.optimizer_stage.tell(context)
+
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
                 break
 
-            self.optimizer_stage.tell(context)
             
         pbar.close()
         

@@ -71,18 +71,18 @@ class SimulationType(Enum):
     # ------------------------------------------------------------------
 
     def available_parameters(self, num_ports: int) -> List[str]:
-        from cobra.optimizers.design_goal import get_available_parameters  # lazy – avoids circular import
+        from cobra.optimizers.design_goal_collection import get_available_parameters  # lazy – avoids circular import
         return [p.name for p in get_available_parameters(num_ports, simulation_type=self)]
 
     @classmethod
     def for_parameter(cls, param_name: str) -> "SimulationType":
-        from cobra.optimizers.design_goal import find_parameter  # lazy – avoids circular import
+        from cobra.optimizers.design_goal_collection import find_parameter  # lazy – avoids circular import
         p = find_parameter(param_name)
         return p.simulation_type if p is not None else cls.UNKNOWN
 
     @classmethod
     def all_available_parameters(cls, num_ports: int) -> List[str]:
-        from cobra.optimizers.design_goal import get_available_parameters  # lazy – avoids circular import
+        from cobra.optimizers.design_goal_collection import get_available_parameters  # lazy – avoids circular import
         return [p.name for p in get_available_parameters(num_ports)]
 
 
