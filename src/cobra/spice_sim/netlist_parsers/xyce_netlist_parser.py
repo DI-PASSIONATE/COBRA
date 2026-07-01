@@ -346,6 +346,10 @@ class XyceNetlistParser(BaseNetlistParser):
             # Count P-elements as netlist ports.
             if etype == "P":
                 self._num_ports += 1
+                # Extract SIN/AC source info for Pin / Gain calculations.
+                source_info = self._extract_port_source_info(tokens)
+                if source_info:
+                    self._port_sources[name] = source_info
 
     # -------------------------------------------------------------------------
     # Public: simulation directive editing
@@ -537,6 +541,53 @@ class XyceNetlistParser(BaseNetlistParser):
     # -------------------------------------------------------------------------
     # Private: instance line parsing
     # -------------------------------------------------------------------------
+
+    def _extract_port_source_info(self, tokens: List[str]) -> Dict[str, float]:
+        """Extract AC amplitude, SIN amplitude and z0 from a P-element token list.
+
+        Handles lines such as::
+
+            P2 _net28 0 port=1 z0=100 AC 0.089442719 SIN 0 0.089442719 130G
+
+        Returns a dict with any subset of keys ``{"sin_amplitude", "ac_amplitude", "z0"}``.
+        Only populated when at least one of SIN or AC amplitude is found.
+        """
+        result: Dict[str, float] = {}
+
+        # z0 is a key=value token — collect it first.
+        for tok in tokens:
+            m = self._kv_re.match(tok)
+            if m and m.group(1).lower() == "z0":
+                try:
+                    result["z0"] = float(m.group(2))
+                except ValueError:
+                    pass
+
+        # Scan for positional AC/SIN waveform keywords.
+        i = 0
+        while i < len(tokens):
+            upper = tokens[i].upper()
+            if upper == "AC" and i + 1 < len(tokens):
+                try:
+                    result["ac_amplitude"] = float(tokens[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+                continue
+            if upper == "SIN" and i + 2 < len(tokens):
+                # SIN <offset> <amplitude> [freq] [td] [theta]
+                try:
+                    result["sin_amplitude"] = float(tokens[i + 2])
+                except ValueError:
+                    pass
+                i += 3
+                continue
+            i += 1
+
+        # Only return info when a source amplitude is present.
+        if "sin_amplitude" not in result and "ac_amplitude" not in result:
+            return {}
+        return result
 
     def _parse_instance(
         self, tokens: List[str], etype: str

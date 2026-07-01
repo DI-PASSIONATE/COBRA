@@ -30,7 +30,7 @@ from cobra.spice_sim.simulation_type import SimulationType
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 from cobra.optimizers.design_goal import DesignParameter
-from cobra.optimizers.design_goal_collection import get_available_parameters
+from cobra.optimizers.design_goal_collection import get_available_parameters, make_gain_db
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
@@ -826,6 +826,14 @@ class MainWindow(QMainWindow):
             self._parsed_directives = list(parser.simulation_directives)
             self._parsed_options = dict(parser.options_directives)
             self._available_parameters = get_available_parameters(self._num_ports)
+
+            # Add dynamic Gain_dB parameters for each port that has a SIN source.
+            port_sources = parser.port_sources
+            for port_name, source_info in sorted(port_sources.items()):
+                sin_amp = source_info.get("sin_amplitude") or source_info.get("ac_amplitude")
+                z0 = source_info.get("z0", 50.0)
+                if sin_amp is not None:
+                    self._available_parameters.append(make_gain_db(port_name, sin_amp, z0))
 
             self._netlist_sim_type = sim_type
             self.sim_type_value_label.setText(sim_type.display_name)

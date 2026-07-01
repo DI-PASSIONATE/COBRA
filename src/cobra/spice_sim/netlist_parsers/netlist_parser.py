@@ -60,6 +60,7 @@ class BaseNetlistParser(ABC):
         self._simulation_type: SimulationType = SimulationType.UNKNOWN
         self._num_ports: int = 0
         self._simulation_directives: List[SimulationDirective] = []
+        self._port_sources: Dict[str, Dict] = {} # Maps P-element name → {sin_amplitude, z0, ac_amplitude} for ports that carry a SIN source."""
 
     # -------------------------------------------------------------------------
     # Factory / loader methods
@@ -87,6 +88,7 @@ class BaseNetlistParser(ABC):
         self._simulation_type = SimulationType.UNKNOWN
         self._num_ports = 0
         self._simulation_directives.clear()
+        self._port_sources.clear()
 
     # -------------------------------------------------------------------------
     # Serialisation
@@ -148,6 +150,15 @@ class BaseNetlistParser(ABC):
     def num_ports(self) -> int:
         """Number of port elements (P-instances) found in the netlist."""
         return self._num_ports
+
+    @property
+    def port_sources(self) -> Dict[str, Dict]:
+        """Dict mapping P-element name → waveform info (sin_amplitude, z0, ac_amplitude).
+
+        Only ports that carry an explicit SIN or AC source declaration are included.
+        These are used to compute Pin for Gain calculations.
+        """
+        return self._port_sources.copy()
 
     @property
     def available_design_parameters(self) -> List[str]:

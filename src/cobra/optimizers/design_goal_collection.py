@@ -126,7 +126,51 @@ def _power(sim_result: SimulationResult, frequency_range: Optional[str] = None):
             
             return p_dbm
     return np.nan  # Return NaN if no suitable dataframe is found
-    
+
+
+def make_gain_db(port_name: str, sin_amplitude: float, z0: float = 50.0) -> "DesignParameter":
+    """Return a ``Gain_dB[<port_name>]`` DesignParameter for HB simulations.
+
+    Gain is defined as ``Pout[dBm] − Pin[dBm]`` where:
+
+    * ``Pout`` is extracted from the HB simulation via :func:`_power`.
+    * ``Pin`` (available power at the input port) is the constant::
+
+          P_avail = A² / (8 · z0)   →   Pin_dBm = 10·log10(P_avail / 1 mW)
+
+      with *A* being the SIN peak amplitude read from the netlist.
+
+    Parameters
+    ----------
+    port_name:
+        Name of the input P-element in the netlist (e.g. ``"P2"``).
+    sin_amplitude:
+        Peak amplitude of the SIN source on that port (Volts).
+    z0:
+        Port impedance in Ohms (default 50 Ω).
+    """
+    p_avail_w = sin_amplitude ** 2 / (8.0 * z0)
+    pin_dbm = 10.0 * np.log10(max(p_avail_w / 1e-3, 1e-30))
+
+    def _gain_formula(
+        sim_result: SimulationResult, frequency_range: Optional[str] = None
+    ) -> np.ndarray:
+        pout = _power(sim_result, frequency_range)
+        if isinstance(pout, float) and np.isnan(pout):
+            return np.array([np.nan])
+        return np.asarray(pout) - pin_dbm
+
+    return DesignParameter(
+        name=f"Gain_dB[{port_name}]",
+        simulation_type=SimulationType.HB,
+        formula=_gain_formula,
+        loss=calculate_array_penalty,
+        description=(
+            f"Transducer gain in dB using {port_name} as input port "
+            f"(A={sin_amplitude:.6g} V, z0={z0:.4g} Ω → P_in={pin_dbm:.2f} dBm)."
+        ),
+        min_ports=1,
+    )
 
 
 # ---------------------------------------------------------------------------
