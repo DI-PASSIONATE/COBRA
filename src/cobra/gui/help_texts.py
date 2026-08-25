@@ -11,6 +11,21 @@ TOOLTIPS = {
     "add_net_btn": "Add parameters from netlist elements. Options here are automatically parsed from the netlist",
     "add_goal_btn": "Create a design goal constraint. The final optimized design will try to meet all goals as well as possible.",
     "zoom_btn": "Zoom the S-parameter plot to the goal frequency range.",
+    "hb_point_combo": (
+        "Circuit node used as the Harmonic Balance analysis point.\n"
+        "Only nodes whose voltage V(node) and probe current I(Vnode) are both written\n"
+        "to the HB result are listed. Drives the HB spectrum plot and the HB design goals."
+    ),
+    "plot_view_combo": (
+        "Switch between the S-parameter plot and the HB spectrum.\n"
+        "Only selectable when both an .AC and a .HB simulation are run."
+    ),
+    "hb_quantity_combo": "Quantity shown on the HB spectrum: output power, node voltage, or probe current.",
+    "hb_input_port_combo": (
+        "Input port the gain is referenced to (Gain = Pout − Pin).\n"
+        "Pin is the available power A²/(8·z0) of that port's SIN/AC source.\n"
+        "Only used when the plotted quantity is Gain."
+    ),
     "geometry_file_btn": "Browse for a custom ORCA geometry Python file.",
     "optuna_sampler_combo": "Select the Optuna sampler strategy. SimulatedAnnealingSampler requires optunahub.",
     "optuna_pruner_combo": "Select an optional Optuna pruner. Pruners stop unpromising trials early to save time, but may miss good solutions.",

@@ -3,6 +3,7 @@ import skrf as rf
 from typing import Callable, Optional, Union
 
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker, DesignParameter
+from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
 
@@ -71,69 +72,54 @@ def _srf(sim_result: SimulationResult, frequency_range: Optional[str] = None):
     srf_idx = np.where(np.diff(np.sign(np.imag(z11))))[0]
     return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else np.nan
 
-def _power(sim_result: SimulationResult, frequency_range: Optional[str] = None):
-    """Isolation in dB for a HB analysis result"""
-    for df in sim_result.dataframes.values():
-        if "FREQ" in df.columns and "Re(V(OUT))" in df.columns and "Im(V(OUT))" in df.columns:
-            df = df.copy()
-            df.columns = df.columns.str.strip()
+def _power(
+    sim_result: SimulationResult,
+    frequency_range: Optional[str] = None,
+    node: str = "OUT",
+) -> np.ndarray:
+    """Output power in dBm at *node* from a Harmonic Balance result.
 
-            freq_range = DesignGoal.str_to_frequency_range(frequency_range)
-
-            # Change frequency column to float for comparison from scientific e notation
-            df["FREQ"] = df["FREQ"].astype(float)
-
-            df_filtered = df
-            if freq_range[0] is not None:
-                df_filtered = df_filtered[df_filtered["FREQ"] >= freq_range[0]]
-            if freq_range[1] is not None:
-                df_filtered = df_filtered[df_filtered["FREQ"] <= freq_range[1]]
-
-            df = df_filtered
-            if df.empty:
-                raise ValueError(f"No data points found in the specified frequency range: {frequency_range}")
-            
-            # Standardize to uppercase to match Xyce output convention
-            pt_upper = "OUT"
-            
-            # Construct target column names based on user example: V(Out) and I(VOut)
-            v_re_col = f"Re(V({pt_upper}))"
-            v_im_col = f"Im(V({pt_upper}))"
-            i_re_col = f"Re(I(V{pt_upper}))"
-            i_im_col = f"Im(I(V{pt_upper}))"
-            
-            # Validation check
-            missing_cols = [c for c in [v_re_col, v_im_col, i_re_col, i_im_col] if c not in df.columns]
-            if missing_cols:
-                raise KeyError(
-                    f"Could not find required columns for point 'OUT'. Missing: {missing_cols}\n"
-                    f"Available columns: {list(df.columns)}"
-                )
-            
-            # Recombine real and imaginary parts into complex phasors
-            v_pk = df[v_re_col] + 1j * df[v_im_col]
-            i_pk = df[i_re_col] + 1j * df[i_im_col]
-            
-            # Power formula matching hb_analysis.py:
-            # S = 2 * |V_pk * I_pk| due to two-sided phasor convention
-            p_w = 2 * np.abs(v_pk * i_pk)
-            
-            # Convert to dBm with a floor to prevent log10(0) runtime errors
-            p_dbm = 10 * np.log10(np.maximum(p_w / 1e-3, 1e-30))
-
-            # Convert to numpy array for consistency
-            p_dbm = np.array(p_dbm)
-            
-            return p_dbm
-    return np.nan  # Return NaN if no suitable dataframe is found
+    Requires the node voltage ``V(<node>)`` and the current ``I(V<node>)`` of the
+    0 V probe source in series with it to be present in the HB output.
+    """
+    df = hb_spectrum.find_dataframe(sim_result.dataframes, node, "power")
+    if df is None:
+        raise KeyError(
+            f"No HB result containing V({node}) and I(V{node}) was found. "
+            f"Add both to the netlist's '.PRINT hb' line."
+        )
+    _, p_dbm = hb_spectrum.spectrum(
+        df, node, "power", DesignGoal.str_to_frequency_range(frequency_range)
+    )
+    return p_dbm
 
 
-def make_gain_db(port_name: str, sin_amplitude: float, z0: float = 50.0) -> "DesignParameter":
-    """Return a ``Gain_dB[<port_name>]`` DesignParameter for HB simulations.
+def make_power_dbm(node: str) -> "DesignParameter":
+    """Return a ``Power_dBm[<node>]`` DesignParameter for HB simulations."""
+
+    def _power_formula(
+        sim_result: SimulationResult, frequency_range: Optional[str] = None
+    ) -> np.ndarray:
+        return _power(sim_result, frequency_range, node)
+
+    return DesignParameter(
+        name=f"Power_dBm[{node}]",
+        simulation_type=SimulationType.HB,
+        formula=_power_formula,
+        loss=calculate_array_penalty,
+        description=f"Output power in dBm at node '{node}' (from V({node}) and I(V{node})).",
+        min_ports=1,
+    )
+
+
+def make_gain_db(
+    port_name: str, sin_amplitude: float, z0: float = 50.0, node: str = "OUT"
+) -> "DesignParameter":
+    """Return a ``Gain_dB[<port_name>@<node>]`` DesignParameter for HB simulations.
 
     Gain is defined as ``Pout[dBm] − Pin[dBm]`` where:
 
-    * ``Pout`` is extracted from the HB simulation via :func:`_power`.
+    * ``Pout`` is the HB output power at *node* (see :func:`_power`).
     * ``Pin`` (available power at the input port) is the constant::
 
           P_avail = A² / (8 · z0)   →   Pin_dBm = 10·log10(P_avail / 1 mW)
@@ -148,25 +134,23 @@ def make_gain_db(port_name: str, sin_amplitude: float, z0: float = 50.0) -> "Des
         Peak amplitude of the SIN source on that port (Volts).
     z0:
         Port impedance in Ohms (default 50 Ω).
+    node:
+        Output node the gain is measured at.
     """
-    p_avail_w = sin_amplitude ** 2 / (8.0 * z0)
-    pin_dbm = 10.0 * np.log10(max(p_avail_w / 1e-3, 1e-30))
+    pin_dbm = hb_spectrum.available_power_dbm(sin_amplitude, z0)
 
     def _gain_formula(
         sim_result: SimulationResult, frequency_range: Optional[str] = None
     ) -> np.ndarray:
-        pout = _power(sim_result, frequency_range)
-        if isinstance(pout, float) and np.isnan(pout):
-            return np.array([np.nan])
-        return np.asarray(pout) - pin_dbm
+        return _power(sim_result, frequency_range, node) - pin_dbm
 
     return DesignParameter(
-        name=f"Gain_dB[{port_name}]",
+        name=f"Gain_dB[{port_name}@{node}]",
         simulation_type=SimulationType.HB,
         formula=_gain_formula,
         loss=calculate_array_penalty,
         description=(
-            f"Transducer gain in dB using {port_name} as input port "
+            f"Transducer gain in dB at node '{node}' using {port_name} as input port "
             f"(A={sin_amplitude:.6g} V, z0={z0:.4g} Ω → P_in={pin_dbm:.2f} dBm)."
         ),
         min_ports=1,
@@ -414,14 +398,6 @@ _ALL_PARAMETERS: list[DesignParameter] = [
         calculate_array_penalty,
         "Maximum available / stable gain |S21/S12| · (K − √(K²−1)), defined where K ≥ 1.",
         min_ports=2,
-    ),
-    DesignParameter(
-        "Power_dBm",
-        SimulationType.HB,
-        _power,
-        calculate_array_penalty,
-        "Output power in dBm for a given circuit point.",
-        min_ports=1,
     ),
 ]
 

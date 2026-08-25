@@ -111,6 +111,11 @@ class CircuitSimulationStage(COBRABaseStage):
         extra_lines = []
         if sim_type is SimulationType.AC:
             extra_lines.append(".LIN format=touchstone sparcalc=1\n")
+        elif sim_type is SimulationType.HB:
+            # Without a .PRINT the injected HB analysis would produce no output at all.
+            probes = " ".join(f"V({n}) I(V{n})" for n in parser.hb_probe_nodes)
+            if probes:
+                extra_lines.append(f".PRINT HB format=csv {probes}\n")
 
         # Work on a copy of the raw lines.
         lines = parser._lines[:]
