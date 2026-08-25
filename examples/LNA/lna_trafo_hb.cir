@@ -1,0 +1,47 @@
+* Qucs 26.1.0
+.INCLUDE "/usr/share/qucs-s/spicelibrary/xfmr.cir"
+.LIB "/home/david/Documents/git/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerRES.lib" res_typ
+.LIB "/home/david/Documents/git/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerHBT.lib" hbt_typ
+.LIB "/home/david/Documents/git/IHP-Open-PDK/ihp-sg13g2/libs.tech/xyce/models/cornerCAP.lib" cap_typ
+ 
+.SUBCKT IHP_PDK_nonlinear_components_npn13G2  gnd c b e bn Nx=1  
+X1 c b e bn npn13G2 Nx={Nx} 
+.ENDS
+
+ 
+.SUBCKT IHP_PDK_basic_components_ptap1  gnd P1 P2 w=0.78e-6 l=0.78e-6
+X1 P1 P2 ptap1 w={w} l={l}
+.ENDS
+.SUBCKT ideal_balun _net1 _net4 _net3 _net0 _net2 
+X_Tr1_W1 _net1 _net2 _net4 _net3  XFMR RATIO=0.5
+X_Tr1_W2 _net1 _net2 _net0 _net4  XFMR RATIO=0.5
+.ENDS
+.PARAM Cout = 44f
+V1 Vdd 0 DC 2.5
+L1 _net0 _net1  100P 
+C1 0 on  {COUT} 
+L2 _net2 _net1  40.000P 
+Xnpn13G1 0 _net0 _net0 0 sub IHP_PDK_nonlinear_components_npn13G2 Nx=1
+R1 _net3 Vdd  3K tc1=0.0 tc2=0.0 
+R2 0 _net3  13K tc1=0.0 tc2=0.0 
+R3 _net0 Vdd  2.5K tc1=0.0 tc2=0.0 
+C2 0 _net0  200F 
+C3 0 _net2  38F 
+C4 _net4 _net2  300F 
+C5 0 _net3  72F 
+Xnpn13G2 0 _net5 _net1 0 sub IHP_PDK_nonlinear_components_npn13G2 Nx=8
+Xnpn13G3 0 ip _net3 _net5 sub IHP_PDK_nonlinear_components_npn13G2 Nx=8
+Xptap1 0 sub 0 IHP_PDK_basic_components_ptap1 w=0.78U l=0.78U
+XSUB1 Out Vdd on op 0 ideal_balun
+C6 0 op  {COUT}
+ 
+ 
+VOut Out _net8 DC 0
+P2 _net8 0 port=2  z0=100  AC 0.89442719  SIN 0 0.89442719 0G
+YLIN YLIN_X1 ip 0 Vdd 0 op 0 on 0 _net9 0 _net10 0 YLIN_X1_model
+.MODEL YLIN_X1_model LIN TSTONEFILE=/home/david/Documents/git/COBRA/examples/XYLIN_X1.sp
+P1 _net4 0 port=1  z0=70  AC 0.074833148  SIN 0 0.074833148 130G
+.options hbint numfreq=3 STARTUPPERIODS=2
+.HB 130G
+.PRINT  hb I(VOut) v(Out) v(Vdd) v(ip) v(on) v(op) v(sub) 
+.END

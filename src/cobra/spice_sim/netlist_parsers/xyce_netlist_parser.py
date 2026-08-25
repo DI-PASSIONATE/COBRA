@@ -6,6 +6,7 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import (
     Component,
     Include,
     NetlistElement,
+    PrintDirective,
     SimulationDirective,
 )
 from cobra.spice_sim.simulation_type import SimulationType
@@ -58,6 +59,12 @@ class XyceNetlistParser(BaseNetlistParser):
 
     # .options lines: ".options <category> [key=val ...]"
     _options_re      = re.compile(r"^\s*\.options\b",                  re.IGNORECASE)
+
+    # .PRINT lines: ".PRINT <analysis> [key=val ...] <signal> ..."
+    _print_re        = re.compile(r"^\s*\.print\b",                    re.IGNORECASE)
+
+    # Printed signal tokens such as "v(Out)" or "I(VOut)".
+    _probe_re        = re.compile(r"^([VI])\(([^)]+)\)$",              re.IGNORECASE)
 
     # -------------------------------------------------------------------------
     # Constructor
@@ -297,6 +304,18 @@ class XyceNetlistParser(BaseNetlistParser):
                     opt_params = self._collect_params(tokens_opt[2:])
                     self._options_lines[category] = {"_line_index": idx, **opt_params}
 
+            # Parse .PRINT lines (e.g. ".PRINT hb format=csv I(VOut) v(Out)").
+            if self._print_re.match(stripped):
+                tokens_print = stripped.split()
+                if len(tokens_print) >= 2:
+                    remaining = tokens_print[2:]
+                    self._print_directives.append(PrintDirective(
+                        analysis=tokens_print[1].lower(),
+                        signals=[t for t in remaining if not self._kv_re.match(t)],
+                        kv_params=self._collect_params(remaining),
+                        line_index=idx,
+                    ))
+
             # Other dot-directives are preserved in the text but not parsed.
             if stripped.startswith("."):
                 continue
@@ -354,6 +373,41 @@ class XyceNetlistParser(BaseNetlistParser):
     # -------------------------------------------------------------------------
     # Public: simulation directive editing
     # -------------------------------------------------------------------------
+
+    @property
+    def hb_probe_nodes(self) -> List[str]:
+        """Node names that can serve as an HB analysis point.
+
+        A node ``X`` qualifies when both its voltage ``V(X)`` and the current
+        ``I(VX)`` of the 0 V probe source named ``VX`` are available, which is
+        the Qucs-S convention for a labelled node with a current probe.
+        Falls back to the netlist's V-elements when no ``.PRINT hb`` line exists.
+        """
+        voltages: Dict[str, str] = {}   # upper-case node → node as written
+        currents: set[str] = set()      # upper-case source name
+        for directive in self._print_directives:
+            if directive.analysis != "hb":
+                continue
+            for token in directive.signals:
+                m = self._probe_re.match(token)
+                if not m:
+                    continue
+                kind, arg = m.group(1).upper(), m.group(2).strip()
+                if kind == "V":
+                    voltages.setdefault(arg.upper(), arg)
+                else:
+                    currents.add(arg.upper())
+
+        if not voltages:
+            # No .PRINT hb line: derive candidates from the probe sources themselves.
+            for elem in self.list_elements(["V"]):
+                if elem.nodes:
+                    node = elem.nodes[0]
+                    if elem.name.upper() == f"V{node.upper()}":
+                        voltages.setdefault(node.upper(), node)
+                        currents.add(elem.name.upper())
+
+        return [node for key, node in voltages.items() if f"V{key}" in currents]
 
     @property
     def options_directives(self) -> Dict[str, Dict[str, str]]:

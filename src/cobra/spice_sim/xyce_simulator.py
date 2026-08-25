@@ -168,9 +168,9 @@ class XyceSimulator(BaseSimulator):
 
         elif sim_type is SimulationType.HB:
             # Xyce HB writes <netlist>.HB.FD.prn (freq-domain) and
-            # <netlist>.HB.TD.prn (time-domain)
-            # found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.prn")))
+            # <netlist>.HB.TD.prn (time-domain); ".PRINT hb format=csv" yields .csv instead.
             found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.csv")))
+            found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.prn")))
 
         elif sim_type in (SimulationType.TRAN, SimulationType.DC):
             # Default PRN output for transient / DC sweeps
@@ -201,10 +201,14 @@ class XyceSimulator(BaseSimulator):
         prn_files = [f for f in found if not re.search(r'\.s\d+p$', f, re.IGNORECASE)]
         for prn_path in prn_files:
             try:
-                df = pd.read_csv(prn_path)
+                separator = "," if prn_path.lower().endswith(".csv") else r"\s+"
+                df = pd.read_csv(prn_path, sep=separator, engine="python")
+                df.columns = df.columns.str.strip()
                 # Xyce PRN files end with a trailing "End of Xyce(TM) Simulation" line;
-                # drop any rows where the Index column is not numeric.
-                dataframes[prn_path] = df
+                # drop any rows where the first column is not numeric.
+                first_col = df.columns[0]
+                df = df[pd.to_numeric(df[first_col], errors="coerce").notna()].reset_index(drop=True)
+                dataframes[prn_path] = df.apply(pd.to_numeric, errors="coerce")
             except Exception as exc:
                 print(f"Warning: could not parse {prn_path}: {exc}")
 

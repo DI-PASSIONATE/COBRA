@@ -47,6 +47,15 @@ class SimulationDirective:
     line_index: int
 
 
+@dataclass
+class PrintDirective:
+    """A ``.PRINT`` directive found in the netlist (e.g. ``.PRINT hb format=csv v(Out) I(VOut)``)."""
+    analysis: str              # analysis keyword in lower case, e.g. "hb", "ac", "tran"
+    signals: List[str]         # printed signal tokens, e.g. ["v(Out)", "I(VOut)"]
+    kv_params: Dict[str, str]  # key=value params, e.g. {"format": "csv"}
+    line_index: int
+
+
 class BaseNetlistParser(ABC):
     """Abstract base class for SPICE netlist parsers."""
 
@@ -60,6 +69,7 @@ class BaseNetlistParser(ABC):
         self._simulation_type: SimulationType = SimulationType.UNKNOWN
         self._num_ports: int = 0
         self._simulation_directives: List[SimulationDirective] = []
+        self._print_directives: List[PrintDirective] = []
         self._port_sources: Dict[str, Dict] = {} # Maps P-element name → {sin_amplitude, z0, ac_amplitude} for ports that carry a SIN source."""
 
     # -------------------------------------------------------------------------
@@ -88,6 +98,7 @@ class BaseNetlistParser(ABC):
         self._simulation_type = SimulationType.UNKNOWN
         self._num_ports = 0
         self._simulation_directives.clear()
+        self._print_directives.clear()
         self._port_sources.clear()
 
     # -------------------------------------------------------------------------
@@ -145,6 +156,11 @@ class BaseNetlistParser(ABC):
     def simulation_directives(self) -> List[SimulationDirective]:
         """All simulation/analysis directives found in the netlist."""
         return list(self._simulation_directives)
+
+    @property
+    def print_directives(self) -> List[PrintDirective]:
+        """All ``.PRINT`` directives found in the netlist."""
+        return list(self._print_directives)
 
     @property
     def num_ports(self) -> int:
