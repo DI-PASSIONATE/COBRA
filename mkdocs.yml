@@ -13,6 +13,10 @@ nav:
   - Getting Started:
     - Installation: setup.md
     - Quickstart: getting-started/quickstart.md
+  - User Guide:
+    - GUI Mode: user-guide/gui.md
+    - Script Mode: user-guide/scripting.md
+    - Examples: user-guide/examples.md
   - Support:
     - Troubleshooting: advanced/troubleshooting.md
     - FAQ: advanced/faq.md
