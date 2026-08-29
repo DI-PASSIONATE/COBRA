@@ -8,6 +8,22 @@ Yes. Script mode is fully supported. Start with **Getting Started -> Quickstart*
 
 Yes. Map each component to either `.onnx` or fixed `.sNp` in the same run.
 
+## Can I optimize large-signal behavior?
+
+Yes, through Harmonic Balance. If the netlist contains a `.HB` analysis, COBRA exposes output-power and gain goals at any node that has both a voltage label and a current probe, and plots the resulting spectrum live. See **Advanced -> Harmonic Balance**.
+
+## Can S-parameter and Harmonic Balance goals be combined?
+
+Yes. COBRA runs one simulation per required analysis type and aggregates all penalties into a single loss, so matching (`.AC`) and conversion gain or isolation (`.HB`) can be optimized together.
+
+## How do I target a single frequency instead of a band?
+
+Set the same value for the minimum and maximum frequency of the goal. The nearest point of the sweep or HB spectrum is used.
+
+## Is transient simulation supported?
+
+Transient netlists are parsed and simulated, but time-domain spectrum plotting is not implemented yet. Use Harmonic Balance to obtain a spectrum.
+
 ## Is ORCA required?
 
 Not for core surrogate optimization with existing ONNX files.

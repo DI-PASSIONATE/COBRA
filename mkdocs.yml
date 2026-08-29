@@ -22,6 +22,7 @@ nav:
     - Optimizers: api/optimizers.md
     - Simulation and Netlist Parsing: api/simulation.md
   - Advanced:
+    - Harmonic Balance: advanced/harmonic-balance.md
     - Fine-Tuning: advanced/fine-tuning.md
   
 # Configuration
@@ -80,9 +81,13 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/DI-PASSIONATE/COBRA
 
-extra-css:
+extra_css:
   - stylesheets/extra.css
-  
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
 # Extensions
 markdown_extensions:
   - abbr

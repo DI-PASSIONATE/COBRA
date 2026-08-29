@@ -36,6 +36,7 @@
 - Mixed component sources in one run: ONNX surrogates and fixed SNP files.
 - Goal-based optimization with Optuna samplers/pruners.
 - Design metrics for S-parameters and RF lumped quantities (e.g. L, R, Q, coupling).
+- Large-signal metrics from Harmonic Balance: output power, gain, and mixing-product isolation.
 - Optional EM fine-tuning loop through Palace + ORCA geometry.
 - GUI workflow and script-first workflow.
 
@@ -43,6 +44,7 @@
 
 - New users: go to **Getting Started -> Installation**.
 - First successful run: **Getting Started -> Quickstart**.
+- Large-signal design: **Advanced -> Harmonic Balance**.
 - API details: **API Reference**.
 
 ## Core Concepts
@@ -65,6 +67,7 @@ flowchart LR
 ### Goals and Parameter Types
 
 - A design goal is a bound on one metric (for example S11, S21, L, Q, k), optionally in a frequency range such as `125-135ghz`.
+- Large-signal goals (`Power_dBm`, `Gain_dB`) are evaluated on a Harmonic Balance spectrum instead of the S-parameter sweep; AC and HB goals can be combined in one run.
 - `MODEL_INPUT` parameters control ONNX surrogate inputs (example: `X1:bottom_winding_diameter`).
 - `NETLIST_VARIABLE` parameters patch parsed netlist values directly (example: `Cshunt_p`).
 - Linked parameters (`linked_to`) enforce symmetry/constraints by mirroring values.
