@@ -134,10 +134,17 @@ def spectrum(
     mask = freqs >= 0
     if frequency_range:
         f_min, f_max = frequency_range
-        if f_min is not None:
-            mask &= freqs >= f_min
-        if f_max is not None:
-            mask &= freqs <= f_max
+        if f_min is not None and f_max is not None and f_min == f_max and mask.any():
+            # Single frequency point: snap to the nearest line, matching skrf network slicing.
+            candidates = np.flatnonzero(mask)
+            nearest = candidates[int(np.argmin(np.abs(freqs[candidates] - f_min)))]
+            mask = np.zeros(freqs.shape, dtype=bool)
+            mask[nearest] = True
+        else:
+            if f_min is not None:
+                mask &= freqs >= f_min
+            if f_max is not None:
+                mask &= freqs <= f_max
     if not mask.any():
         raise ValueError(f"No HB frequency bins left after filtering to {frequency_range}.")
 

@@ -208,18 +208,7 @@ class DesignGoalChecker:
                 continue  # No goals for this simulation type
 
             for goal in goals_for_type:
-                ntwk_backup = sim_result.network
-                if sim_type is SimulationType.AC and goal.frequency_range:
-                    # Slice network to the goal's frequency range if specified
-                    ntwk_backup = sim_result.network.copy()
-                    if goal.frequency_range:
-                        sim_result.network = ntwk_backup[goal.frequency_range]
-                    
-                # TODO: remove this, will be unnecessary since we store current results in the goal object
                 penalties.append(goal.penalty(sim_result))
-                
-
-                sim_result.network = ntwk_backup
 
         return penalties
 

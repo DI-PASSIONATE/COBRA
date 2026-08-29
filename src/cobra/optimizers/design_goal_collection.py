@@ -12,14 +12,25 @@ from cobra.spice_sim.simulation_type import SimulationType
 # ---------------------------------------------------------------------------
 
 
-def _mm_z(sim_result: SimulationResult, frequency_range: Optional[str] = None):
-    """Return (mm_ntwk, z11, z22, z21, omega) after mixed-mode conversion if ≥ 4 ports."""
+def _network(
+    sim_result: SimulationResult, frequency_range: Optional[str] = None
+) -> rf.Network:
+    """Return the simulated network, sliced to *frequency_range* when one is given.
+    """
     if sim_result.network is None:
         raise ValueError("Simulation result does not contain a network.")
-    ntwk = sim_result.network[frequency_range] if frequency_range else sim_result.network
-    mm = ntwk.copy()
+    return sim_result.network[frequency_range] if frequency_range else sim_result.network
+
+
+def _mm_z(sim_result: SimulationResult, frequency_range: Optional[str] = None):
+    """Return (mm_ntwk, z11, z22, z21, omega) after mixed-mode conversion if ≥ 4 ports.
+
+    The number of differential pairs follows the netlist's port count, so an N-port
+    network is converted as ``N // 2`` pairs (any leftover odd port stays single-ended).
+    """
+    mm = _network(sim_result, frequency_range).copy()
     if mm.nports >= 4:
-        mm.se2gmm(p=2)
+        mm.se2gmm(p=mm.nports // 2)
     return mm, mm.z[:, 0, 0], mm.z[:, 1, 1], mm.z[:, 1, 0], 2 * np.pi * mm.f
 
 
@@ -64,9 +75,9 @@ def _k(sim_result: SimulationResult, frequency_range: Optional[str] = None):
 
 
 def _srf(sim_result: SimulationResult, frequency_range: Optional[str] = None):
-    if sim_result.network is None or sim_result.network.nports < 2:
+    ntwk = _network(sim_result, frequency_range)
+    if ntwk.nports < 2:
         raise ValueError("SRF calculation requires a 2-port network in the simulation result.")
-    ntwk: rf.Network = sim_result.network
     _, z11, *_ = _mm_z(sim_result, frequency_range)
     freq_ghz = ntwk.f / 1e9
     srf_idx = np.where(np.diff(np.sign(np.imag(z11))))[0]
@@ -164,11 +175,9 @@ def make_gain_db(
 
 def _stability_terms(sim_result: SimulationResult, frequency_range: Optional[str] = None):
     """Return (s11, s12, s21, s22, delta) for a 2-port network."""
-    if sim_result.network is None or sim_result.network.nports < 2:
+    ntwk = _network(sim_result, frequency_range)
+    if ntwk.nports < 2:
         raise ValueError("Stability terms require a 2-port network in the simulation result.")
-    ntwk: rf.Network = sim_result.network
-    if frequency_range:
-        ntwk = ntwk[frequency_range]
     s11 = ntwk.s[:, 0, 0]
     s12 = ntwk.s[:, 0, 1]
     s21 = ntwk.s[:, 1, 0]
@@ -210,9 +219,9 @@ def _gmax(sim_result: SimulationResult, frequency_range: Optional[str] = None):
 def s_param_formula(i: int, j: int, in_db: bool = True) -> Callable[[SimulationResult, Optional[str]], np.ndarray]:
     """Return a formula function for S{i}{j} or S{i}{j}_dB."""
     if in_db:
-        return lambda sim_result, frequency_range=None, _i=i, _j=j: sim_result.network[frequency_range].s_db[:, _i - 1, _j - 1]
+        return lambda sim_result, frequency_range=None, _i=i, _j=j: np.asarray(_network(sim_result, frequency_range).s_db[:, _i - 1, _j - 1])
     else:
-        return lambda sim_result, frequency_range=None, _i=i, _j=j: np.abs(sim_result.network[frequency_range].s[:, _i - 1, _j - 1])
+        return lambda sim_result, frequency_range=None, _i=i, _j=j: np.abs(_network(sim_result, frequency_range).s[:, _i - 1, _j - 1])
 
 def make_s_param_db(i: int, j: int) -> DesignParameter:
     """Return a ``S{i}{j}_dB`` DesignParameter (dB magnitude)."""
@@ -255,12 +264,12 @@ def calculate_array_penalty(min_value: Optional[float], max_value: Optional[floa
         max_value : Optional[float]
             The maximum acceptable value. If None, no upper bound is enforced.
         values : Union[np.ndarray, float]
-            The array of values to evaluate. Can be a numpy array or a single float.
+            The value(s) to evaluate. Scalars — as returned by single-valued parameters
+            such as SRF — are treated as a one-element array.
 
         """
-        if isinstance(values, float):
-            raise TypeError("calculate_array_penalty expects 'values' to be a numpy array, not a float.")
-        
+        values = np.atleast_1d(np.asarray(values, dtype=float))
+
         eps = 1e-9
         loss_val = 0.0
 
@@ -277,21 +286,21 @@ def calculate_array_penalty(min_value: Optional[float], max_value: Optional[floa
                     np.abs(max_value) + eps
                 )
                 loss_val += np.sum(diff**2)
-            return loss_val
+            return float(loss_val)
 
         elif min_value is not None:
             denom = np.abs(min_value) + eps
             if np.any(values < min_value):
                 violating = values[values < min_value]
-                return np.sum(((min_value - violating) / denom) ** 2)
-            return -np.sum(((values - min_value) / denom) ** 2)
+                return float(np.sum(((min_value - violating) / denom) ** 2))
+            return float(-np.sum(((values - min_value) / denom) ** 2))
 
         elif max_value is not None:
             denom = np.abs(max_value) + eps
             if np.any(values > max_value):
                 violating = values[values > max_value]
-                return np.sum(((violating - max_value) / denom) ** 2)
-            return -np.sum(((max_value - values) / denom) ** 2)
+                return float(np.sum(((violating - max_value) / denom) ** 2))
+            return float(-np.sum(((max_value - values) / denom) ** 2))
 
         raise ValueError("At least one of min_value or max_value must be provided.")
 
