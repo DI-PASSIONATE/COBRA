@@ -4,25 +4,25 @@ import os
 from cobra import (
     COBRA,
     DesignGoal,
-    DesignParameter,
     OptimizationProperty,
     OptimizationType,
     OptunaOptimizer,
     XyceSimulator,
 )
+from cobra.optimizers.design_goal_collection import find_parameter
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-NETLIST_PATH = os.path.join(BASE_DIR, "netlist_multiple_SPFiles.cir")
+NETLIST_PATH = os.path.join(BASE_DIR, "Trafo", "netlist_multiple_SPFiles.cir")
 ONNX_MODEL_PATH = os.path.join(BASE_DIR, "tf_octa_c_ports.onnx")
 FIXED_TOUCHSTONE_PATH = os.path.join(BASE_DIR, "XYLIN_Trafo_output_predicted.s6p")
 
 
 design_goals = [
-    DesignGoal(DesignParameter.S11_dB, max_value=-9, frequency_range="125-135ghz"),
-    DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
+    DesignGoal(find_parameter("S11_dB"), max_value=-9, frequency_range="125-135ghz"),
+    DesignGoal(find_parameter("S21_dB"), min_value=-3, max_value=0, frequency_range="125-135ghz"),
 ]
 
 parser = XyceNetlistParser().from_file(NETLIST_PATH)

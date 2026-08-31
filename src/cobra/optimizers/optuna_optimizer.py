@@ -4,11 +4,55 @@ from typing import Any, Dict
 import optuna
 
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+from cobra.setting import CobraSetting
 
 class OptunaOptimizer(BaseOptimizer):
     """
     OptunaOptimizer - An implementation of the BaseOptimizer using Optuna for optimization.
     """
+
+    _settings = [
+        CobraSetting(
+            name="multi_objective",
+            dtype=bool,
+            default=False,
+            description=(
+                "Enable multi-objective optimisation (Pareto front).\n"
+                "When disabled, per-goal losses are aggregated into a single scalar."
+            ),
+        ),
+        CobraSetting(
+            name="sampler",
+            dtype=str,
+            default="tpe",
+            description=(
+                "Optuna sampling algorithm used to suggest trial parameters.\n"
+                "TPE (Tree-structured Parzen Estimator) is a good general-purpose choice.\n"
+                "SimulatedAnnealing requires the optunahub package."
+            ),
+            choices=[
+                ("TPESampler (default)", "tpe"),
+                ("RandomSampler", "random"),
+                ("SimulatedAnnealingSampler (optunahub)", "simulated_annealing"),
+            ],
+        ),
+        CobraSetting(
+            name="pruner",
+            dtype=str,
+            default=None,
+            description=(
+                "Optuna pruner that terminates unpromising trials early.\n"
+                "Pruning can reduce runtime but may miss good regions of the search space."
+            ),
+            choices=[
+                ("None", None),
+                ("MedianPruner", "median"),
+                ("SuccessiveHalvingPruner", "successive_halving"),
+                ("HyperbandPruner", "hyperband"),
+            ],
+        ),
+    ]
+
     def __init__(
         self,
         multi_objective: bool = False,

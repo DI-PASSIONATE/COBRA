@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Set, Union
 from pathlib import Path
 import skrf as rf
 
+from cobra.spice_sim.simulation_type import SimulationType
+
 
 @dataclass
 class NetlistElement:
@@ -36,6 +38,24 @@ class Include:
     line_index: int
 
 
+@dataclass
+class SimulationDirective:
+    """A simulation/analysis directive found in the netlist (e.g. .AC, .LIN, .HB)."""
+    directive: str             # e.g. ".AC", ".LIN", ".TRAN"
+    positional: List[str]      # positional tokens after the keyword, e.g. ["LIN", "500", "100G", "170G"]
+    kv_params: Dict[str, str]  # key=value params on the same line, e.g. {"format": "touchstone"}
+    line_index: int
+
+
+@dataclass
+class PrintDirective:
+    """A ``.PRINT`` directive found in the netlist (e.g. ``.PRINT hb format=csv v(Out) I(VOut)``)."""
+    analysis: str              # analysis keyword in lower case, e.g. "hb", "ac", "tran"
+    signals: List[str]         # printed signal tokens, e.g. ["v(Out)", "I(VOut)"]
+    kv_params: Dict[str, str]  # key=value params, e.g. {"format": "csv"}
+    line_index: int
+
+
 class BaseNetlistParser(ABC):
     """Abstract base class for SPICE netlist parsers."""
 
@@ -46,6 +66,11 @@ class BaseNetlistParser(ABC):
         self._includes: List[Include] = []               # .INCLUDE directives
         self._inline_subckt_names: Set[str] = set()      # .SUBCKT names defined within this file
         self.netlist_path: Optional[Union[str, Path]] = None
+        self._simulation_type: SimulationType = SimulationType.UNKNOWN
+        self._num_ports: int = 0
+        self._simulation_directives: List[SimulationDirective] = []
+        self._print_directives: List[PrintDirective] = []
+        self._port_sources: Dict[str, Dict] = {} # Maps P-element name → {sin_amplitude, z0, ac_amplitude} for ports that carry a SIN source."""
 
     # -------------------------------------------------------------------------
     # Factory / loader methods
@@ -70,6 +95,11 @@ class BaseNetlistParser(ABC):
         self._components.clear()
         self._includes.clear()
         self._inline_subckt_names.clear()
+        self._simulation_type = SimulationType.UNKNOWN
+        self._num_ports = 0
+        self._simulation_directives.clear()
+        self._print_directives.clear()
+        self._port_sources.clear()
 
     # -------------------------------------------------------------------------
     # Serialisation
@@ -116,6 +146,43 @@ class BaseNetlistParser(ABC):
     def includes(self) -> List[Include]:
         """List of .INCLUDE directives found in the netlist."""
         return self._includes.copy()
+
+    @property
+    def simulation_type(self) -> SimulationType:
+        """The primary analysis type detected in the netlist (e.g. LIN, AC, HB)."""
+        return self._simulation_type
+
+    @property
+    def simulation_directives(self) -> List[SimulationDirective]:
+        """All simulation/analysis directives found in the netlist."""
+        return list(self._simulation_directives)
+
+    @property
+    def print_directives(self) -> List[PrintDirective]:
+        """All ``.PRINT`` directives found in the netlist."""
+        return list(self._print_directives)
+
+    @property
+    def num_ports(self) -> int:
+        """Number of port elements (P-instances) found in the netlist."""
+        return self._num_ports
+
+    @property
+    def port_sources(self) -> Dict[str, Dict]:
+        """Dict mapping P-element name → waveform info (sin_amplitude, z0, ac_amplitude).
+
+        Only ports that carry an explicit SIN or AC source declaration are included.
+        These are used to compute Pin for Gain calculations.
+        """
+        return self._port_sources.copy()
+
+    @property
+    def available_design_parameters(self) -> List[str]:
+        """
+        Convenience shortcut: the design parameters available for the current
+        simulation type and port count.
+        """
+        return self._simulation_type.available_parameters(self._num_ports)
 
     # -------------------------------------------------------------------------
     # Mutators (registration helpers)

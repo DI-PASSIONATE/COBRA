@@ -1,23 +1,59 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 import math
 import skrf as rf
+import pandas as pd
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
+
+
+@dataclass
+class SimulationResult:
+    """Unified result returned by :meth:`BaseSimulator.run_simulation`.
+
+    Attributes
+    ----------
+    output_files:
+        Absolute paths to every output file produced by the simulator.
+    network:
+        Parsed S-parameter network when the simulation yielded Touchstone
+        output (AC / S-parameter analysis).  ``None`` for other analysis
+        types (HB, TRAN, DC, …).
+    dataframes:
+        Mapping of output file path → parsed ``pandas.DataFrame`` for
+        every text-based PRN/table output file found.  Empty for purely
+        Touchstone results.
+    """
+    output_files: List[str] = field(default_factory=list)
+    network: Optional[rf.Network] = None
+    dataframes: Dict[str, "pd.DataFrame"] = field(default_factory=dict)
+
 
 @dataclass
 class BaseSimulator(ABC):
     netlist_parser: BaseNetlistParser
+
+    @classmethod
+    def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
+        """Return simulator-specific metadata for *sim_type*.
+
+        Override in concrete simulator subclasses to provide parameter names,
+        descriptions, defaults, and ``.options`` category information.
+        The base implementation returns an empty metadata object so that
+        unknown simulators degrade gracefully.
+        """
+        return SimulationTypeMetadata()
     
     @abstractmethod
-    def run_simulation(self, netlist_name: str) -> rf.Network:
-        """
-        Run the circuit simulation using the provided netlist and output name.
-        Args:
-            netlist_name (str): The name of the netlist file to be simulated.
-            output_name (str): The name of the output file where simulation results will be stored.
-        Returns:
-            str: The path to the output file containing the simulation results (e.g., a Touchstone file).
+    def run_simulation(self, netlist_name: str) -> Optional[SimulationResult]:
+        """Run the simulator on *netlist_name* and return a :class:`SimulationResult`.
+
+        Returns ``None`` if the simulation failed (non-zero exit code or no
+        output files found).
         """
         pass
 

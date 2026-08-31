@@ -14,7 +14,8 @@ class OptimizationWorker(QThread):
 
     def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
                  optimization_parameters: List[OptimizationProperty], 
-                 max_iterations: int, orca_geometries: Optional[Any] = None):
+                 max_iterations: int, orca_geometries: Optional[Any] = None,
+                 sim_params_by_type: Optional[Any] = None):
         super().__init__()
         self.cobra = cobra_instance
         self.netlist = netlist
@@ -22,6 +23,7 @@ class OptimizationWorker(QThread):
         self.optimization_parameters = optimization_parameters
         self.max_iterations = max_iterations
         self.orca_geometries = orca_geometries
+        self.sim_params_by_type = sim_params_by_type or {}
         self.stop_requested = False
         self.paused = False
 
@@ -60,7 +62,8 @@ class OptimizationWorker(QThread):
                     context["max_iterations"] = self.max_iterations
 
                 # Update prev_network for next iteration
-                self.prev_network = context["simulated_network"]
+                sim_results = context.get("simulation_results") or {}
+                self.prev_network = next((r.network for r in sim_results.values() if r.network is not None), None)
                 
                 return True
 
@@ -71,7 +74,8 @@ class OptimizationWorker(QThread):
                 optimization_parameters=self.optimization_parameters,
                 max_iterations=self.max_iterations,
                 orca_geometries=self.orca_geometries,
-                callback=optimization_callback
+                callback=optimization_callback,
+                sim_params_by_type=self.sim_params_by_type,
             )
             
             self.finished.emit()

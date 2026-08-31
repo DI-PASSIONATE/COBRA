@@ -130,7 +130,7 @@ The GUI lets you:
 - load a netlist and map each parsed subcircuit component to either an ONNX surrogate model or a fixed SNP Touchstone file,
 - configure optimization parameters and design goals,
 - run/pause/stop optimization,
-- visualize S-parameters and goal losses in real time,
+- visualize S-parameters, harmonic-balance output spectra, and goal losses in real time,
 - optionally enable EM fine-tuning with Palace and select ORCA geometry presets or custom geometry classes.
 - browse, download, and use community surrogate models directly from HuggingFace.
 
@@ -202,6 +202,8 @@ cobra = COBRA(
 
 ### Design parameters
 
+Small-signal parameters, derived from the `.AC` S-parameter result:
+
 | Parameter | Description |
 |-----------|-------------|
 | `S11_dB`, `S21_dB`, `S31_dB`, `S41_dB`, `S12_dB`, `S22_dB` | S-parameters in dB |
@@ -211,7 +213,14 @@ cobra = COBRA(
 | `k` | Magnetic coupling coefficient |
 | `SRF` | Self-resonance frequency (GHz) |
 
-Each goal accepts an optional `frequency_range` string (e.g., `"125-135ghz"`), a `min_value`, a `max_value`, and a `weight`.
+Large-signal parameters, derived from the `.HB` result (see [Harmonic Balance Support](#harmonic-balance-support)). These are generated per netlist, so `<node>` and `<port>` are the names found in your circuit:
+
+| Parameter | Description |
+|-----------|-------------|
+| `Power_dBm[<node>]` | Output power in dBm at the selected analysis point |
+| `Gain_dB[<port>@<node>]` | Transducer gain in dB at `<node>`, referred to the drive level of input port `<port>` |
+
+Each goal accepts an optional `frequency_range` string (e.g., `"125-135ghz"`), a `min_value`, a `max_value`, and a `weight`. For HB goals a single frequency such as `"35ghz"` selects the corresponding spectral line.
 
 ### Optimizer options
 
@@ -232,6 +241,55 @@ For EM fine-tuning, a `GradientDescentOptimizer` is also available by passing `f
 
 Parameters can be linked (`linked_to="other_param"`) so that one variable always mirrors another, useful for symmetrically constrained components.
 
+## Harmonic Balance Support
+
+S-parameters only describe small-signal behaviour. For large-signal designs — power amplifiers, mixers, anything where compression or mixing products matter — COBRA can optimize against a Harmonic Balance (`.HB`) analysis instead of, or in addition to, the `.AC` sweep.
+
+### Netlist requirements
+
+A Qucs-S schematic with a Harmonic Balance simulation block exports the three directives COBRA needs:
+
+```spice
+.options hbint numfreq=3 STARTUPPERIODS=2
+.HB 130G
+.PRINT hb format=csv I(VOut) v(Out) v(Vdd) v(ip) v(on) v(op) v(sub)
+```
+
+- `.HB` lists the **fundamental frequencies**. One token is a single-tone analysis (LNA, PA); several tokens make it multi-tone (`.HB 95E9 10E9` for a mixer), and Xyce then solves for all mixing products of those tones.
+- `.options hbint numfreq=…` sets the number of harmonics per fundamental (`numfreq=4,40` assigns a different count to each tone).
+- `.PRINT hb …` determines which signals end up in the result file.
+
+Both the `.HB` frequencies and the `.options hbint` values are editable in the GUI under **Simulation Parameters** once a netlist is loaded, so you can sweep the harmonic settings without touching the schematic.
+
+### Analysis points
+
+Output power needs both a voltage and a current. The Qucs-S convention is a labelled node with a 0 V source used as a current probe in series with it:
+
+```spice
+VOut Out _net6 DC 0
+```
+
+This yields the pair `V(Out)` and `I(VOut)`. COBRA scans the `.PRINT hb` line and offers every node that has **both** halves of such a pair in the **HB Analysis Point** dropdown in the configuration panel. The selected node is what the HB design parameters and the spectrum plot refer to.
+
+### Goals
+
+Once a netlist with an HB analysis is loaded, `Power_dBm[<node>]` and one `Gain_dB[<port>@<node>]` per driven port appear in the goal dialog. A goal such as `Power_dBm[Out] > 10` with a frequency range of `35ghz` constrains exactly the 35 GHz line of the output spectrum, which is how you express a mixer conversion target.
+
+AC and HB goals can be mixed freely. COBRA determines which analyses are required, generates one netlist per analysis type, runs them, and combines the resulting penalties in a single loss. If a goal needs an analysis the netlist does not contain, the missing directive is injected automatically — including a matching `.PRINT HB format=csv` line, without which Xyce would produce no HB output at all.
+
+### Spectrum visualization
+
+During optimization the visualization panel plots the output spectrum of the selected analysis point as a stem plot:
+
+- **Quantity** — output power (dBm), gain (dB) against a selectable input port, node voltage (dBV), or probe current (dBmA).
+- **Fundamentals** are highlighted in a separate colour from the remaining lines.
+- **Click any line** to drop a marker labelled with its frequency, value, and harmonic index — `H2` for a single-tone analysis, or the mixing-product decomposition such as `2f1-f2` for multi-tone, so unwanted products are easy to identify when tuning for isolation.
+
+When both an `.AC` and an `.HB` analysis run, a selector switches the left plot between the S-parameters and the HB spectrum; when only one of them is active, that plot is shown and the selector is disabled.
+
+> [!NOTE]
+> Transient (`.TRAN`) analyses are parsed and can be simulated, but time-domain spectrum plotting is not implemented yet.
+
 ## Typical Inputs and Outputs
 
 Inputs:
@@ -245,6 +303,7 @@ Results are saved to a timestamped folder `results/<timestamp>_<netlist_name>/` 
 - `cobra_optimization_context.json` — full optimization history and best parameters
 - `<component>_predicted.s<N>p` — surrogate-predicted Touchstone files per component
 - `surrogate_s_params_<component>.s<N>p` — best-trial surrogate S-parameters
+- `<netlist>.HB.FD.csv` / `.HB.FD.prn` — harmonic-balance frequency-domain results, when an HB analysis is run
 - vector-fitted SPICE subcircuits (`<component>.sp`) included by the final netlist
 
 ## EM Fine-Tuning Notes (Optional)
@@ -264,27 +323,27 @@ COBRA runs a staged pipeline on each optimization iteration. Understanding each 
 ┌──────────────────────────────────────────────────────────────────────┐
 │                          COBRA run loop                              │
 │                                                                      │
-│  ┌──────────────┐   new params   ┌─────────────────┐                │
-│  │  Optimizer   │───────────────▶│  Netlist Parser  │ (patch .cir)  │
-│  │  (Optuna)    │                └────────┬────────┘                │
+│  ┌──────────────┐   new params   ┌─────────────────┐                 │
+│  │  Optimizer   │───────────────▶│ Netlist Parser  │ (patch .cir)    │
+│  │  (Optuna)    │                └────────┬────────┘                 │
 │  └──────┬───────┘                         │ updated netlist          │
 │         │ tell(penalties)                 ▼                          │
-│         │                       ┌─────────────────┐                 │
+│         │                       ┌─────────────────┐                  │
 │         │                       │  EM Surrogate   │ (ONNX inference) │
-│         │                       │  Stage          │                 │
-│         │                       └────────┬────────┘                 │
+│         │                       │  Stage          │                  │
+│         │                       └────────┬────────┘                  │
 │         │                                │ rf.Network per component  │
-│         │                                ▼                          │
-│         │                       ┌─────────────────┐                 │
-│         │                       │  Circuit Sim    │ (vector fit →   │
-│         │                       │  Stage          │  Xyce)          │
-│         │                       └────────┬────────┘                 │
+│         │                                ▼                           │
+│         │                       ┌─────────────────┐                  │
+│         │                       │  Circuit Sim    │ (vector fit →    │
+│         │                       │  Stage          │  Xyce)           │
+│         │                       └────────┬────────┘                  │
 │         │                                │ simulated rf.Network      │
-│         │                                ▼                          │
-│         └───────────────────────┌─────────────────┐                 │
-│                                 │  Design Goal    │                 │
-│                                 │  Checker        │                 │
-│                                 └─────────────────┘                 │
+│         │                                ▼                           │
+│         └───────────────────────┌─────────────────┐                  │
+│                                 │  Design Goal    │                  │
+│                                 │  Checker        │                  │
+│                                 └─────────────────┘                  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -317,11 +376,13 @@ COBRA solves this by vector-fitting the surrogate-predicted S-parameter network 
 
 The generated subcircuit is automatically included in the patched netlist via a `.INCLUDE` directive, so Xyce sees a fully self-contained netlist on every iteration.
 
-After the include is in place, COBRA invokes Xyce as a subprocess, reads the resulting Touchstone output back as a `scikit-rf` `Network`, and passes it to the goal checker.
+After the include is in place, COBRA runs one Xyce simulation per analysis type required by the goals (`.AC`, `.HB`, …), reads each result back — a Touchstone file as a `scikit-rf` `Network` for `.AC`, a frequency-domain table as a DataFrame for `.HB` — and passes them to the goal checker.
 
 ### Stage 5 — Design goal checking (`DesignGoalChecker`)
 
 Each `DesignGoal` computes a penalty scalar from the simulated network. The penalty is zero (or negative, acting as a reward) when the network already satisfies the goal, and grows proportionally to the squared normalized deviation when it does not. This smooth, differentiable penalty signal is what the optimizer minimizes.
+
+Goals are grouped by the analysis they need, so each one is evaluated against the matching result: S-parameter and lumped-element goals against the `.AC` network, power and gain goals against the `.HB` spectrum.
 
 For 4-port networks the checker automatically converts to mixed-mode (differential/common-mode) parameters before extracting lumped quantities such as inductance, Q-factor, and coupling coefficient.
 

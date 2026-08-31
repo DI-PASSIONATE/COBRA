@@ -22,14 +22,15 @@ class OptimizerStage(COBRABaseStage):
         return context
     
     def tell(self, context):
-        loss_values = context["penalties"]
+        goals = context.get("goals", [])
+        loss_values = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in goals]
         status = "finetuning" if context.get("fine_tuning_active") else "optimization"
         context["iterations"].append({
             "iteration": context.get("iteration"),
             "status": status,
             "model_parameters": context["model_parameters"],
             "netlist_parameters": context["netlist_parameters"],
-            "loss": loss_values,
+            "losses": loss_values
         })
         # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False
         self.optimizer._tell(context, loss_values)

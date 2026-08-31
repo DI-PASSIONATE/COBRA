@@ -6,7 +6,10 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import (
     Component,
     Include,
     NetlistElement,
+    PrintDirective,
+    SimulationDirective,
 )
+from cobra.spice_sim.simulation_type import SimulationType
 
 
 class XyceNetlistParser(BaseNetlistParser):
@@ -46,10 +49,22 @@ class XyceNetlistParser(BaseNetlistParser):
     # TSTONEFILE=... on a LIN model marks a Qucs-S surrogate placeholder.
     _tstonefile_re   = re.compile(r"\bTSTONEFILE\s*=\s*([^\s]+)",    re.IGNORECASE)
 
+    # Dot-directives that identify the primary simulation type.
+    _sim_directive_re = re.compile(r"^\s*(\.(?:LIN|AC|HB|TRAN|DC))\b", re.IGNORECASE)
+
     # .INCLUDE directives that reference fitted-subcircuit files.
     _include_re      = re.compile(
         r"^\s*\.include\s+[\"']?([^\s\"']+)[\"']?\s*$",               re.IGNORECASE
     )
+
+    # .options lines: ".options <category> [key=val ...]"
+    _options_re      = re.compile(r"^\s*\.options\b",                  re.IGNORECASE)
+
+    # .PRINT lines: ".PRINT <analysis> [key=val ...] <signal> ..."
+    _print_re        = re.compile(r"^\s*\.print\b",                    re.IGNORECASE)
+
+    # Printed signal tokens such as "v(Out)" or "I(VOut)".
+    _probe_re        = re.compile(r"^([VI])\(([^)]+)\)$",              re.IGNORECASE)
 
     # -------------------------------------------------------------------------
     # Constructor
@@ -60,6 +75,8 @@ class XyceNetlistParser(BaseNetlistParser):
         # Maps rewritten X-instance names → original TSTONEFILE paths so the
         # GUI can display them even after the Y→X conversion.
         self._tstonefile_map: Dict[str, str] = {}
+        # Parsed .options lines: category_lower → {param: value, "_line_index": int}
+        self._options_lines: Dict[str, Dict] = {}
 
     # -------------------------------------------------------------------------
     # Public mutators
@@ -188,6 +205,7 @@ class XyceNetlistParser(BaseNetlistParser):
         """
         self._normalize_tstonefile_subcircuits()
         self._reset_state()
+        self._options_lines = {}
 
         subckt_depth = 0  # > 0 while inside a .SUBCKT definition block
 
@@ -253,6 +271,51 @@ class XyceNetlistParser(BaseNetlistParser):
                 )
                 continue
 
+            # Detect the primary simulation / analysis directive.
+            # Both .AC and .LIN map to SimulationType.AC (see SimulationType.from_directive).
+            # .LIN is a post-processing directive that sits alongside .AC to request
+            # Touchstone/S-parameter output — it is not a separate simulation type.
+            # The first recognised directive wins; subsequent ones are stored but
+            # do not override _simulation_type.
+            m_sim = self._sim_directive_re.match(stripped)
+            if m_sim:
+                detected = SimulationType.from_directive(m_sim.group(1))
+                if self._simulation_type is SimulationType.UNKNOWN:
+                    self._simulation_type = detected
+
+                # Store the full directive so it can be inspected and edited later.
+                tokens_sim = stripped.split()
+                directive_kw = tokens_sim[0]  # e.g. ".AC", ".LIN"
+                remaining = tokens_sim[1:]
+                positional = [t for t in remaining if not self._kv_re.match(t)]
+                kv = self._collect_params(remaining)
+                self._simulation_directives.append(SimulationDirective(
+                    directive=directive_kw,
+                    positional=positional,
+                    kv_params=kv,
+                    line_index=idx,
+                ))
+
+            # Parse .options lines (e.g. ".options hbint numfreq=3 STARTUPPERIODS=2").
+            if self._options_re.match(stripped):
+                tokens_opt = stripped.split()
+                if len(tokens_opt) >= 2:
+                    category = tokens_opt[1].lower()
+                    opt_params = self._collect_params(tokens_opt[2:])
+                    self._options_lines[category] = {"_line_index": idx, **opt_params}
+
+            # Parse .PRINT lines (e.g. ".PRINT hb format=csv I(VOut) v(Out)").
+            if self._print_re.match(stripped):
+                tokens_print = stripped.split()
+                if len(tokens_print) >= 2:
+                    remaining = tokens_print[2:]
+                    self._print_directives.append(PrintDirective(
+                        analysis=tokens_print[1].lower(),
+                        signals=[t for t in remaining if not self._kv_re.match(t)],
+                        kv_params=self._collect_params(remaining),
+                        line_index=idx,
+                    ))
+
             # Other dot-directives are preserved in the text but not parsed.
             if stripped.startswith("."):
                 continue
@@ -298,6 +361,142 @@ class XyceNetlistParser(BaseNetlistParser):
                     model=model if model else "",
                     params=params,
                 )
+
+            # Count P-elements as netlist ports.
+            if etype == "P":
+                self._num_ports += 1
+                # Extract SIN/AC source info for Pin / Gain calculations.
+                source_info = self._extract_port_source_info(tokens)
+                if source_info:
+                    self._port_sources[name] = source_info
+
+    # -------------------------------------------------------------------------
+    # Public: simulation directive editing
+    # -------------------------------------------------------------------------
+
+    @property
+    def hb_probe_nodes(self) -> List[str]:
+        """Node names that can serve as an HB analysis point.
+
+        A node ``X`` qualifies when both its voltage ``V(X)`` and the current
+        ``I(VX)`` of the 0 V probe source named ``VX`` are available, which is
+        the Qucs-S convention for a labelled node with a current probe.
+        Falls back to the netlist's V-elements when no ``.PRINT hb`` line exists.
+        """
+        voltages: Dict[str, str] = {}   # upper-case node → node as written
+        currents: set[str] = set()      # upper-case source name
+        for directive in self._print_directives:
+            if directive.analysis != "hb":
+                continue
+            for token in directive.signals:
+                m = self._probe_re.match(token)
+                if not m:
+                    continue
+                kind, arg = m.group(1).upper(), m.group(2).strip()
+                if kind == "V":
+                    voltages.setdefault(arg.upper(), arg)
+                else:
+                    currents.add(arg.upper())
+
+        if not voltages:
+            # No .PRINT hb line: derive candidates from the probe sources themselves.
+            for elem in self.list_elements(["V"]):
+                if elem.nodes:
+                    node = elem.nodes[0]
+                    if elem.name.upper() == f"V{node.upper()}":
+                        voltages.setdefault(node.upper(), node)
+                        currents.add(elem.name.upper())
+
+        return [node for key, node in voltages.items() if f"V{key}" in currents]
+
+    @property
+    def options_directives(self) -> Dict[str, Dict[str, str]]:
+        """Parsed ``.options`` lines, keyed by category name (e.g. ``'hbint'``).
+
+        Returns a copy with the internal ``_line_index`` key stripped out.
+        """
+        return {
+            cat: {k: v for k, v in params.items() if k != "_line_index"}
+            for cat, params in self._options_lines.items()
+        }
+
+    def update_options_directive(self, category: str, params: Dict[str, str]) -> None:
+        """Update key=value parameters on a ``.options <category>`` line in-place.
+
+        Example::
+
+            parser.update_options_directive("hbint", {"numfreq": "5"})
+        """
+        cat_lower = category.lower()
+        entry = self._options_lines.get(cat_lower)
+        if entry is None:
+            raise KeyError(f".options {category} not found in netlist.")
+        line_idx = entry["_line_index"]
+        merged = {k: v for k, v in entry.items() if k != "_line_index"}
+        merged.update(params)
+        tokens = [".options", category] + [f"{k}={v}" for k, v in merged.items()]
+        raw_line = self._lines[line_idx]
+        had_newline = raw_line.endswith("\n")
+        _, inline_comment = self._split_inline_comment(raw_line)
+        self._lines[line_idx] = self._format_line(tokens, inline_comment, had_newline)
+        self.parse_netlist()
+
+    def update_simulation_directive(self, directive: str, params: Dict[str, str]) -> None:
+        """
+        Update named parameters of a simulation directive in-place, then re-parse.
+
+        ``params`` keys can be:
+
+        * **Positional names** as returned by ``SimulationType.positional_param_names()``
+          (e.g. ``"start_freq"``, ``"stop_freq"``, ``"points"`` for ``.AC``).
+        * **Key=value names** already present on the directive line
+          (e.g. ``"format"`` for ``.LIN format=touchstone``).
+
+        Example::
+
+            parser.update_simulation_directive(".AC", {"start_freq": "100G", "stop_freq": "200G"})
+        """
+        directive_upper = directive.strip().upper()
+        target = next(
+            (d for d in self._simulation_directives if d.directive.upper() == directive_upper),
+            None,
+        )
+        if target is None:
+            raise KeyError(f"Directive '{directive}' not found in netlist.")
+
+        sim_type = SimulationType.from_directive(directive_upper)
+        # Lazy import avoids circular dependency: XyceNetlistParser ← XyceSimulator ← XyceNetlistParser
+        from cobra.spice_sim.xyce_simulator import XyceSimulator
+        param_names = XyceSimulator.get_simulation_metadata(sim_type).positional_param_names
+
+        new_positional = list(target.positional)
+        new_kv = dict(target.kv_params)
+
+        for param_name, value in params.items():
+            if param_name in param_names:
+                idx = param_names.index(param_name)
+                # Special case: a param whose value may contain multiple space-separated
+                # tokens (e.g. HB "frequencies" = "95E9 10E9") — expand into individual
+                # positional slots starting at idx.
+                sub_tokens = str(value).split()
+                for offset, tok in enumerate(sub_tokens):
+                    while len(new_positional) <= idx + offset:
+                        new_positional.append("")
+                    new_positional[idx + offset] = tok
+                # Truncate any extra positional slots that no longer exist
+                new_positional = new_positional[:idx + len(sub_tokens)]
+            else:
+                new_kv[param_name] = str(value)
+
+        tokens = [target.directive] + new_positional
+        for k, v in new_kv.items():
+            tokens.append(f"{k}={v}")
+
+        raw_line = self._lines[target.line_index]
+        had_newline = raw_line.endswith("\n")
+        _, inline_comment = self._split_inline_comment(raw_line)
+        self._lines[target.line_index] = self._format_line(tokens, inline_comment, had_newline)
+        self.parse_netlist()
 
     # -------------------------------------------------------------------------
     # Private: Qucs-S TSTONEFILE → X-subcircuit normalisation
@@ -396,6 +595,53 @@ class XyceNetlistParser(BaseNetlistParser):
     # -------------------------------------------------------------------------
     # Private: instance line parsing
     # -------------------------------------------------------------------------
+
+    def _extract_port_source_info(self, tokens: List[str]) -> Dict[str, float]:
+        """Extract AC amplitude, SIN amplitude and z0 from a P-element token list.
+
+        Handles lines such as::
+
+            P2 _net28 0 port=1 z0=100 AC 0.089442719 SIN 0 0.089442719 130G
+
+        Returns a dict with any subset of keys ``{"sin_amplitude", "ac_amplitude", "z0"}``.
+        Only populated when at least one of SIN or AC amplitude is found.
+        """
+        result: Dict[str, float] = {}
+
+        # z0 is a key=value token — collect it first.
+        for tok in tokens:
+            m = self._kv_re.match(tok)
+            if m and m.group(1).lower() == "z0":
+                try:
+                    result["z0"] = float(m.group(2))
+                except ValueError:
+                    pass
+
+        # Scan for positional AC/SIN waveform keywords.
+        i = 0
+        while i < len(tokens):
+            upper = tokens[i].upper()
+            if upper == "AC" and i + 1 < len(tokens):
+                try:
+                    result["ac_amplitude"] = float(tokens[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+                continue
+            if upper == "SIN" and i + 2 < len(tokens):
+                # SIN <offset> <amplitude> [freq] [td] [theta]
+                try:
+                    result["sin_amplitude"] = float(tokens[i + 2])
+                except ValueError:
+                    pass
+                i += 3
+                continue
+            i += 1
+
+        # Only return info when a source amplitude is present.
+        if "sin_amplitude" not in result and "ac_amplitude" not in result:
+            return {}
+        return result
 
     def _parse_instance(
         self, tokens: List[str], etype: str

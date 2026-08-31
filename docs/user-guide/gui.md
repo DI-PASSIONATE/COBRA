@@ -11,6 +11,7 @@ cobra
 - Netlist source
 - Component-to-model mapping (`.onnx` or `.sNp`)
 - Design goals (S-parameter and RF metrics)
+- HB analysis point, when the netlist contains a Harmonic Balance analysis
 - Optimization parameters and ranges
 - Iteration control and stop behavior
 - Optional fine-tuning settings
@@ -33,6 +34,9 @@ Use goal constraints with optional frequency ranges, for example:
 
 - S11 <= -9 dB in `125-135ghz`
 - -3 dB <= S21 <= 0 dB in `125-135ghz`
+- `Power_dBm[Out]` >= 10 dB at `35ghz` (single spectral line of an HB run)
+
+Setting the same value for min and max frequency selects one point; the nearest frequency of the sweep or HB spectrum is used.
 
 !!! note
     Goals are transformed into penalty values. Satisfying goals yields zero or negative penalty (reward), violations increase positive penalty.
@@ -47,9 +51,12 @@ Use goal constraints with optional frequency ranges, for example:
 The GUI displays:
 
 - live S-parameter traces,
+- the HB output spectrum at the selected analysis point, as power, gain, voltage or current,
 - per-goal penalty/loss behavior,
 - current and best trial values,
 - progress against maximum iterations.
+
+When a run needs both an `.AC` and an `.HB` analysis, a selector switches the left plot between the two. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels.
 
 ## Outputs
 

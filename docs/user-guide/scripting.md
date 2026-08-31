@@ -18,12 +18,12 @@ Use `examples/main.py` as the canonical end-to-end script.
 from cobra import (
     COBRA,
     DesignGoal,
-    DesignParameter,
     OptimizationProperty,
     OptimizationType,
     OptunaOptimizer,
     XyceSimulator,
 )
+from cobra.optimizers.design_goal_collection import find_parameter
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 ```
 
@@ -45,14 +45,31 @@ cobra = COBRA(
 
 ## Defining Goals and Parameters
 
+A goal binds one `DesignParameter` to min/max limits. Look parameters up by name with
+`find_parameter(...)`, or list the ones valid for a netlist with `get_available_parameters(num_ports)`.
+
 === "DesignGoal"
 
     ```python
     goals = [
-        DesignGoal(DesignParameter.S11_dB, max_value=-9, frequency_range="125-135ghz"),
-        DesignGoal(DesignParameter.S21_dB, min_value=-3, max_value=0, frequency_range="125-135ghz"),
+        DesignGoal(find_parameter("S11_dB"), max_value=-9, frequency_range="125-135ghz"),
+        DesignGoal(find_parameter("S21_dB"), min_value=-3, max_value=0, frequency_range="125-135ghz"),
     ]
     ```
+
+=== "Harmonic Balance goal"
+
+    ```python
+    from cobra.optimizers.design_goal_collection import make_power_dbm
+
+    # Output power at one spectral line of an .HB run
+    goals.append(
+        DesignGoal(make_power_dbm("Out"), min_value=10.0, frequency_range="35ghz")
+    )
+    ```
+
+    Power and gain parameters depend on the nodes and ports of the circuit, so they are
+    built per netlist instead of being looked up by name. See **Advanced -> Harmonic Balance**.
 
 === "OptimizationProperty"
 
