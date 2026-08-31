@@ -5,6 +5,7 @@ import inspect
 import os
 import pkgutil
 import re
+from pathlib import Path
 import numpy as np
 import onnxruntime
 import gmsh
@@ -17,11 +18,20 @@ from PySide6.QtWidgets import (
     QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog,
     QStackedWidget, QDialog, QTextBrowser, QDialogButtonBox
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import QElapsedTimer, QTimer, Qt, Slot
 import pyqtgraph as pg
 
 # COBRA imports
 from cobra.cobra import COBRA
+from cobra.configuration import (
+    BackendConfig,
+    ConfigurationError,
+    DesignGoalConfig,
+    FineTuningConfig,
+    OptimizationParameterConfig,
+    RunConfiguration,
+)
+from cobra.config_runner import build_configured_run, build_design_goals
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.xyce_simulator import XyceSimulator
@@ -52,6 +62,12 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle("COBRA GUI")
         self.resize(1200, 800)
+        self._last_config_path: Optional[str] = None
+        self._run_elapsed_timer = QElapsedTimer()
+        self._run_elapsed_display_timer = QTimer(self)
+        self._run_elapsed_display_timer.setInterval(250)
+        self._run_elapsed_display_timer.timeout.connect(self._update_elapsed_time)
+        self._elapsed_before_pause = 0
         
         # Central widget
         central = QWidget()
@@ -95,7 +111,16 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_optimization)
         self.stop_btn.setEnabled(False)
 
+        self.save_config_btn = QPushButton("Save Config")
+        self.save_config_btn.setFixedHeight(control_btn_height)
+        self.save_config_btn.clicked.connect(self.save_configuration)
+        self.load_config_btn = QPushButton("Load Config")
+        self.load_config_btn.setFixedHeight(control_btn_height)
+        self.load_config_btn.clicked.connect(self.load_configuration)
+
         global_controls_layout.addStretch()
+        global_controls_layout.addWidget(self.save_config_btn)
+        global_controls_layout.addWidget(self.load_config_btn)
         global_controls_layout.addWidget(self.action_btn)
         global_controls_layout.addWidget(self.stop_btn)
         global_controls_layout.addWidget(self.help_btn)
@@ -535,6 +560,35 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(iteration)
         self.progress_label.setText(f"Finetuning {iteration}/{total_iterations} ({percentage:.1f}%)")
 
+    def _start_elapsed_clock(self) -> None:
+        self._elapsed_before_pause = 0
+        self._run_elapsed_timer.start()
+        self._run_elapsed_display_timer.start()
+        self._update_elapsed_time()
+
+    def _pause_elapsed_clock(self) -> None:
+        if self._run_elapsed_display_timer.isActive():
+            self._elapsed_before_pause += self._run_elapsed_timer.elapsed()
+            self._run_elapsed_display_timer.stop()
+        self._update_elapsed_time()
+
+    def _resume_elapsed_clock(self) -> None:
+        self._run_elapsed_timer.restart()
+        self._run_elapsed_display_timer.start()
+        self._update_elapsed_time()
+
+    def _stop_elapsed_clock(self) -> None:
+        if self._run_elapsed_display_timer.isActive():
+            self._elapsed_before_pause += self._run_elapsed_timer.elapsed()
+            self._run_elapsed_display_timer.stop()
+        self._update_elapsed_time()
+
+    def _update_elapsed_time(self) -> None:
+        elapsed_ms = self._elapsed_before_pause
+        if self._run_elapsed_display_timer.isActive():
+            elapsed_ms += self._run_elapsed_timer.elapsed()
+        self.elapsed_label.setText(f"Time: {elapsed_ms / 1000.0:.1f}s")
+
     def _goal_sparam_specs(self) -> List[tuple[str, int, int]]:
         # Parse goal parameter names like S11 or S21_dB into (label, row_idx, col_idx).
         specs: List[tuple[str, int, int]] = []
@@ -823,8 +877,16 @@ class MainWindow(QMainWindow):
 
     def update_optimizer_options(self):
         """Rebuild per-optimizer settings rows using the selected optimizer's _settings list."""
-        for _ in range(self.opt_options_count):
-            result = self.config_form_layout.takeRow(self.opt_options_insert_pos)
+        rows = sorted(
+            {
+                self.config_form_layout.getWidgetPosition(widget)[0]
+                for widget in self.optimizer_widgets.values()
+                if self.config_form_layout.getWidgetPosition(widget)[0] >= 0
+            },
+            reverse=True,
+        )
+        for row in rows:
+            result = self.config_form_layout.takeRow(row)
             if result.labelItem:
                 w = result.labelItem.widget()
                 if w: w.deleteLater()
@@ -839,7 +901,7 @@ class MainWindow(QMainWindow):
         if not opt_cls:
             return
 
-        idx = self.opt_options_insert_pos
+        idx = self.config_form_layout.getWidgetPosition(self.optimizer_combo)[0] + 1
         count = 0
 
         cobra_settings = getattr(opt_cls, "_settings", None)
@@ -871,8 +933,16 @@ class MainWindow(QMainWindow):
 
     def update_simulator_options(self):
         # Clear existing dynamic options using takeRow + deleteLater
-        for _ in range(self.sim_options_count):
-            result = self.config_form_layout.takeRow(self.sim_options_insert_pos)
+        rows = sorted(
+            {
+                self.config_form_layout.getWidgetPosition(widget)[0]
+                for widget in self.simulator_widgets.values()
+                if self.config_form_layout.getWidgetPosition(widget)[0] >= 0
+            },
+            reverse=True,
+        )
+        for row in rows:
+            result = self.config_form_layout.takeRow(row)
             if result.labelItem: 
                 w = result.labelItem.widget()
                 if w: w.deleteLater()
@@ -888,7 +958,7 @@ class MainWindow(QMainWindow):
         if not sim_cls:
             return
 
-        idx = self.sim_options_insert_pos
+        idx = self.config_form_layout.getWidgetPosition(self.simulator_combo)[0] + 1
         count = 0
 
         # Prefer _settings list (CobraSetting descriptors) for rich metadata.
@@ -999,6 +1069,251 @@ class MainWindow(QMainWindow):
             if selector.isVisible():
                 geometries[comp_name] = selector.get_geometry()
         return geometries
+
+    @staticmethod
+    def _widget_value(widget):
+        if isinstance(widget, QComboBox):
+            return widget.currentData()
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        if isinstance(widget, QSpinBox):
+            value = widget.value()
+            return None if value == -1 else value
+        if isinstance(widget, QDoubleSpinBox):
+            return widget.value()
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        raise TypeError(f"Unsupported configuration widget: {type(widget).__name__}")
+
+    @staticmethod
+    def _set_widget_value(widget, value) -> None:
+        if isinstance(widget, QComboBox):
+            index = widget.findData(value)
+            if index < 0:
+                raise ConfigurationError(f"Unsupported option '{value}'")
+            widget.setCurrentIndex(index)
+        elif isinstance(widget, QCheckBox):
+            widget.setChecked(bool(value))
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            widget.setValue(-1 if value is None else value)
+        elif isinstance(widget, QLineEdit):
+            widget.setText(str(value))
+        else:
+            raise TypeError(f"Unsupported configuration widget: {type(widget).__name__}")
+
+    def _design_goal_configuration(self, goal: DesignGoal) -> DesignGoalConfig:
+        name = goal.parameter_name
+        common = {
+            "parameter": name,
+            "frequency_range": goal.frequency_range,
+            "min_value": goal.min_value,
+            "max_value": goal.max_value,
+            "weight": goal.weight,
+        }
+        power_match = re.fullmatch(r"Power_dBm\[(.+)]", name)
+        if power_match:
+            return DesignGoalConfig(**common, kind="power_dbm", node=power_match.group(1))
+        gain_match = re.fullmatch(r"Gain_dB\[([^@]+)@(.+)]", name)
+        if gain_match:
+            port, node = gain_match.groups()
+            source = self._port_sources.get(port)
+            if source is None:
+                raise ConfigurationError(f"No source information is available for gain port '{port}'")
+            amplitude = source.get("sin_amplitude") or source.get("ac_amplitude")
+            return DesignGoalConfig(
+                **common,
+                kind="gain_db",
+                node=node,
+                port=port,
+                source_amplitude=amplitude,
+                impedance=source.get("z0", 50.0),
+            )
+        return DesignGoalConfig(**common)
+
+    def create_run_configuration(self) -> RunConfiguration:
+        """Capture and validate all GUI fields that affect execution."""
+        netlist_text = self.netlist_edit.text().strip()
+        if not netlist_text:
+            raise ConfigurationError("Select a netlist file first")
+        netlist = str(Path(netlist_text).expanduser().resolve())
+        component_models = {
+            name: str(Path(edit.text().strip()).expanduser().resolve())
+            for name, edit in self.component_onnx_edits.items()
+            if edit.text().strip()
+        }
+        simulation_parameters: dict[str, dict[str, str]] = {}
+        for key, edit in self._sim_param_edits.items():
+            if key.startswith(".OPTIONS:"):
+                _, category, parameter = key.split(":", 2)
+                section = f".OPTIONS:{category}"
+            else:
+                section, parameter = key.split(":", 1)
+            simulation_parameters.setdefault(section, {})[parameter] = edit.text().strip()
+
+        geometries = {}
+        if self.finetune_cb.isChecked():
+            geometries = {
+                name: selector.configuration()
+                for name, selector in self.component_geometry_selectors.items()
+                if selector.isVisible()
+            }
+        config = RunConfiguration(
+            netlist=netlist,
+            component_models=component_models,
+            simulation_parameters=simulation_parameters,
+            optimizer=BackendConfig(
+                self.optimizer_combo.currentText(),
+                {name: self._widget_value(widget) for name, widget in self.optimizer_widgets.items()},
+            ),
+            simulator=BackendConfig(
+                self.simulator_combo.currentText(),
+                {name: self._widget_value(widget) for name, widget in self.simulator_widgets.items()},
+            ),
+            max_iterations=self.max_iter_spin.value(),
+            optimization_parameters=[
+                OptimizationParameterConfig(
+                    name=parameter.name,
+                    type=parameter.type.value,
+                    min_value=parameter.min_value,
+                    max_value=parameter.max_value,
+                    step=parameter.step,
+                    unit=parameter.unit,
+                    linked_to=parameter.linked_to,
+                )
+                for parameter in self.opt_params
+            ],
+            design_goals=[self._design_goal_configuration(goal) for goal in self.goals],
+            fine_tuning=FineTuningConfig(
+                enabled=self.finetune_cb.isChecked(),
+                palace_command=self.palace_edit.text().strip() or "palace",
+                iterations=self.ft_iter_spin.value(),
+                optimizer=self.ft_optimizer_combo.currentData(),
+                geometries=geometries,
+            ),
+        )
+        config.validate()
+        return config
+
+    def apply_run_configuration(self, config: RunConfiguration) -> None:
+        """Populate run-affecting GUI state from a validated configuration."""
+        config.validate()
+        self.goals.clear()
+        self.goal_list.clear()
+        self.opt_params.clear()
+        self.param_table.setRowCount(0)
+        self.netlist_edit.setText(config.netlist)
+        self.parse_and_update_components(config.netlist)
+
+        hb_node = next(
+            (goal.node for goal in config.design_goals if goal.kind != "catalogue" and goal.node),
+            None,
+        )
+        if hb_node:
+            index = self.hb_point_combo.findText(hb_node, Qt.MatchFlag.MatchFixedString)
+            if index < 0:
+                raise ConfigurationError(f"HB analysis point '{hb_node}' is not available")
+            self.hb_point_combo.setCurrentIndex(index)
+            self.on_hb_point_changed()
+
+        for component, path in config.component_models.items():
+            edit = self.component_onnx_edits.get(component)
+            if edit is None:
+                raise ConfigurationError(f"Component '{component}' is not present in the netlist")
+            edit.blockSignals(True)
+            edit.setText(path)
+            edit.blockSignals(False)
+        missing_models = set(self.component_onnx_edits) - set(config.component_models)
+        if missing_models:
+            raise ConfigurationError("Missing component models: " + ", ".join(sorted(missing_models)))
+
+        for combo, backend, rebuild in (
+            (self.optimizer_combo, config.optimizer, self.update_optimizer_options),
+            (self.simulator_combo, config.simulator, self.update_simulator_options),
+        ):
+            index = combo.findText(backend.name)
+            if index < 0:
+                raise ConfigurationError(f"Unsupported backend '{backend.name}'")
+            combo.blockSignals(True)
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+            rebuild()
+            widgets = self.optimizer_widgets if combo is self.optimizer_combo else self.simulator_widgets
+            unknown = set(backend.settings) - set(widgets)
+            if unknown:
+                raise ConfigurationError(
+                    f"Unknown settings for '{backend.name}': {', '.join(sorted(unknown))}"
+                )
+            for name, value in backend.settings.items():
+                self._set_widget_value(widgets[name], value)
+
+        for item in config.optimization_parameters:
+            self._add_param_to_table(
+                OptimizationProperty(
+                    name=item.name,
+                    type=OptimizationType(item.type),
+                    min_value=item.min_value,
+                    max_value=item.max_value,
+                    step=item.step,
+                    unit=item.unit,
+                    linked_to=item.linked_to,
+                )
+            )
+
+        parser = XyceNetlistParser().from_file(config.netlist)
+        self.goals = build_design_goals(config.design_goals, parser)
+        for goal in self.goals:
+            self.goal_list.addItem(self._goal_label(goal))
+        self.loss_history = {index: [] for index in range(len(self.goals))}
+        self._refresh_sim_params_for_goals()
+        for section, values in config.simulation_parameters.items():
+            for name, value in values.items():
+                key = f"{section}:{name}"
+                edit = self._sim_param_edits.get(key)
+                if edit is None:
+                    raise ConfigurationError(f"Simulation setting '{key}' is not available")
+                edit.setText(value)
+
+        self.max_iter_spin.setValue(config.max_iterations)
+        fine_tuning = config.fine_tuning
+        self.finetune_cb.setChecked(fine_tuning.enabled)
+        self.palace_edit.setText(fine_tuning.palace_command)
+        self.ft_iter_spin.setValue(fine_tuning.iterations)
+        self._set_widget_value(self.ft_optimizer_combo, fine_tuning.optimizer)
+        for component, geometry in fine_tuning.geometries.items():
+            selector = self.component_geometry_selectors.get(component)
+            if selector is None:
+                raise ConfigurationError(f"Geometry references unknown component '{component}'")
+            selector.apply_configuration(geometry)
+        self._update_geometry_selectors_visibility()
+
+    def save_configuration(self) -> None:
+        suggested = self._last_config_path or str(Path.cwd() / "cobra_config.json")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save COBRA Configuration", suggested, "JSON Files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            saved = self.create_run_configuration().save(path)
+            self._last_config_path = str(saved)
+            self.statusBar().showMessage(f"Configuration saved to {saved}", 5000)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Configuration", str(exc))
+
+    def load_configuration(self) -> None:
+        start = self._last_config_path or str(Path.cwd())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load COBRA Configuration", start, "JSON Files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            config = RunConfiguration.load(path)
+            self.apply_run_configuration(config)
+            self._last_config_path = str(Path(path).resolve())
+            self.statusBar().showMessage(f"Configuration loaded from {path}", 5000)
+        except Exception as exc:
+            QMessageBox.critical(self, "Load Configuration", str(exc))
 
     def on_netlist_selected(self):
         """Handle netlist selection with automatic parsing."""
@@ -1592,108 +1907,26 @@ class MainWindow(QMainWindow):
         # If running, toggle pause
         if self.worker.paused:
             self.worker.resume()
+            self._resume_elapsed_clock()
             self._set_action_button_state("pause")
         else:
             self.worker.pause()
+            self._pause_elapsed_clock()
             self._set_action_button_state("resume")
 
     def start_optimization(self):
-        netlist = self.netlist_edit.text()
-        if not netlist:
-            QMessageBox.warning(self, "Missing Netlist", "Please select a netlist file.")
-            return
-
-        # Parse netlist and extract components
         try:
-            netlist_parser = XyceNetlistParser().from_file(netlist)
-        except Exception as e:
-            QMessageBox.critical(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
+            run_configuration = self.create_run_configuration()
+            configured_run = build_configured_run(run_configuration)
+        except Exception as exc:
+            QMessageBox.critical(self, "Invalid Configuration", str(exc))
             return
-
-        # Apply any GUI-edited simulation parameters (start/stop freq, points, etc.)
-        self._apply_simulation_parameters(netlist_parser)
-        
-        # Get detected components
-        components = netlist_parser.components
-        
-        if components:
-            # Component-based workflow: validate all components have ONNX files
-            component_onnx_mapping = {}
-            for comp_name in components.keys():
-                if comp_name not in self.component_onnx_edits:
-                    QMessageBox.warning(
-                        self, "Missing Component Selector",
-                        f"Model selector for component '{comp_name}' not found."
-                    )
-                    return
-                onnx_path = self.component_onnx_edits[comp_name].text()
-                if not onnx_path:
-                    QMessageBox.warning(
-                        self, "Missing Model Files",
-                        f"Please select ONNX or Touchstone model for component '{comp_name}'."
-                    )
-                    return
-                component_onnx_mapping[comp_name] = onnx_path
-        else:
-            # No surrogate components — optimization-only mode (e.g. pure HB)
-            component_onnx_mapping = {}
-
-        orca_geometries = {}
-        if self.finetune_cb.isChecked():
-            try:
-                orca_geometries = self.create_orca_geometries()
-            except Exception as exc:
-                QMessageBox.critical(self, "ORCA Geometry", str(exc))
-                return
-
-        optimizer_cls = self.optimizer_combo.currentData()
-        simulator_cls = self.simulator_combo.currentData()
-
-        # Gather optimizer kwargs from dynamically-created CobraSetting widgets
-        optimizer_kwargs = {}
-        for name, widget in self.optimizer_widgets.items():
-            if isinstance(widget, QComboBox):
-                optimizer_kwargs[name] = widget.currentData()
-            elif isinstance(widget, QCheckBox):
-                optimizer_kwargs[name] = widget.isChecked()
-            elif isinstance(widget, QSpinBox):
-                val = widget.value()
-                # -1 is the sentinel meaning "no seed" for int | None params
-                if name == "random_seed" and val == -1:
-                    optimizer_kwargs[name] = None
-                else:
-                    optimizer_kwargs[name] = val
-            elif isinstance(widget, QDoubleSpinBox):
-                optimizer_kwargs[name] = widget.value()
-            elif isinstance(widget, QLineEdit):
-                optimizer_kwargs[name] = widget.text()
-        
-        # Gather simulator kwargs
-        sim_kwargs = {}
-        for name, widget in self.simulator_widgets.items():
-             if isinstance(widget, QCheckBox):
-                 sim_kwargs[name] = widget.isChecked()
-             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-                 sim_kwargs[name] = widget.value()
-             elif isinstance(widget, QLineEdit):
-                 sim_kwargs[name] = widget.text()
-        
-        # Create COBRA with component-based workflow
-        cobra = COBRA(
-            netlist_parser=netlist_parser,
-            component_onnx_mapping=component_onnx_mapping,
-            optimizer=optimizer_cls(**optimizer_kwargs),
-            circuit_simulator=simulator_cls(**sim_kwargs),
-            palace_fine_tuning_command=(self.palace_edit.text() or None) if self.finetune_cb.isChecked() else None,
-            fine_tuning_iterations=self.ft_iter_spin.value(),
-            fine_tuning_optimizer=self.ft_optimizer_combo.currentData() if self.finetune_cb.isChecked() else "reuse",
-        )
         
         # Change button to PAUSE (running state)
         self._set_action_button_state("pause")
         self.stop_btn.setEnabled(True)
         self._update_progress_display(0, self.max_iter_spin.value())
-        self.elapsed_label.setText("Time: 0.0s")
+        self._start_elapsed_clock()
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
         
@@ -1705,19 +1938,15 @@ class MainWindow(QMainWindow):
         
         self.draw_overlays()
         
-        # Build sim_params_by_type dict from GUI edits, keyed by SimulationType
-        sim_params_by_type: Dict[SimulationType, Dict[str, str]] = {}
-        for key, edit in self._sim_param_edits.items():
-            directive_str, param_name = key.split(":", 1)
-            st = SimulationType.from_directive(directive_str)
-            if st is not SimulationType.UNKNOWN:
-                sim_params_by_type.setdefault(st, {})[param_name] = edit.text().strip()
-
         self.worker = OptimizationWorker(
-            cobra, netlist, self.goals,
-            self.opt_params, self.max_iter_spin.value(),
-            orca_geometries,
-            sim_params_by_type=sim_params_by_type,
+            configured_run.cobra,
+            run_configuration.netlist,
+            configured_run.design_goals,
+            configured_run.optimization_parameters,
+            run_configuration.max_iterations,
+            configured_run.orca_geometries,
+            sim_params_by_type=configured_run.simulation_parameters,
+            run_configuration=run_configuration,
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
@@ -1729,6 +1958,7 @@ class MainWindow(QMainWindow):
     def stop_optimization(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
+            self._stop_elapsed_clock()
             self._set_action_button_state("stopping", enabled=False)
             self.stop_btn.setEnabled(False)
 
@@ -1769,13 +1999,6 @@ class MainWindow(QMainWindow):
                     self.fine_tuning_notification_shown = True
         else:
             self._update_progress_display(iteration, max_iterations)
-        
-        elapsed = context.get("elapsed_time")
-        if elapsed is None and "times" in context:
-             elapsed = context["times"].get("total_time")
-        
-        if elapsed is not None:
-            self.elapsed_label.setText(f"Time: {elapsed:.1f}s")
         
         # 1. Update Parameters Table (Current Values)
         net_params = context.get("netlist_parameters", {})
@@ -1984,6 +2207,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_finished(self):
+        self._stop_elapsed_clock()
         self._set_action_button_state("start", enabled=True)
         
         self.stop_btn.setEnabled(False)
@@ -1992,6 +2216,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def on_error(self, msg):
+        self._stop_elapsed_clock()
         self._set_action_button_state("start", enabled=True)
         
         self.stop_btn.setEnabled(False)

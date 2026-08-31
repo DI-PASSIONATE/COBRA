@@ -1,7 +1,7 @@
 {
   "netlist": "../netlists/Trafo/netlist_xyce_vector.cir",
   "component_models": {
-    "X1": "../tf_octa_c_ports.onnx"
+    "X1": "../../models/DavidL-11/tf_octa_c_ports/tf_octa_c_ports.onnx"
   },
   "simulation_parameters": {
     ".AC": {
@@ -72,6 +72,24 @@
       "step": 0.1,
       "unit": null,
       "linked_to": null
+    },
+    {
+      "name": "C3",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 20.0,
+      "step": 1.0,
+      "unit": "F",
+      "linked_to": null
+    },
+    {
+      "name": "C4",
+      "type": "netlist_variable",
+      "min_value": 0.0,
+      "max_value": 0.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "C3"
     }
   ],
   "design_goals": [
@@ -101,11 +119,18 @@
     }
   ],
   "fine_tuning": {
-    "enabled": false,
+    "enabled": true,
     "palace_command": "palace",
     "iterations": 3,
     "optimizer": "reuse",
-    "geometries": {}
+    "geometries": {
+      "X1": {
+        "source": "preset",
+        "class_name": "TransformerOcta",
+        "module": "orca.geometry.presets.tf_octa_c_ports",
+        "file": null
+      }
+    }
   },
   "schema_version": 1
 }

@@ -1,8 +1,7 @@
-import importlib
-import importlib.util
-import inspect
 import os
-import pkgutil
+
+from cobra.configuration import ConfigurationError, GeometryConfig
+from cobra.geometry_loader import discover_custom_geometries, discover_preset_geometries
 
 from PySide6.QtWidgets import (
     QGroupBox, QVBoxLayout, QFormLayout, QLabel, QComboBox,
@@ -80,23 +79,7 @@ class GeometrySelectorWidget(QGroupBox):
         self._preset_classes = {}
 
         try:
-            BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-            presets = importlib.import_module("orca.geometry.presets")
-
-            discovered = []
-            for _, module_name, _ in pkgutil.iter_modules(presets.__path__):
-                module = importlib.import_module(f"orca.geometry.presets.{module_name}")
-                for class_name, cls in inspect.getmembers(module, inspect.isclass):
-                    if cls is BaseGeometry or not issubclass(cls, BaseGeometry):
-                        continue
-                    if cls.__module__ != module.__name__:
-                        continue
-                    label = class_name
-                    if label in self._preset_classes:
-                        label = f"{class_name} ({module_name})"
-                    discovered.append((label, cls))
-
-            for label, cls in sorted(discovered, key=lambda x: x[0].lower()):
+            for label, cls in discover_preset_geometries():
                 self._preset_classes[label] = cls
                 self._preset_combo.addItem(label, cls)
 
@@ -120,32 +103,8 @@ class GeometrySelectorWidget(QGroupBox):
             return False
 
         try:
-            BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-
             abs_path = os.path.abspath(file_path)
-            if not os.path.isfile(abs_path):
-                raise FileNotFoundError(f"Geometry file not found: {abs_path}")
-
-            module_name = f"cobra_custom_geometry_{abs(hash(abs_path))}"
-            spec = importlib.util.spec_from_file_location(module_name, abs_path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Unable to load geometry module from {abs_path}")
-
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            classes = []
-            for class_name, cls in inspect.getmembers(module, inspect.isclass):
-                if cls is BaseGeometry or not issubclass(cls, BaseGeometry):
-                    continue
-                if cls.__module__ != module.__name__:
-                    continue
-                classes.append((class_name, cls))
-
-            if not classes:
-                raise ValueError("No classes extending BaseGeometry were found in the selected file.")
-
-            for class_name, cls in sorted(classes, key=lambda x: x[0].lower()):
+            for class_name, cls in discover_custom_geometries(abs_path):
                 self._custom_classes[class_name] = cls
                 self._class_combo.addItem(class_name, cls)
 
@@ -174,3 +133,56 @@ class GeometrySelectorWidget(QGroupBox):
             raise ValueError("Please select an ORCA geometry class.")
 
         return cls()
+
+    def configuration(self) -> GeometryConfig:
+        """Return the selected geometry as portable configuration data."""
+        source = self._source_combo.currentData()
+        if source == "custom":
+            cls = self._class_combo.currentData()
+            file_path = self._file_edit.text().strip()
+            if cls is None or not file_path:
+                raise ConfigurationError("Select a custom geometry file and class")
+            return GeometryConfig(
+                source="custom",
+                class_name=cls.__name__,
+                file=os.path.abspath(file_path),
+            )
+
+        cls = self._preset_combo.currentData()
+        if cls is None:
+            raise ConfigurationError("Select an ORCA preset geometry")
+        return GeometryConfig(
+            source="preset",
+            class_name=cls.__name__,
+            module=cls.__module__,
+        )
+
+    def apply_configuration(self, config: GeometryConfig) -> None:
+        """Restore a geometry selection without instantiating the geometry."""
+        config.validate()
+        source_index = self._source_combo.findData(config.source)
+        if source_index < 0:
+            raise ConfigurationError(f"Unsupported geometry source '{config.source}'")
+        self._source_combo.setCurrentIndex(source_index)
+
+        if config.source == "custom":
+            self._file_edit.setText(config.file or "")
+            if not self.load_custom_file(config.file or "", show_errors=False):
+                raise ConfigurationError(f"Could not load geometry file '{config.file}'")
+            class_index = self._class_combo.findText(config.class_name)
+            if class_index < 0:
+                raise ConfigurationError(
+                    f"Geometry class '{config.class_name}' was not found in '{config.file}'"
+                )
+            self._class_combo.setCurrentIndex(class_index)
+            return
+
+        self.reload_presets(show_errors=False)
+        for index in range(self._preset_combo.count()):
+            cls = self._preset_combo.itemData(index)
+            if cls and cls.__name__ == config.class_name and cls.__module__ == config.module:
+                self._preset_combo.setCurrentIndex(index)
+                return
+        raise ConfigurationError(
+            f"Preset geometry '{config.module}.{config.class_name}' is not available"
+        )
