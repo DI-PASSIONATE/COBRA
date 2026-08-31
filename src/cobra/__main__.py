@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 
 
@@ -13,6 +14,21 @@ def _parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run a saved JSON configuration")
     run_parser.add_argument("config", help="Path to a COBRA JSON configuration")
     return parser
+
+
+def _print_dependency_status() -> None:
+    """Report optional runtime dependencies without preventing COBRA startup."""
+    print("COBRA dependency status:")
+    for package_name, import_name in (("torch", "torch"), ("ORCA", "orca")):
+        try:
+            importlib.import_module(import_name)
+        except ModuleNotFoundError as exc:
+            missing_name = exc.name or package_name
+            print(f"  {package_name}: missing ({missing_name} is not installed)")
+        except Exception as exc:
+            print(f"  {package_name}: unavailable ({type(exc).__name__}: {exc})")
+        else:
+            print(f"  {package_name}: found")
 
 
 def _run_config(path: str) -> int:
@@ -38,6 +54,8 @@ def _run_config(path: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Launch the GUI or execute a saved configuration."""
     args = _parser().parse_args(argv)
+    _print_dependency_status()
+    print(f"Starting COBRA V{importlib.metadata.version('cobra')}...")
     if args.command == "run":
         return _run_config(args.config)
 

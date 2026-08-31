@@ -447,7 +447,9 @@ If you use COBRA in your research, please cite our upcoming SBCCI 2026 paper:
 ```
 
 ## Acknowledgements
-This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible, including but not limited to:
+This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We appreciate the scientific support and HPC resources provided by the Erlangen National High Performance Computing Center (NHR@FAU) of the Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU). The hardware is funded by the German Research Foundation (DFG).
+
+We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible, including but not limited to:
 
 - [gdsfactory](https://github.com/gdsfactory/gdsfactory)
 - [gds2palace](https://github.com/VolkerMuehlhaus/gds2palace_ihp_sg13g2)
@@ -472,8 +474,3 @@ This work was supported by the Bundesministerium für Forschung, Technologie und
     </td>
   </tr>
 </table>
-
-## Future Ideas
-
-- Add support for additional circuit simulators (e.g., NGSPICE, LTspice) to increase flexibility and accessibility
-- Add support for AI Agents to call COBRA as a skill

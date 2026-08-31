@@ -42,6 +42,8 @@ dependencies = [
     "pyqtgraph",
     "huggingface-hub",
     "gmsh",
+    "ruff",
+    "ty",
 ]
 
 [project.scripts]
