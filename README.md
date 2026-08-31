@@ -113,7 +113,7 @@ pip install -e .
 
 ## Running COBRA
 
-COBRA supports two main usage modes.
+COBRA supports three main usage modes.
 
 Technically, fully GUI-free usage through Python code is supported and works well for scripted workflows, CI, and reproducible experiments. For most users and day-to-day interactive optimization, the GUI is still highly recommended.
 
@@ -153,6 +153,28 @@ The example in `examples/main.py` shows how to:
 - optimize parsed netlist values `Cshunt_p` and `Cshunt_n` with `linked_to`,
 - configure `OptunaOptimizer` and `XyceSimulator`,
 - run `cobra.run(...)` with optional ORCA geometry (`TransformerOcta`). The ORCA geometry is only required for finetuning.
+
+### 3. JSON configuration and CLI mode
+
+The GUI has **Save Config** and **Load Config** buttons for reproducible runs. A
+saved configuration restores the netlist, component models, simulation settings,
+optimizer and simulator options, optimization parameters, goals, and optional
+fine-tuning settings.
+
+Run the same configuration without opening the GUI:
+
+```bash
+cobra run path/to/cobra_config.json
+```
+
+Relative netlist, model, and custom geometry paths are resolved from the directory
+containing the JSON file. Every GUI or CLI run also archives its exact input as
+`cobra_config.json` inside the timestamped results directory. This input file is
+separate from `cobra_optimization_context.json`, which contains run history and
+results.
+
+See the [JSON Configuration Guide](https://di-passionate.github.io/COBRA/user-guide/configuration/)
+for the schema and a complete example.
 
 ## GUI User Guide
 Coming soon
@@ -425,7 +447,9 @@ If you use COBRA in your research, please cite our upcoming SBCCI 2026 paper:
 ```
 
 ## Acknowledgements
-This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible, including but not limited to:
+This work was supported by the Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) under the DI-PASSIONATE project. We appreciate the scientific support and HPC resources provided by the Erlangen National High Performance Computing Center (NHR@FAU) of the Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU). The hardware is funded by the German Research Foundation (DFG).
+
+We thank our colleagues in the LITES institute for their feedback and support during development. Special thanks to the open-source community for providing the tools and libraries that made this project possible, including but not limited to:
 
 - [gdsfactory](https://github.com/gdsfactory/gdsfactory)
 - [gds2palace](https://github.com/VolkerMuehlhaus/gds2palace_ihp_sg13g2)

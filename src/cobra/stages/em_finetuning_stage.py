@@ -42,7 +42,7 @@ def _mesh_gds_and_run_palace(
         result_dir=os.path.join(base_dir),
         config_name=os.path.join(sim_path, "config.json"),
         palace_executable=palace_executable,
-        cpu_cores=16,
+        num_processes=16,
         touchstone_type="all",
     )
 

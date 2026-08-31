@@ -15,6 +15,7 @@ nav:
     - Quickstart: getting-started/quickstart.md
   - User Guide:
     - GUI Mode: user-guide/gui.md
+    - JSON Configuration: user-guide/configuration.md
     - Script Mode: user-guide/scripting.md
     - Examples: user-guide/examples.md
   - Support:

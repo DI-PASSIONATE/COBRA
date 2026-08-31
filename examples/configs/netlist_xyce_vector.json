@@ -1,0 +1,136 @@
+{
+  "netlist": "../netlists/Trafo/netlist_xyce_vector.cir",
+  "component_models": {
+    "X1": "../../models/DavidL-11/tf_octa_c_ports/tf_octa_c_ports.onnx"
+  },
+  "simulation_parameters": {
+    ".AC": {
+      "points": "500",
+      "start_freq": "100G",
+      "stop_freq": "170G"
+    }
+  },
+  "optimizer": {
+    "name": "OptunaOptimizer",
+    "settings": {
+      "multi_objective": false,
+      "sampler": "tpe",
+      "pruner": null
+    }
+  },
+  "simulator": {
+    "name": "XyceSimulator",
+    "settings": {
+      "xyce_command": "Xyce",
+      "parallel_xyce": false,
+      "enforce_passivity": false
+    }
+  },
+  "max_iterations": 500,
+  "optimization_parameters": [
+    {
+      "name": "X1:bottom_winding_diameter",
+      "type": "model_input",
+      "min_value": 20.0,
+      "max_value": 100.0,
+      "step": 0.1,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:top_winding_diameter",
+      "type": "model_input",
+      "min_value": 20.0,
+      "max_value": 100.0,
+      "step": 0.1,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:center_displacement",
+      "type": "model_input",
+      "min_value": 0.0,
+      "max_value": 15.0,
+      "step": 0.1,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:bottom_linewidth",
+      "type": "model_input",
+      "min_value": 2.0,
+      "max_value": 8.0,
+      "step": 0.1,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:top_linewidth",
+      "type": "model_input",
+      "min_value": 2.0,
+      "max_value": 8.0,
+      "step": 0.1,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "C3",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 20.0,
+      "step": 1.0,
+      "unit": "F",
+      "linked_to": null
+    },
+    {
+      "name": "C4",
+      "type": "netlist_variable",
+      "min_value": 0.0,
+      "max_value": 0.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "C3"
+    }
+  ],
+  "design_goals": [
+    {
+      "parameter": "S11_dB",
+      "frequency_range": "130-140ghz",
+      "min_value": null,
+      "max_value": -10.0,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    },
+    {
+      "parameter": "S21_dB",
+      "frequency_range": "130-140ghz",
+      "min_value": -3.0,
+      "max_value": null,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    }
+  ],
+  "fine_tuning": {
+    "enabled": true,
+    "palace_command": "palace",
+    "iterations": 3,
+    "optimizer": "reuse",
+    "geometries": {
+      "X1": {
+        "source": "preset",
+        "class_name": "TransformerOcta",
+        "module": "orca.geometry.presets.tf_octa_c_ports",
+        "file": null
+      }
+    }
+  },
+  "schema_version": 1
+}

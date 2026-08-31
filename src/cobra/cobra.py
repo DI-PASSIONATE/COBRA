@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Union
+from typing import TYPE_CHECKING, List, Dict, Optional, Union
 from enum import Enum
 import json
 
@@ -25,6 +25,9 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 import os
+
+if TYPE_CHECKING:
+    from cobra.configuration import RunConfiguration
 
 
 def _sanitize_for_json(obj):
@@ -153,7 +156,7 @@ class COBRA:
             "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
         )
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: Optional[Dict] = None, callback=None, results_name: Optional[str] = None, sim_params_by_type: Optional[Dict] = None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: Optional[Dict] = None, callback=None, results_name: Optional[str] = None, sim_params_by_type: Optional[Dict] = None, run_configuration: Optional["RunConfiguration"] = None) -> dict:
         """
         Run the optimization workflow.
 
@@ -179,6 +182,9 @@ class COBRA:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         results_dir = Path("results") / f"{timestamp}_{results_name}"
         results_dir.mkdir(parents=True, exist_ok=True)
+
+        if run_configuration is not None:
+            run_configuration.save(results_dir / "cobra_config.json")
         
         # Copy original netlist to results directory
         original_netlist_path = Path(netlist)

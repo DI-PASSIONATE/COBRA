@@ -1,8 +1,9 @@
 from typing import Any, List, Optional
-import time
+import threading
 from PySide6.QtCore import QThread, Signal
 
 from cobra.cobra import COBRA
+from cobra.configuration import RunConfiguration
 from cobra.optimizers.base_optimizer import OptimizationProperty
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
 
@@ -15,7 +16,8 @@ class OptimizationWorker(QThread):
     def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
                  optimization_parameters: List[OptimizationProperty], 
                  max_iterations: int, orca_geometries: Optional[Any] = None,
-                 sim_params_by_type: Optional[Any] = None):
+                 sim_params_by_type: Optional[Any] = None,
+                 run_configuration: Optional[RunConfiguration] = None):
         super().__init__()
         self.cobra = cobra_instance
         self.netlist = netlist
@@ -24,31 +26,23 @@ class OptimizationWorker(QThread):
         self.max_iterations = max_iterations
         self.orca_geometries = orca_geometries
         self.sim_params_by_type = sim_params_by_type or {}
+        self.run_configuration = run_configuration
         self.stop_requested = False
         self.paused = False
+        self.resume_event = threading.Event()
+        self.resume_event.set()
+        self.prev_network = None
 
     def run(self):
         try:
-            # Helper to calculate loss and notify text of "prev_network" tracking
-            # The context in cobra.run is persistent, so we can store prev_network directly in it if we want,
-            # but ideally we handle the state tracking in the callback.
-            # However, the context passed to the callback IS the mutable dictionary from cobra.run.
-            
-            # We'll attach a small state container to the worker to track prev_network
-            self.prev_network = None
-            self.start_time = time.time()
-
             def optimization_callback(context):
-                while self.paused:
-                    if self.stop_requested:
-                        return False
-                    time.sleep(0.1)
-
                 if self.stop_requested:
                     return False
-                
-                # Calculate elapsed time
-                context["elapsed_time"] = time.time() - self.start_time
+
+                if self.paused:
+                    self.resume_event.wait()
+                    if self.stop_requested:
+                        return False
                 
                 # Handle prev_network logic for plotting
                 context["prev_network"] = self.prev_network
@@ -76,6 +70,7 @@ class OptimizationWorker(QThread):
                 orca_geometries=self.orca_geometries,
                 callback=optimization_callback,
                 sim_params_by_type=self.sim_params_by_type,
+                run_configuration=self.run_configuration,
             )
             
             self.finished.emit()
@@ -87,9 +82,12 @@ class OptimizationWorker(QThread):
 
     def stop(self):
         self.stop_requested = True
+        self.resume_event.set()
 
     def pause(self):
         self.paused = True
+        self.resume_event.clear()
 
     def resume(self):
         self.paused = False
+        self.resume_event.set()
