@@ -113,7 +113,7 @@ pip install -e .
 
 ## Running COBRA
 
-COBRA supports two main usage modes.
+COBRA supports three main usage modes.
 
 Technically, fully GUI-free usage through Python code is supported and works well for scripted workflows, CI, and reproducible experiments. For most users and day-to-day interactive optimization, the GUI is still highly recommended.
 
@@ -153,6 +153,28 @@ The example in `examples/main.py` shows how to:
 - optimize parsed netlist values `Cshunt_p` and `Cshunt_n` with `linked_to`,
 - configure `OptunaOptimizer` and `XyceSimulator`,
 - run `cobra.run(...)` with optional ORCA geometry (`TransformerOcta`). The ORCA geometry is only required for finetuning.
+
+### 3. JSON configuration and CLI mode
+
+The GUI has **Save Config** and **Load Config** buttons for reproducible runs. A
+saved configuration restores the netlist, component models, simulation settings,
+optimizer and simulator options, optimization parameters, goals, and optional
+fine-tuning settings.
+
+Run the same configuration without opening the GUI:
+
+```bash
+cobra run path/to/cobra_config.json
+```
+
+Relative netlist, model, and custom geometry paths are resolved from the directory
+containing the JSON file. Every GUI or CLI run also archives its exact input as
+`cobra_config.json` inside the timestamped results directory. This input file is
+separate from `cobra_optimization_context.json`, which contains run history and
+results.
+
+See the [JSON Configuration Guide](https://di-passionate.github.io/COBRA/user-guide/configuration/)
+for the schema and a complete example.
 
 ## GUI User Guide
 Coming soon
@@ -450,3 +472,8 @@ This work was supported by the Bundesministerium für Forschung, Technologie und
     </td>
   </tr>
 </table>
+
+## Future Ideas
+
+- Add support for additional circuit simulators (e.g., NGSPICE, LTspice) to increase flexibility and accessibility
+- Add support for AI Agents to call COBRA as a skill
