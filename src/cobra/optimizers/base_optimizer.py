@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
 from enum import Enum
-import numpy as np
+from typing import Any
+
 
 class OptimizationType(Enum):
     NETLIST_VARIABLE = "netlist_variable"
@@ -14,9 +14,9 @@ class OptimizationProperty:
     type: OptimizationType
     min_value: float
     max_value: float
-    step: Optional[float] = None
-    unit: Optional[str] = None
-    linked_to: Optional[str] = None
+    step: float | None = None
+    unit: str | None = None
+    linked_to: str | None = None
 
 class BaseOptimizer(ABC):
     """
@@ -40,10 +40,9 @@ class BaseOptimizer(ABC):
         Args:
             num_goals: The number of design goals that the optimizer will be optimizing for.
         """
-        pass
 
     @abstractmethod
-    def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+    def step(self, context: dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         """
         Optimize the parameters based on the given input parameter range and constraints.
 
@@ -62,7 +61,6 @@ class BaseOptimizer(ABC):
             context: A dictionary containing the current design state, including the netlist, design goals, and any other relevant information.
             penalty: A list of penalty values corresponding to each design goal, indicating how well the current parameters meet the design goals. The optimizer can use this information to update its internal state and improve future parameter suggestions.
         """
-        pass
 
     @abstractmethod
     def get_moo_results(self) -> Any:
@@ -73,17 +71,15 @@ class BaseOptimizer(ABC):
         Returns:
             A list of the best trials from the multi-objective optimization process, representing the Pareto front of optimal solutions.
         """
-        pass
 
     @abstractmethod
-    def get_best_parameters(self) -> Dict[str, float]:#
+    def get_best_parameters(self) -> dict[str, float]:
         """
         Get the best parameters found by the optimizer. This method should return a dictionary of parameter names and their corresponding optimized values.
 
         Returns:
             A dictionary containing the best parameters found by the optimizer, where the keys are parameter names and the values are the optimized parameter values.
         """
-        pass
 
     def _tell(self, context, loss: list[float]):
         """

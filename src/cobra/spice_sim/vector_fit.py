@@ -1,8 +1,8 @@
 import os
 import re
 import warnings
+
 import skrf
-import numpy as np
 from skrf.vectorFitting import VectorFitting
 
 # TODO: make configurable, find better values, or implement some sort of dynamic strategy

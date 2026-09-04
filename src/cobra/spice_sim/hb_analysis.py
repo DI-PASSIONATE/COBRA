@@ -1,7 +1,8 @@
 import re
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 # Column name and axis label for each plot_quantity mode
 _QUANTITY_META = {

@@ -1,9 +1,9 @@
-from typing import Dict, List
 import os
-from onnxruntime import InferenceSession
+
 import numpy as np
 import skrf as rf
-import matplotlib.pyplot as plt
+from onnxruntime import InferenceSession
+
 from cobra.stages.base_stage import COBRABaseStage
 
 
@@ -13,7 +13,7 @@ class EMSurrogateStage(COBRABaseStage):
     It takes the current design state, runs the surrogate model, and updates the design state with the new EM results.
     """
 
-    def __init__(self, em_surrogate_model: List[str], component_names: List[str] = None):
+    def __init__(self, em_surrogate_model: list[str], component_names: list[str] = None):
         self.em_surrogate_model = em_surrogate_model
         
         self.session = []
@@ -28,7 +28,7 @@ class EMSurrogateStage(COBRABaseStage):
                 
         self.component_names = component_names or []
 
-    def run(self, context: Dict) -> Dict:
+    def run(self, context: dict) -> dict:
         params = context["model_parameters"]
         results_dir = context.get("results_dir", ".")
         context["predicted_networks"] = []
@@ -61,11 +61,11 @@ class EMSurrogateStage(COBRABaseStage):
         Runs inference on the model for the given geometry parameters and frequency points, and saves the predicted S-parameters to a Touchstone file.
         """
         # Check compatability of input parameters with model input
-        for param_name in input_params.keys():
+        for param_name in input_params:
             if param_name not in [node.name for node in session.get_inputs()]:
                 raise ValueError(f"Input parameter '{param_name}' is not compatible with the model input.")
             
-        input_names = [name for name in input_params.keys()]
+        input_names = [name for name in input_params]
         input_values = np.array([input_params[name] for name in input_names], dtype=np.float32)
 
         # Create frequency points from 1 GHz to 200 GHz in 1 GHz steps

@@ -1,12 +1,21 @@
 import os
 
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
 from cobra.configuration import ConfigurationError, GeometryConfig
 from cobra.geometry_loader import discover_custom_geometries, discover_preset_geometries
-
-from PySide6.QtWidgets import (
-    QGroupBox, QVBoxLayout, QFormLayout, QLabel, QComboBox,
-    QLineEdit, QPushButton, QWidget, QHBoxLayout, QMessageBox, QFileDialog,
-)
 
 
 class GeometrySelectorWidget(QGroupBox):

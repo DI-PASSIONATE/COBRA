@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 
@@ -123,7 +123,7 @@ class GradientDescentOptimizer(BaseOptimizer):
 
         return masters
 
-    def _seed_from_context(self, context: Dict[str, Any], masters: list[OptimizationProperty]) -> dict[str, float]:
+    def _seed_from_context(self, context: dict[str, Any], masters: list[OptimizationProperty]) -> dict[str, float]:
         seed: dict[str, float] = {}
         model_parameters = context.get("model_parameters", {}) or {}
         netlist_parameters = context.get("netlist_parameters", {}) or {}
@@ -190,7 +190,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._best_penalty = float("inf")
         self._pending_probe = None
 
-    def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+    def step(self, context: dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
 
@@ -274,7 +274,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._current_point = updated_point
         self._pending_probe = None
 
-    def _extract_point(self, context: Dict[str, Any]) -> dict[str, float] | None:
+    def _extract_point(self, context: dict[str, Any]) -> dict[str, float] | None:
         if not self._master_order:
             return None
 
@@ -298,7 +298,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             raise NotImplementedError("Multi-objective optimization is not supported by GradientDescentOptimizer.")
         raise ValueError("GradientDescentOptimizer does not produce MOO results.")
 
-    def get_best_parameters(self) -> Dict[str, float]:
+    def get_best_parameters(self) -> dict[str, float]:
         if self._best_parameters:
             best = dict(self._best_parameters)
         else:

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-import math
-import skrf as rf
+
 import pandas as pd
+import skrf as rf
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
@@ -28,9 +28,9 @@ class SimulationResult:
         every text-based PRN/table output file found.  Empty for purely
         Touchstone results.
     """
-    output_files: List[str] = field(default_factory=list)
-    network: Optional[rf.Network] = None
-    dataframes: Dict[str, "pd.DataFrame"] = field(default_factory=dict)
+    output_files: list[str] = field(default_factory=list)
+    network: rf.Network | None = None
+    dataframes: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
 @dataclass
@@ -49,13 +49,12 @@ class BaseSimulator(ABC):
         return SimulationTypeMetadata()
     
     @abstractmethod
-    def run_simulation(self, netlist_name: str) -> Optional[SimulationResult]:
+    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
         """Run the simulator on *netlist_name* and return a :class:`SimulationResult`.
 
         Returns ``None`` if the simulation failed (non-zero exit code or no
         output files found).
         """
-        pass
 
     @abstractmethod
     def preprocess_ntwk(self, ntwk, name: str) -> str:
@@ -68,7 +67,6 @@ class BaseSimulator(ABC):
         Returns:
             A file path to the preprocessed network data (e.g., a SPICE subcircuit file) that can be included in the netlist for circuit simulation.
         """
-        pass
 
     def equivalent_RCL(self, Z, f):
         # returns RLC values for a specific impedance

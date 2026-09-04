@@ -1,10 +1,11 @@
 import importlib
-from typing import Any, Dict
+from typing import Any
 
 import optuna
 
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
 from cobra.setting import CobraSetting
+
 
 class OptunaOptimizer(BaseOptimizer):
     """
@@ -162,7 +163,7 @@ class OptunaOptimizer(BaseOptimizer):
         trial = context["trial"]
         self._get_study().tell(trial, penalty)
 
-    def step(self, context: Dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+    def step(self, context: dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         trial = self._get_study().ask()
         context["trial"] = trial
         self._param_to_trial_name = {}
@@ -215,7 +216,7 @@ class OptunaOptimizer(BaseOptimizer):
         context["model_parameters"] = model_parameters
         context["netlist_parameters"] = netlist_parameters
 
-    def get_best_parameters(self) -> Dict[str, Any]:
+    def get_best_parameters(self) -> dict[str, Any]:
         if self.multi_objective:
             raise ValueError("get_best_parameters is not available for multi-objective optimization. Use get_moo_results instead.")
         best = dict(self._get_study().best_params)

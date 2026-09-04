@@ -1,28 +1,46 @@
-from typing import Dict, List, Optional, Tuple
-import importlib
-import importlib.util
 import inspect
 import os
-import pkgutil
 import re
 from pathlib import Path
+
+import gmsh
 import numpy as np
 import onnxruntime
-import gmsh
-
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog,
-    QListWidget, QTableWidget, QTableWidgetItem,
-    QSpinBox, QGroupBox, QFormLayout, QScrollArea,
-    QHeaderView, QMessageBox, QProgressBar, QCheckBox, QMenu, QDoubleSpinBox, QInputDialog,
-    QStackedWidget, QDialog, QTextBrowser, QDialogButtonBox
-)
-from PySide6.QtCore import QElapsedTimer, QTimer, Qt, Slot
 import pyqtgraph as pg
+from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Slot
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 # COBRA imports
 from cobra.cobra import COBRA
+from cobra.config_runner import build_configured_run, build_design_goals
 from cobra.configuration import (
     BackendConfig,
     ConfigurationError,
@@ -31,24 +49,26 @@ from cobra.configuration import (
     OptimizationParameterConfig,
     RunConfiguration,
 )
-from cobra.config_runner import build_configured_run, build_design_goals
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal
-from cobra.spice_sim.xyce_simulator import XyceSimulator
-from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
-from cobra.spice_sim import hb_spectrum
-from cobra.spice_sim.simulation_type import SimulationType
+from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from cobra.optimizers.design_goal_collection import (
+    get_available_parameters,
+    make_gain_db,
+    make_power_dbm,
+)
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
-from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
-from cobra.optimizers.design_goal import DesignParameter
-from cobra.optimizers.design_goal_collection import get_available_parameters, make_gain_db, make_power_dbm
+from cobra.spice_sim import hb_spectrum
+from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
-from .hf_model_browser import HuggingFaceModelDialog
 from .help_texts import TUTORIAL_HTML, tooltip
+from .hf_model_browser import HuggingFaceModelDialog
 from .theme import apply_theme
 from .worker import OptimizationWorker
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -56,13 +76,13 @@ class MainWindow(QMainWindow):
         gmsh.initialize()
         
         # Initialize component ONNX selector dictionaries
-        self.component_onnx_edits: Dict[str, QLineEdit] = {}
-        self.component_onnx_btns: Dict[str, QPushButton] = {}
-        self.component_hf_btns: Dict[str, QPushButton] = {}
+        self.component_onnx_edits: dict[str, QLineEdit] = {}
+        self.component_onnx_btns: dict[str, QPushButton] = {}
+        self.component_hf_btns: dict[str, QPushButton] = {}
         
         self.setWindowTitle("COBRA GUI")
         self.resize(1200, 800)
-        self._last_config_path: Optional[str] = None
+        self._last_config_path: str | None = None
         self._run_elapsed_timer = QElapsedTimer()
         self._run_elapsed_display_timer = QTimer(self)
         self._run_elapsed_display_timer.setInterval(250)
@@ -205,7 +225,7 @@ class MainWindow(QMainWindow):
         # Track position for inserting dynamic optimizer options (CobraSetting-driven)
         self.opt_options_insert_pos = self.config_form_layout.rowCount()
         self.opt_options_count = 0
-        self.optimizer_widgets: Dict[str, object] = {}
+        self.optimizer_widgets: dict[str, object] = {}
         self.optimizer_combo.currentIndexChanged.connect(self.update_optimizer_options)
 
         # ---- Simulator selection + dynamic per-simulator options ----
@@ -259,7 +279,7 @@ class MainWindow(QMainWindow):
         self.component_geometry_layout.setContentsMargins(0, 0, 0, 0)
         self.component_geometry_layout.setSpacing(6)
         self.component_geometry_container.setVisible(False)
-        self.component_geometry_selectors: Dict[str, GeometrySelectorWidget] = {}
+        self.component_geometry_selectors: dict[str, GeometrySelectorWidget] = {}
 
         # Disable fine-tuning fields by default
         self.palace_label.setVisible(False)
@@ -442,25 +462,25 @@ class MainWindow(QMainWindow):
         self.panel_stack.addWidget(viz_group)
         
         # Data storage
-        self.opt_params: List[OptimizationProperty] = []
-        self.goals: List[DesignGoal] = []
+        self.opt_params: list[OptimizationProperty] = []
+        self.goals: list[DesignGoal] = []
         self.worker = None
         self.loss_history = {} # key: goal index, value: list of losses
         self.overlay_items = []
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
-        self._available_parameters: "List[DesignParameter]" = []  # populated from netlist on load
-        self._sim_param_edits: Dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name" or ".OPTIONS:<cat>:<param>"
+        self._available_parameters: list[DesignParameter] = []  # populated from netlist on load
+        self._sim_param_edits: dict[str, QLineEdit] = {}  # key: "DIRECTIVE:param_name" or ".OPTIONS:<cat>:<param>"
         self._parsed_directives: list = []  # last directives from netlist parse
-        self._parsed_options: Dict[str, Dict[str, str]] = {}  # category → {param: value}
-        self._port_sources: Dict[str, Dict] = {}  # P-element name → SIN/AC source info
-        self._hb_probe_nodes: List[str] = []  # nodes with both a V() and an I(V) HB probe
-        self._required_sim_types: "set[SimulationType]" = set()
-        self._hb_dataframes: Dict[str, object] = {}
-        self._hb_spectrum_data: Optional[tuple] = None
+        self._parsed_options: dict[str, dict[str, str]] = {}  # category → {param: value}
+        self._port_sources: dict[str, dict] = {}  # P-element name → SIN/AC source info
+        self._hb_probe_nodes: list[str] = []  # nodes with both a V() and an I(V) HB probe
+        self._required_sim_types: set[SimulationType] = set()
+        self._hb_dataframes: dict[str, object] = {}
+        self._hb_spectrum_data: tuple | None = None
         self._hb_markers: list = []
         self._num_ports: int = 0
-        self._netlist_sim_type: "SimulationType | None" = None
+        self._netlist_sim_type: SimulationType | None = None
         self._simulator_cls = self.simulator_combo.currentData() or XyceSimulator
         self.simulator_combo.currentIndexChanged.connect(
             lambda: setattr(self, "_simulator_cls", self.simulator_combo.currentData() or XyceSimulator)
@@ -589,9 +609,9 @@ class MainWindow(QMainWindow):
             elapsed_ms += self._run_elapsed_timer.elapsed()
         self.elapsed_label.setText(f"Time: {elapsed_ms / 1000.0:.1f}s")
 
-    def _goal_sparam_specs(self) -> List[tuple[str, int, int]]:
+    def _goal_sparam_specs(self) -> list[tuple[str, int, int]]:
         # Parse goal parameter names like S11 or S21_dB into (label, row_idx, col_idx).
-        specs: List[tuple[str, int, int]] = []
+        specs: list[tuple[str, int, int]] = []
         seen = set()
         for goal in self.goals:
             p_name = goal.parameter_name
@@ -649,7 +669,7 @@ class MainWindow(QMainWindow):
         self.hb_input_port_combo.setEnabled(self.hb_quantity_combo.currentData() == "gain")
         self.update_hb_spectrum_plot()
 
-    def _hb_pin_dbm(self) -> Optional[float]:
+    def _hb_pin_dbm(self) -> float | None:
         """Available input power in dBm of the port selected as gain reference."""
         info = self._port_sources.get(self.hb_input_port_combo.currentData())
         if not info:
@@ -659,7 +679,7 @@ class MainWindow(QMainWindow):
             return None
         return hb_spectrum.available_power_dbm(amplitude, info.get("z0", 50.0))
 
-    def _hb_fundamentals(self) -> List[float]:
+    def _hb_fundamentals(self) -> list[float]:
         """Fundamental tone(s) of the HB analysis, taken from the .HB directive field."""
         edit = self._sim_param_edits.get(f"{SimulationType.HB.value.upper()}:frequencies")
         return hb_spectrum.parse_fundamentals(edit.text() if edit else None)
@@ -785,8 +805,8 @@ class MainWindow(QMainWindow):
                         f_start_hz = f_start * 1e9
                         f_end_hz = f_end * 1e9
                         
-                        if f_start_hz < min_f: min_f = f_start_hz
-                        if f_end_hz > max_f: max_f = f_end_hz
+                        min_f = min(min_f, f_start_hz)
+                        max_f = max(max_f, f_end_hz)
                         found_any = True
             except:
                 pass
@@ -1062,9 +1082,9 @@ class MainWindow(QMainWindow):
                 any_visible = True
         self.component_geometry_container.setVisible(any_visible)
 
-    def create_orca_geometries(self) -> Dict[str, object]:
+    def create_orca_geometries(self) -> dict[str, object]:
         """Instantiate and return a geometry for every visible ONNX-component selector."""
-        geometries: Dict[str, object] = {}
+        geometries: dict[str, object] = {}
         for comp_name, selector in self.component_geometry_selectors.items():
             if selector.isVisible():
                 geometries[comp_name] = selector.get_geometry()
@@ -1358,7 +1378,7 @@ class MainWindow(QMainWindow):
                 self.clear_component_onnx_selectors()
                 self.statusBar().showMessage("No components found in netlist.")
         except Exception as e:
-            QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{str(e)}")
+            QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{e!s}")
             self.clear_component_onnx_selectors()
             self._netlist_sim_type = None
             self.sim_type_label.setVisible(False)
@@ -1366,7 +1386,7 @@ class MainWindow(QMainWindow):
             self._populate_sim_param_widgets(set())
 
     @property
-    def hb_analysis_point(self) -> Optional[str]:
+    def hb_analysis_point(self) -> str | None:
         """The node whose HB spectrum is plotted and used by HB design goals."""
         return self.hb_point_combo.currentText() or None
 
@@ -1532,8 +1552,8 @@ class MainWindow(QMainWindow):
             for d in self._parsed_directives
         }
 
-        updates: Dict[str, Dict[str, str]] = {}
-        options_updates: Dict[str, Dict[str, str]] = {}
+        updates: dict[str, dict[str, str]] = {}
+        options_updates: dict[str, dict[str, str]] = {}
         for key, edit in self._sim_param_edits.items():
             if key.startswith(".OPTIONS:"):
                 # Format: ".OPTIONS:<category>:<param>"
@@ -1558,7 +1578,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Warning: Could not update .options {category}: {e}")
 
-    def update_component_onnx_selectors(self, components: Dict, netlist_path: str):
+    def update_component_onnx_selectors(self, components: dict, netlist_path: str):
         """Create ONNX/Touchstone selectors for each detected component."""
         # Clear existing component selectors if any
         self.clear_component_onnx_selectors()
@@ -1701,7 +1721,7 @@ class MainWindow(QMainWindow):
                     )
                     self._add_param_to_table(dlg.get_data())
                     current_param_names.add(prefixed_name)
-        except Exception as e:
+        except Exception:
             # Not an ONNX file or failed to parse, simply return
             pass
 
@@ -2024,7 +2044,7 @@ class MainWindow(QMainWindow):
         # Determine how to display the current parameters: Group them by component if any
         if hasattr(self, 'component_inputs') and self.component_inputs:
             all_comp_inputs = {inp for inputs in self.component_inputs.values() for inp in inputs}
-            other_params = [name for name in current_values.keys() if name not in all_comp_inputs]
+            other_params = [name for name in current_values if name not in all_comp_inputs]
             
             for comp_name, inputs in sorted(self.component_inputs.items()):
                 # Add component header row
@@ -2152,7 +2172,7 @@ class MainWindow(QMainWindow):
             ntwk_n = next((r.network for r in sim_results.values() if r.network is not None), None)
             ntwk_prev = context.get("prev_network")
             requested_sparams = self._goal_sparam_specs()
-            color_map: Dict[str, Tuple[int, int, int]] = {
+            color_map: dict[str, tuple[int, int, int]] = {
                 "S11": (220, 20, 60),
                 "S21": (65, 105, 225),
                 "S12": (46, 139, 87),
@@ -2164,7 +2184,7 @@ class MainWindow(QMainWindow):
                 for label, i, j in requested_sparams:
                     if i < ntwk_prev.nports and j < ntwk_prev.nports:
                         fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
-                        fallback_color: Tuple[int, int, int] = (
+                        fallback_color: tuple[int, int, int] = (
                             fallback_qcolor.red(),
                             fallback_qcolor.green(),
                             fallback_qcolor.blue(),
@@ -2182,7 +2202,7 @@ class MainWindow(QMainWindow):
                 for label, i, j in requested_sparams:
                     if i < ntwk_n.nports and j < ntwk_n.nports:
                         fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
-                        fallback_color: Tuple[int, int, int] = (
+                        fallback_color: tuple[int, int, int] = (
                             fallback_qcolor.red(),
                             fallback_qcolor.green(),
                             fallback_qcolor.blue(),

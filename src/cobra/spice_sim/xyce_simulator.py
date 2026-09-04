@@ -1,9 +1,10 @@
+import glob
+import os
 import re
 import subprocess
-from typing import Optional
-import skrf as rf
-import glob, os
+
 import pandas as pd
+import skrf as rf
 
 from cobra.setting import CobraSetting
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
@@ -128,7 +129,7 @@ class XyceSimulator(BaseSimulator):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
         return vector_fit(ntwk, name=name, enforce_passivity=self.enforce_passivity)
 
-    def run_simulation(self, netlist_name: str) -> Optional[SimulationResult]:
+    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
         results_dir = os.path.dirname(netlist_name)
         netlist_base = os.path.basename(netlist_name)  # e.g. "circuit_hb.cir"
 
@@ -163,14 +164,14 @@ class XyceSimulator(BaseSimulator):
         if sim_type is SimulationType.AC:
             # AC sweep output is written to <netlist>.s*p (Touchstone) 
             # To avoid .sp files we don't use * to match but rather use regex to match .s followed by a single digit and then p (e.g. .s1p, .s2p, etc.)
-            matched_files = glob.glob(os.path.join(results_dir, f"*.s[0-9]p"))
+            matched_files = glob.glob(os.path.join(results_dir, "*.s[0-9]p"))
             found.extend(matched_files)
 
         elif sim_type is SimulationType.HB:
             # Xyce HB writes <netlist>.HB.FD.prn (freq-domain) and
             # <netlist>.HB.TD.prn (time-domain); ".PRINT hb format=csv" yields .csv instead.
-            found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.csv")))
-            found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.HB.FD.csv")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.HB.FD.prn")))
 
         elif sim_type in (SimulationType.TRAN, SimulationType.DC):
             # Default PRN output for transient / DC sweeps
@@ -178,8 +179,8 @@ class XyceSimulator(BaseSimulator):
 
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
-            found.extend(glob.glob(os.path.join(results_dir, f"*.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, f".s[0-9]p")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, ".s[0-9]p")))
 
         # Add any files explicitly named in .PRINT file= directives
         for path in custom_print_files:
@@ -191,7 +192,7 @@ class XyceSimulator(BaseSimulator):
             return None
 
         # --- Load Touchstone output as rf.Network (AC only) ------------------
-        network: Optional[rf.Network] = None
+        network: rf.Network | None = None
         sp_files = [f for f in found if re.search(r'\.s\d+p$', f, re.IGNORECASE)]
         if sp_files:
             network = rf.Network(sp_files[0])

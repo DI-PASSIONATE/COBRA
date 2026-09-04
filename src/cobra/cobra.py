@@ -1,30 +1,31 @@
-from typing import TYPE_CHECKING, List, Dict, Optional, Union
-from enum import Enum
 import json
+import shutil
+import time
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 import skrf as rf
+import tqdm
+
 from cobra.optimizers import OptunaOptimizer
+from cobra.optimizers.base_optimizer import (
+    BaseOptimizer,
+    OptimizationProperty,
+    OptimizationType,
+)
+from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
 from cobra.setting import CobraSetting
-from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator
-from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages import (
     CircuitSimulationStage,
+    EMFineTuningStage,
     EMSurrogateStage,
     OptimizerStage,
-    EMFineTuningStage,
-    COBRABaseStage,
 )
-import numpy as np
-import matplotlib.pyplot as plt
-from cobra.optimizers.design_goal import DesignGoalChecker
-import tqdm, time
-from pathlib import Path
-from datetime import datetime
-import shutil
-import os
 
 if TYPE_CHECKING:
     from cobra.configuration import RunConfiguration
@@ -93,10 +94,10 @@ class COBRA:
     def __init__(
         self,
         netlist_parser: BaseNetlistParser,
-        component_onnx_mapping: Dict[str, str],
+        component_onnx_mapping: dict[str, str],
         optimizer: BaseOptimizer = OptunaOptimizer(),
         circuit_simulator: BaseSimulator = XyceSimulator(),
-        palace_fine_tuning_command: Optional[str] = None,
+        palace_fine_tuning_command: str | None = None,
         fine_tuning_iterations: int = 3,
         fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
     ):
@@ -156,7 +157,7 @@ class COBRA:
             "Unsupported fine-tuning optimizer. Choose 'reuse' or 'gradient_descent', or pass a BaseOptimizer instance."
         )
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: Optional[Dict] = None, callback=None, results_name: Optional[str] = None, sim_params_by_type: Optional[Dict] = None, run_configuration: Optional["RunConfiguration"] = None) -> dict:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: dict | None = None, callback=None, results_name: str | None = None, sim_params_by_type: dict | None = None, run_configuration: Optional["RunConfiguration"] = None) -> dict:
         """
         Run the optimization workflow.
 
@@ -297,7 +298,7 @@ class COBRA:
             print(f"Design goals achieved at iteration {context['iteration']}.")
         
         # Save the surrogate model's predicted S-parameters to the results directory for the user
-        ntwks: List[rf.Network] = context.get("predicted_networks", [])
+        ntwks: list[rf.Network] = context.get("predicted_networks", [])
         for i, ntwk in enumerate(ntwks):
             name_suffix = f"_{ntwk.name}" if ntwk.name else f"_{i+1}"
             surrogate_file = results_dir / f"surrogate_s_params{name_suffix}.s{ntwk.nports}p"
@@ -365,7 +366,7 @@ class COBRA:
 
 
 
-    def fine_tuning(self, context: Dict, callback=None) -> Dict:
+    def fine_tuning(self, context: dict, callback=None) -> dict:
         """ Perform EM fine-tuning using the EM fine-tuning stage. """
         if self.em_fine_tuning_stage is None:
             raise ValueError("EM fine-tuning stage is not defined. Cannot perform fine-tuning.")
@@ -450,11 +451,11 @@ class COBRA:
         if not context["goal_achieved"]:
             print("EM fine-tuning completed without achieving design goals. Returning best parameters found.")
         else:
-            print(f"Design goals achieved and geometry verified with EM simulation. Returning optimized parameters.")
+            print("Design goals achieved and geometry verified with EM simulation. Returning optimized parameters.")
 
         return context
     
-    def print_time(self, context: Dict):
+    def print_time(self, context: dict):
         """
         Prints the percentage of time spent in each stage of the optimization process.
         """

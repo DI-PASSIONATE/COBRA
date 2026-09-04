@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from cobra.configuration import ConfigurationError, DesignGoalConfig, RunConfiguration
 from cobra.cobra import COBRA
+from cobra.configuration import ConfigurationError, DesignGoalConfig, RunConfiguration
 from cobra.geometry_loader import create_geometry
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal
-from cobra.optimizers.design_goal_collection import find_parameter, make_gain_db, make_power_dbm
+from cobra.optimizers.design_goal_collection import (
+    find_parameter,
+    make_gain_db,
+    make_power_dbm,
+)
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
-
 
 OPTIMIZER_REGISTRY = {"OptunaOptimizer": OptunaOptimizer}
 SIMULATOR_REGISTRY = {"XyceSimulator": XyceSimulator}

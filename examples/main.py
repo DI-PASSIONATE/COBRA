@@ -1,6 +1,8 @@
 """Example COBRA workflow using mixed component sources and linked netlist values."""
 import os
 
+from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
+
 from cobra import (
     COBRA,
     DesignGoal,
@@ -11,8 +13,6 @@ from cobra import (
 )
 from cobra.optimizers.design_goal_collection import find_parameter
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
-from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NETLIST_PATH = os.path.join(BASE_DIR, "Trafo", "netlist_multiple_SPFiles.cir")

@@ -1,4 +1,3 @@
-from typing import Dict, List, Optional, Tuple
 import re
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import (
@@ -74,9 +73,9 @@ class XyceNetlistParser(BaseNetlistParser):
         super().__init__()
         # Maps rewritten X-instance names → original TSTONEFILE paths so the
         # GUI can display them even after the Y→X conversion.
-        self._tstonefile_map: Dict[str, str] = {}
+        self._tstonefile_map: dict[str, str] = {}
         # Parsed .options lines: category_lower → {param: value, "_line_index": int}
-        self._options_lines: Dict[str, Dict] = {}
+        self._options_lines: dict[str, dict] = {}
 
     # -------------------------------------------------------------------------
     # Public mutators
@@ -168,7 +167,7 @@ class XyceNetlistParser(BaseNetlistParser):
         self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
         self.parse_netlist()
 
-    def update_parameters(self, parameters: Dict[str, float]) -> None:
+    def update_parameters(self, parameters: dict[str, float]) -> None:
         """
         Bulk-update multiple parameters by name.
 
@@ -375,7 +374,7 @@ class XyceNetlistParser(BaseNetlistParser):
     # -------------------------------------------------------------------------
 
     @property
-    def hb_probe_nodes(self) -> List[str]:
+    def hb_probe_nodes(self) -> list[str]:
         """Node names that can serve as an HB analysis point.
 
         A node ``X`` qualifies when both its voltage ``V(X)`` and the current
@@ -383,7 +382,7 @@ class XyceNetlistParser(BaseNetlistParser):
         the Qucs-S convention for a labelled node with a current probe.
         Falls back to the netlist's V-elements when no ``.PRINT hb`` line exists.
         """
-        voltages: Dict[str, str] = {}   # upper-case node → node as written
+        voltages: dict[str, str] = {}   # upper-case node → node as written
         currents: set[str] = set()      # upper-case source name
         for directive in self._print_directives:
             if directive.analysis != "hb":
@@ -410,7 +409,7 @@ class XyceNetlistParser(BaseNetlistParser):
         return [node for key, node in voltages.items() if f"V{key}" in currents]
 
     @property
-    def options_directives(self) -> Dict[str, Dict[str, str]]:
+    def options_directives(self) -> dict[str, dict[str, str]]:
         """Parsed ``.options`` lines, keyed by category name (e.g. ``'hbint'``).
 
         Returns a copy with the internal ``_line_index`` key stripped out.
@@ -420,7 +419,7 @@ class XyceNetlistParser(BaseNetlistParser):
             for cat, params in self._options_lines.items()
         }
 
-    def update_options_directive(self, category: str, params: Dict[str, str]) -> None:
+    def update_options_directive(self, category: str, params: dict[str, str]) -> None:
         """Update key=value parameters on a ``.options <category>`` line in-place.
 
         Example::
@@ -441,7 +440,7 @@ class XyceNetlistParser(BaseNetlistParser):
         self._lines[line_idx] = self._format_line(tokens, inline_comment, had_newline)
         self.parse_netlist()
 
-    def update_simulation_directive(self, directive: str, params: Dict[str, str]) -> None:
+    def update_simulation_directive(self, directive: str, params: dict[str, str]) -> None:
         """
         Update named parameters of a simulation directive in-place, then re-parse.
 
@@ -518,8 +517,8 @@ class XyceNetlistParser(BaseNetlistParser):
         self._tstonefile_map.clear()
 
         # --- Pass 1: collect LIN models that carry a TSTONEFILE reference ----
-        model_line_index: Dict[str, int] = {}
-        model_tstonefile: Dict[str, str] = {}
+        model_line_index: dict[str, int] = {}
+        model_tstonefile: dict[str, str] = {}
 
         for idx, raw in enumerate(self._lines):
             code, _ = self._split_inline_comment(raw)
@@ -544,7 +543,7 @@ class XyceNetlistParser(BaseNetlistParser):
 
         # --- Pass 2: rewrite Y-instances and replace matching model lines ----
         updated_lines = self._lines[:]
-        converted_models: Dict[str, str] = {}
+        converted_models: dict[str, str] = {}
 
         for idx, raw in enumerate(self._lines):
             code, inline_comment = self._split_inline_comment(raw)
@@ -596,7 +595,7 @@ class XyceNetlistParser(BaseNetlistParser):
     # Private: instance line parsing
     # -------------------------------------------------------------------------
 
-    def _extract_port_source_info(self, tokens: List[str]) -> Dict[str, float]:
+    def _extract_port_source_info(self, tokens: list[str]) -> dict[str, float]:
         """Extract AC amplitude, SIN amplitude and z0 from a P-element token list.
 
         Handles lines such as::
@@ -606,7 +605,7 @@ class XyceNetlistParser(BaseNetlistParser):
         Returns a dict with any subset of keys ``{"sin_amplitude", "ac_amplitude", "z0"}``.
         Only populated when at least one of SIN or AC amplitude is found.
         """
-        result: Dict[str, float] = {}
+        result: dict[str, float] = {}
 
         # z0 is a key=value token — collect it first.
         for tok in tokens:
@@ -644,18 +643,18 @@ class XyceNetlistParser(BaseNetlistParser):
         return result
 
     def _parse_instance(
-        self, tokens: List[str], etype: str
-    ) -> Tuple[List[str], Optional[str], Optional[str], Dict[str, str], Optional[str]]:
+        self, tokens: list[str], etype: str
+    ) -> tuple[list[str], str | None, str | None, dict[str, str], str | None]:
         """
         Decode a device/instance token list into
         ``(nodes, value, model, params, subtype)``.
         Each device type has its own positional layout.
         """
-        nodes:   List[str]       = []
-        params:  Dict[str, str]  = {}
-        value:   Optional[str]   = None
-        model:   Optional[str]   = None
-        subtype: Optional[str]   = None
+        nodes:   list[str]       = []
+        params:  dict[str, str]  = {}
+        value:   str | None   = None
+        model:   str | None   = None
+        subtype: str | None   = None
 
         if etype in ("R", "C", "L"):
             # <name> <n+> <n-> <value> [params...]
@@ -727,9 +726,9 @@ class XyceNetlistParser(BaseNetlistParser):
 
         return nodes, value, model, params, subtype
 
-    def _collect_params(self, toks: List[str]) -> Dict[str, str]:
+    def _collect_params(self, toks: list[str]) -> dict[str, str]:
         """Parse a list of tokens and return only the ``key=value`` pairs as a dict."""
-        result: Dict[str, str] = {}
+        result: dict[str, str] = {}
         for tok in toks or []:
             m = self._kv_re.match(tok)
             if m:
@@ -740,7 +739,7 @@ class XyceNetlistParser(BaseNetlistParser):
     # Private: line-level text helpers
     # -------------------------------------------------------------------------
 
-    def _split_inline_comment(self, raw_line: str) -> Tuple[str, str]:
+    def _split_inline_comment(self, raw_line: str) -> tuple[str, str]:
         """
         Split *raw_line* into ``(code, comment)``.
 
@@ -763,13 +762,13 @@ class XyceNetlistParser(BaseNetlistParser):
         return code + newline, comment
 
     def _replace_line(
-        self, line_index: int, tokens: List[str], inline_comment: str, had_newline: bool
+        self, line_index: int, tokens: list[str], inline_comment: str, had_newline: bool
     ) -> None:
         """Overwrite ``self._lines[line_index]`` with a rebuilt line."""
         self._lines[line_index] = self._format_line(tokens, inline_comment, had_newline)
 
     def _format_line(
-        self, tokens: List[str], inline_comment: str, had_newline: bool
+        self, tokens: list[str], inline_comment: str, had_newline: bool
     ) -> str:
         """
         Assemble *tokens* back into a single text line, re-attaching any inline
