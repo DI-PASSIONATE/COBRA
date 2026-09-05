@@ -48,7 +48,7 @@ def _print_dependency_status() -> None:
     except ModuleNotFoundError as exc:
         print(f"  ORCA: missing ({exc.name or 'orca'} is not installed)")
         print("    EM fine-tuning is disabled; all other stages run normally.")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a broken ORCA install must not stop startup
         print(f"  ORCA: unavailable ({type(exc).__name__}: {exc})")
         print("    EM fine-tuning is disabled; all other stages run normally.")
     else:
@@ -67,7 +67,7 @@ def _run_config(path: str) -> int:
     except KeyboardInterrupt:
         print(">> COBRA: interrupted", file=sys.stderr)
         return 130
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: report and exit non-zero
         print(f">> COBRA: run failed: {exc}", file=sys.stderr)
         return 1
 
