@@ -15,7 +15,10 @@ from PySide6.QtWidgets import (
 )
 
 from cobra.configuration import ConfigurationError, GeometryConfig
-from cobra.geometry_loader import discover_custom_geometries, discover_preset_geometries
+from cobra.configuration.geometry_loader import (
+    discover_custom_geometries,
+    discover_preset_geometries,
+)
 
 
 class GeometrySelectorWidget(QGroupBox):

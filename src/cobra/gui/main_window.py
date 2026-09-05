@@ -40,7 +40,6 @@ from PySide6.QtWidgets import (
 
 # COBRA imports
 from cobra.cobra import COBRA
-from cobra.config_runner import build_configured_run, build_design_goals
 from cobra.configuration import (
     BackendConfig,
     ConfigurationError,
@@ -49,6 +48,7 @@ from cobra.configuration import (
     OptimizationParameterConfig,
     RunConfiguration,
 )
+from cobra.configuration.config_runner import build_configured_run, build_design_goals
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from cobra.optimizers.design_goal_collection import (

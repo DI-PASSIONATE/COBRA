@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 import skrf as rf
 import tqdm
 
+from cobra.configuration.setting import CobraSetting
 from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import (
     BaseOptimizer,
@@ -16,7 +17,6 @@ from cobra.optimizers.base_optimizer import (
     OptimizationType,
 )
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
-from cobra.setting import CobraSetting
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.xyce_simulator import XyceSimulator

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata
 import sys
 
 
@@ -19,21 +20,21 @@ def _parser() -> argparse.ArgumentParser:
 def _print_dependency_status() -> None:
     """Report optional runtime dependencies without preventing COBRA startup."""
     print("COBRA dependency status:")
-    for package_name, import_name in (("torch", "torch"), ("ORCA", "orca")):
-        try:
-            importlib.import_module(import_name)
-        except ModuleNotFoundError as exc:
-            missing_name = exc.name or package_name
-            print(f"  {package_name}: missing ({missing_name} is not installed)")
-        except Exception as exc:
-            print(f"  {package_name}: unavailable ({type(exc).__name__}: {exc})")
-        else:
-            print(f"  {package_name}: found")
+    try:
+        importlib.import_module("orca")
+    except ModuleNotFoundError as exc:
+        print(f"  ORCA: missing ({exc.name or 'orca'} is not installed)")
+        print("    EM fine-tuning is disabled; all other stages run normally.")
+    except Exception as exc:
+        print(f"  ORCA: unavailable ({type(exc).__name__}: {exc})")
+        print("    EM fine-tuning is disabled; all other stages run normally.")
+    else:
+        print("  ORCA: found")
 
 
 def _run_config(path: str) -> int:
-    from cobra.config_runner import run_configuration_file
     from cobra.configuration import ConfigurationError
+    from cobra.configuration.config_runner import run_configuration_file
 
     try:
         context = run_configuration_file(path)

@@ -6,8 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from cobra.cobra import COBRA
-from cobra.configuration import ConfigurationError, DesignGoalConfig, RunConfiguration
-from cobra.geometry_loader import create_geometry
+from cobra.configuration.configuration import (
+    ConfigurationError,
+    DesignGoalConfig,
+    RunConfiguration,
+)
+from cobra.configuration.geometry_loader import create_geometry
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.optimizers.design_goal_collection import (

@@ -3,8 +3,8 @@ from typing import Any
 
 import optuna
 
+from cobra.configuration.setting import CobraSetting
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
-from cobra.setting import CobraSetting
 
 
 class OptunaOptimizer(BaseOptimizer):

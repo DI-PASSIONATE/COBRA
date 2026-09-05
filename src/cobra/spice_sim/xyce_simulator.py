@@ -6,7 +6,7 @@ import subprocess
 import pandas as pd
 import skrf as rf
 
-from cobra.setting import CobraSetting
+from cobra.configuration.setting import CobraSetting
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser

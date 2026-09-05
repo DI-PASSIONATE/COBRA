@@ -3,8 +3,8 @@ from typing import Any
 
 import numpy as np
 
+from cobra.configuration.setting import CobraSetting
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
-from cobra.setting import CobraSetting
 
 
 class GradientDescentOptimizer(BaseOptimizer):
