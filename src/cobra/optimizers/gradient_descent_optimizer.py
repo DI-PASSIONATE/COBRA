@@ -1,5 +1,5 @@
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -14,7 +14,7 @@ class GradientDescentOptimizer(BaseOptimizer):
     solution.
     """
 
-    _settings = [
+    _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
             name="multi_objective",
             dtype=bool,

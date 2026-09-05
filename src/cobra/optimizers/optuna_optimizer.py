@@ -1,5 +1,5 @@
 import importlib
-from typing import Any
+from typing import Any, ClassVar
 
 import optuna
 
@@ -12,7 +12,7 @@ class OptunaOptimizer(BaseOptimizer):
     OptunaOptimizer - An implementation of the BaseOptimizer using Optuna for optimization.
     """
 
-    _settings = [
+    _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
             name="multi_objective",
             dtype=bool,

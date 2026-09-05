@@ -68,7 +68,7 @@ class EMFineTuningStage(COBRABaseStage):
         
         PDK.activate()
         if not isinstance(orca_geometry, BaseGeometry):
-            raise ValueError("orca_geometry must be an instance of BaseGeometry")
+            raise TypeError("orca_geometry must be an instance of BaseGeometry")
         geometry = cast(Any, orca_geometry)
         
         base_dir = os.path.abspath(context.get("results_dir", os.path.join(os.getcwd(), "results")))

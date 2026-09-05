@@ -2,6 +2,7 @@ import glob
 import os
 import re
 import subprocess
+from typing import ClassVar
 
 import pandas as pd
 import skrf as rf
@@ -87,7 +88,7 @@ class XyceSimulator(BaseSimulator):
         """Return Xyce-specific metadata for *sim_type*."""
         return _XYCE_METADATA.get(sim_type, SimulationTypeMetadata())
 
-    _settings = [
+    _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
             name="xyce_command",
             dtype=str,
@@ -151,7 +152,10 @@ class XyceSimulator(BaseSimulator):
         command = parallel_command + [
             self.xyce_command, netlist_base
         ]
-        proc = subprocess.run(command, capture_output=True, text=True, cwd=results_dir)
+        # check=False: a non-zero return code is reported below, not raised.
+        proc = subprocess.run(
+            command, capture_output=True, text=True, cwd=results_dir, check=False
+        )
 
         if proc.returncode != 0:
             print(f"Simulation Failed! Return code: {proc.returncode}")
@@ -210,7 +214,7 @@ class XyceSimulator(BaseSimulator):
                 first_col = df.columns[0]
                 df = df[pd.to_numeric(df[first_col], errors="coerce").notna()].reset_index(drop=True)
                 dataframes[prn_path] = df.apply(pd.to_numeric, errors="coerce")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one unreadable output file must not abort the run
                 print(f"Warning: could not parse {prn_path}: {exc}")
 
         return SimulationResult(output_files=found, network=network, dataframes=dataframes)

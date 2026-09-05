@@ -75,8 +75,7 @@ class DesignGoal:
         self._eps = 1e-9
         self._current_value = None
         self._current_penalty = None
-        print(f"Created DesignGoal: {self.parameter.name}, freq_range={self.frequency_range}, min={self.min_value}, max={self.max_value}, weight={self.weight}")
-
+        
     @property
     def parameter_name(self) -> str:
         return self.parameter.name

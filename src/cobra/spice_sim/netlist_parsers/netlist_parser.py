@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 from cobra.spice_sim.simulation_type import SimulationType
 
@@ -83,14 +84,14 @@ class BaseNetlistParser(ABC):
     # Factory / loader methods
     # -------------------------------------------------------------------------
 
-    def from_lines(self, lines: list[str]) -> "BaseNetlistParser":
+    def from_lines(self, lines: list[str]) -> Self:
         """Load the parser from a list of raw text lines and (re-)parse."""
         self._lines = lines[:]
         self._reset_state()
         self.parse_netlist()
         return self
 
-    def from_file(self, path: str | Path, encoding: str = "utf-8") -> "BaseNetlistParser":
+    def from_file(self, path: str | Path, encoding: str = "utf-8") -> Self:
         """Load the parser from a file on disk and (re-)parse."""
         self.netlist_path = path
         text = Path(path).read_text(encoding=encoding, errors="replace")
@@ -224,3 +225,17 @@ class BaseNetlistParser(ABC):
     @abstractmethod
     def update_parameters(self, parameters: dict[str, float]) -> None:
         """Apply a dict of {name: value} updates to the netlist held in memory."""
+
+    # -------------------------------------------------------------------------
+    # Optional interface — subclasses override these when the dialect supports it
+    # -------------------------------------------------------------------------
+
+    def set_model(self, name: str, new_model: str) -> None:
+        """Replace the model reference of element *name* with *new_model*.
+
+        Parsers for dialects without model substitution keep the default, which
+        raises ``NotImplementedError`` so callers can skip the element.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support replacing the model of '{name}'."
+        )

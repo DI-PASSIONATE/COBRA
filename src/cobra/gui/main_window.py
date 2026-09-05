@@ -2,11 +2,14 @@ import inspect
 import os
 import re
 from pathlib import Path
+from typing import Any, cast
 
 import gmsh
 import numpy as np
 import onnxruntime
+import pandas as pd
 import pyqtgraph as pg
+from pyqtgraph.GraphicsScene import GraphicsScene
 from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -225,7 +228,7 @@ class MainWindow(QMainWindow):
         # Track position for inserting dynamic optimizer options (CobraSetting-driven)
         self.opt_options_insert_pos = self.config_form_layout.rowCount()
         self.opt_options_count = 0
-        self.optimizer_widgets: dict[str, object] = {}
+        self.optimizer_widgets: dict[str, QWidget] = {}
         self.optimizer_combo.currentIndexChanged.connect(self.update_optimizer_options)
 
         # ---- Simulator selection + dynamic per-simulator options ----
@@ -237,7 +240,7 @@ class MainWindow(QMainWindow):
         self.sim_options_insert_pos = self.config_form_layout.rowCount()
         self.sim_options_count = 0
         self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
-        self.simulator_widgets = {}
+        self.simulator_widgets: dict[str, QWidget] = {}
 
         # ---- COBRA-level settings (tooltips sourced from COBRA._settings) ----
         _cobra_tips = {s.name: s.description for s in getattr(COBRA, "_settings", [])}
@@ -415,7 +418,10 @@ class MainWindow(QMainWindow):
         self.hb_spectrum_plot.setLabel('left', 'Power', units='dBm')
         self.hb_spectrum_plot.setLabel('bottom', 'Frequency', units='Hz')
         self.hb_spectrum_plot.setBackground('w')
-        self.hb_spectrum_plot.scene().sigMouseClicked.connect(self.on_hb_spectrum_clicked)
+        # PlotWidget.scene() is declared as QGraphicsScene by Qt, but pyqtgraph
+        # returns its own GraphicsScene, which provides the mouse-click signal.
+        hb_scene = cast(GraphicsScene, self.hb_spectrum_plot.scene())
+        hb_scene.sigMouseClicked.connect(self.on_hb_spectrum_clicked)
 
         self.left_plot_stack = QStackedWidget()
         self.left_plot_stack.addWidget(self.s_param_plot)
@@ -476,7 +482,7 @@ class MainWindow(QMainWindow):
         self._port_sources: dict[str, dict] = {}  # P-element name → SIN/AC source info
         self._hb_probe_nodes: list[str] = []  # nodes with both a V() and an I(V) HB probe
         self._required_sim_types: set[SimulationType] = set()
-        self._hb_dataframes: dict[str, object] = {}
+        self._hb_dataframes: dict[str, pd.DataFrame] = {}
         self._hb_spectrum_data: tuple | None = None
         self._hb_markers: list = []
         self._num_ports: int = 0
@@ -715,7 +721,7 @@ class MainWindow(QMainWindow):
 
         node = self.hb_analysis_point
         df = hb_spectrum.find_dataframe(self._hb_dataframes, node, quantity) if node else None
-        if df is None:
+        if node is None or df is None:
             self.hb_spectrum_plot.setTitle("HB Spectrum — no data")
             return
 
@@ -808,8 +814,9 @@ class MainWindow(QMainWindow):
                         min_f = min(min_f, f_start_hz)
                         max_f = max(max_f, f_end_hz)
                         found_any = True
-            except:
-                pass
+            except ValueError:
+                # Goal frequency range is not a numeric "a-b" pair; skip it.
+                continue
 
         if found_any:
             # Add some padding (e.g. 5%)
@@ -828,8 +835,9 @@ class MainWindow(QMainWindow):
                 # If item is still in scene, remove it
                 if item.scene() is not None:
                     self.s_param_plot.removeItem(item)
-            except:
-                pass
+            except RuntimeError:
+                # The underlying C++ item was already deleted; nothing to remove.
+                continue
         self.overlay_items = []
         
         if not self.show_goals_cb.isChecked():
@@ -891,17 +899,26 @@ class MainWindow(QMainWindow):
                         self.overlay_items.append(text)
 
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - one bad goal must not stop the overlay redraw
                 print(f"Error drawing overlay for goal: {e}")
 
+
+    def _form_row_of(self, widget: QWidget) -> int:
+        """Row of *widget* in the configuration form, or -1 when it is not in it.
+
+        ``QFormLayout.getWidgetPosition`` is annotated as returning ``object`` by
+        the PySide6 stubs; at runtime it yields a ``(row, role)`` tuple.
+        """
+        row, _role = cast(tuple[int, int], self.config_form_layout.getWidgetPosition(widget))
+        return row
 
     def update_optimizer_options(self):
         """Rebuild per-optimizer settings rows using the selected optimizer's _settings list."""
         rows = sorted(
             {
-                self.config_form_layout.getWidgetPosition(widget)[0]
+                row
                 for widget in self.optimizer_widgets.values()
-                if self.config_form_layout.getWidgetPosition(widget)[0] >= 0
+                if (row := self._form_row_of(widget)) >= 0
             },
             reverse=True,
         )
@@ -915,13 +932,13 @@ class MainWindow(QMainWindow):
                 if w: w.deleteLater()
 
         self.opt_options_count = 0
-        self.optimizer_widgets = {}
+        self.optimizer_widgets.clear()
 
         opt_cls = self.optimizer_combo.currentData()
         if not opt_cls:
             return
 
-        idx = self.config_form_layout.getWidgetPosition(self.optimizer_combo)[0] + 1
+        idx = self._form_row_of(self.optimizer_combo) + 1
         count = 0
 
         cobra_settings = getattr(opt_cls, "_settings", None)
@@ -955,9 +972,9 @@ class MainWindow(QMainWindow):
         # Clear existing dynamic options using takeRow + deleteLater
         rows = sorted(
             {
-                self.config_form_layout.getWidgetPosition(widget)[0]
+                row
                 for widget in self.simulator_widgets.values()
-                if self.config_form_layout.getWidgetPosition(widget)[0] >= 0
+                if (row := self._form_row_of(widget)) >= 0
             },
             reverse=True,
         )
@@ -971,14 +988,14 @@ class MainWindow(QMainWindow):
                 if w: w.deleteLater()
         
         self.sim_options_count = 0
-        self.simulator_widgets = {}
+        self.simulator_widgets.clear()
         
         # Get selected simulator class
         sim_cls = self.simulator_combo.currentData()
         if not sim_cls:
             return
 
-        idx = self.config_form_layout.getWidgetPosition(self.simulator_combo)[0] + 1
+        idx = self._form_row_of(self.simulator_combo) + 1
         count = 0
 
         # Prefer _settings list (CobraSetting descriptors) for rich metadata.
@@ -1060,9 +1077,8 @@ class MainWindow(QMainWindow):
 
     def _open_hf_model_dialog(self, line_edit: QLineEdit):
         dlg = HuggingFaceModelDialog(self)
-        if dlg.exec():
-            if dlg.selected_file_path:
-                line_edit.setText(dlg.selected_file_path)
+        if dlg.exec() and dlg.selected_file_path:
+            line_edit.setText(dlg.selected_file_path)
 
     @staticmethod
     def _is_touchstone_path(path: str) -> bool:
@@ -1123,16 +1139,20 @@ class MainWindow(QMainWindow):
 
     def _design_goal_configuration(self, goal: DesignGoal) -> DesignGoalConfig:
         name = goal.parameter_name
-        common = {
-            "parameter": name,
-            "frequency_range": goal.frequency_range,
-            "min_value": goal.min_value,
-            "max_value": goal.max_value,
-            "weight": goal.weight,
-        }
+
+        def make(**extra: Any) -> DesignGoalConfig:
+            return DesignGoalConfig(
+                parameter=name,
+                frequency_range=goal.frequency_range,
+                min_value=goal.min_value,
+                max_value=goal.max_value,
+                weight=goal.weight,
+                **extra,
+            )
+
         power_match = re.fullmatch(r"Power_dBm\[(.+)]", name)
         if power_match:
-            return DesignGoalConfig(**common, kind="power_dbm", node=power_match.group(1))
+            return make(kind="power_dbm", node=power_match.group(1))
         gain_match = re.fullmatch(r"Gain_dB\[([^@]+)@(.+)]", name)
         if gain_match:
             port, node = gain_match.groups()
@@ -1140,15 +1160,14 @@ class MainWindow(QMainWindow):
             if source is None:
                 raise ConfigurationError(f"No source information is available for gain port '{port}'")
             amplitude = source.get("sin_amplitude") or source.get("ac_amplitude")
-            return DesignGoalConfig(
-                **common,
+            return make(
                 kind="gain_db",
                 node=node,
                 port=port,
                 source_amplitude=amplitude,
                 impedance=source.get("z0", 50.0),
             )
-        return DesignGoalConfig(**common)
+        return make()
 
     def create_run_configuration(self) -> RunConfiguration:
         """Capture and validate all GUI fields that affect execution."""
@@ -1317,7 +1336,7 @@ class MainWindow(QMainWindow):
             saved = self.create_run_configuration().save(path)
             self._last_config_path = str(saved)
             self.statusBar().showMessage(f"Configuration saved to {saved}", 5000)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
             QMessageBox.critical(self, "Save Configuration", str(exc))
 
     def load_configuration(self) -> None:
@@ -1332,7 +1351,7 @@ class MainWindow(QMainWindow):
             self.apply_run_configuration(config)
             self._last_config_path = str(Path(path).resolve())
             self.statusBar().showMessage(f"Configuration loaded from {path}", 5000)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
             QMessageBox.critical(self, "Load Configuration", str(exc))
 
     def on_netlist_selected(self):
@@ -1377,7 +1396,7 @@ class MainWindow(QMainWindow):
             else:
                 self.clear_component_onnx_selectors()
                 self.statusBar().showMessage("No components found in netlist.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - GUI boundary: any parse failure is reported in a dialog
             QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{e!s}")
             self.clear_component_onnx_selectors()
             self._netlist_sim_type = None
@@ -1475,8 +1494,9 @@ class MainWindow(QMainWindow):
         # Clear all child widgets from the container
         while self.sim_params_layout.count():
             item = self.sim_params_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
         self._sim_param_edits.clear()
 
         skip = {"sweep_type", "src_name"}
@@ -1524,7 +1544,7 @@ class MainWindow(QMainWindow):
             self.sim_params_layout.addWidget(group)
 
             # --- .options group box (if relevant params exist) ---
-            if options_params:
+            if options_params and options_cat:
                 opt_group = QGroupBox(f".OPTIONS {options_cat.upper()}")
                 opt_form = QFormLayout(opt_group)
                 opt_descriptions = meta.options_param_descriptions
@@ -1569,13 +1589,13 @@ class MainWindow(QMainWindow):
         for directive, params in updates.items():
             try:
                 parser.update_simulation_directive(directive, params)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - a rejected directive must not stop the remaining updates
                 print(f"Warning: Could not update directive {directive}: {e}")
 
         for category, params in options_updates.items():
             try:
                 parser.update_options_directive(category, params)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - a rejected directive must not stop the remaining updates
                 print(f"Warning: Could not update .options {category}: {e}")
 
     def update_component_onnx_selectors(self, components: dict, netlist_path: str):
@@ -1721,9 +1741,9 @@ class MainWindow(QMainWindow):
                     )
                     self._add_param_to_table(dlg.get_data())
                     current_param_names.add(prefixed_name)
-        except Exception:
+        except Exception:  # noqa: BLE001 - the file is simply not a usable ONNX model
             # Not an ONNX file or failed to parse, simply return
-            pass
+            return
 
     def param_context_menu(self, pos):
         row = self.param_table.rowAt(pos.y())
@@ -1813,7 +1833,7 @@ class MainWindow(QMainWindow):
             )
             if dlg.exec():
                 self._add_param_to_table(dlg.get_data())
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
             QMessageBox.critical(self, "Error", str(e))
 
     def _add_param_to_table(self, param: OptimizationProperty):
@@ -1938,7 +1958,7 @@ class MainWindow(QMainWindow):
         try:
             run_configuration = self.create_run_configuration()
             configured_run = build_configured_run(run_configuration)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
             QMessageBox.critical(self, "Invalid Configuration", str(exc))
             return
         
@@ -2087,8 +2107,6 @@ class MainWindow(QMainWindow):
                 self._add_current_param_row(name, current_values[name])
 
         # Update Goal Status Table
-        sim_results = context.get("simulation_results") or {}
-        networks = {st: r.network for st, r in sim_results.items() if r.network is not None}
         # Metrics are now pre-calculated in COBRA.run and stored in context
         current_goals = context.get("goals", [])  # Update goals with latest values
         
@@ -2214,7 +2232,7 @@ class MainWindow(QMainWindow):
             # Redraw overlays on top
             self.overlay_items = []  # plot.clear() removed prior overlay items
             self.draw_overlays()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
             print(f"S-parameter plot update failed: {exc}")
 
         # 5. Update HB Spectrum Plot
@@ -2222,7 +2240,7 @@ class MainWindow(QMainWindow):
             hb_result = sim_results.get(SimulationType.HB)
             if hb_result is not None:
                 self.update_hb_spectrum_plot(hb_result)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
             print(f"HB spectrum plot update failed: {exc}")
 
     @Slot()

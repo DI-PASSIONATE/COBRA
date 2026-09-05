@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 import skrf as rf
 import tqdm
@@ -61,7 +61,7 @@ class COBRA:
     """
 
     # Settings for run() and __init__ parameters exposed in the GUI.
-    _settings = [
+    _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
             name="max_iterations",
             dtype=int,
@@ -95,8 +95,8 @@ class COBRA:
         self,
         netlist_parser: BaseNetlistParser,
         component_onnx_mapping: dict[str, str],
-        optimizer: BaseOptimizer = OptunaOptimizer(),
-        circuit_simulator: BaseSimulator = XyceSimulator(),
+        optimizer: BaseOptimizer | None = None,
+        circuit_simulator: BaseSimulator | None = None,
         palace_fine_tuning_command: str | None = None,
         fine_tuning_iterations: int = 3,
         fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
@@ -129,8 +129,10 @@ class COBRA:
         else:
             self.em_surrogate_stage = None
         
-        self.optimizer_stage = OptimizerStage(optimizer)
-        self.circuit_simulation_stage = CircuitSimulationStage(circuit_simulator)
+        self.optimizer_stage = OptimizerStage(optimizer if optimizer is not None else OptunaOptimizer())
+        self.circuit_simulation_stage = CircuitSimulationStage(
+            circuit_simulator if circuit_simulator is not None else XyceSimulator()
+        )
         self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
         self.fine_tuning_iterations = fine_tuning_iterations
         self.fine_tuning_optimizer = fine_tuning_optimizer
@@ -180,7 +182,7 @@ class COBRA:
         # Create results folder with timestamp and name
         if results_name is None:
             results_name = Path(netlist).stem
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H:%M:%S")
         results_dir = Path("results") / f"{timestamp}_{results_name}"
         results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -198,17 +200,17 @@ class COBRA:
         netlist_parser = self.netlist_parser
         
         # Replace the component model names in the netlist to match the vector fitted subcircuits
-        for comp_name in self.component_onnx_mapping.keys():
+        for comp_name in self.component_onnx_mapping:
             try:
                 netlist_parser.set_model(comp_name, f"{comp_name}_subct")
-            except Exception as e:
+            except (KeyError, ValueError, NotImplementedError) as e:
                 print(f"Warning: Could not set subcircuit model for {comp_name}: {e}")
         netlist_parser.save(netlist)
         
         design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
 
-        context = {
+        context: dict[str, Any] = {
             "netlist": netlist,
             "native_sim_type": netlist_parser.simulation_type,
             "design_goal_checker": design_goal_checker,
@@ -371,22 +373,28 @@ class COBRA:
         if self.em_fine_tuning_stage is None:
             raise ValueError("EM fine-tuning stage is not defined. Cannot perform fine-tuning.")
 
+        surrogate_stage = self.em_surrogate_stage
+        if surrogate_stage is None:
+            raise ValueError(
+                "EM fine-tuning requires surrogate components, but none were configured "
+                "via component_onnx_mapping. Cannot perform fine-tuning."
+            )
+
         orca_geometries = context.get("orca_geometries") or {}
 
         # Validate that every ONNX-based component has a geometry
-        if self.em_surrogate_stage is not None:
-            onnx_components = [
-                comp for comp, is_ts in zip(
-                    self.em_surrogate_stage.component_names, self.em_surrogate_stage.is_touchstone
-                )
-                if not is_ts
-            ]
-            missing = [c for c in onnx_components if c not in orca_geometries]
-            if missing:
-                raise ValueError(
-                    f"No ORCA geometry provided for component(s): {missing}. "
-                    "Cannot perform EM fine-tuning without geometry information."
-                )
+        onnx_components = [
+            comp for comp, is_ts in zip(
+                surrogate_stage.component_names, surrogate_stage.is_touchstone
+            )
+            if not is_ts
+        ]
+        missing = [c for c in onnx_components if c not in orca_geometries]
+        if missing:
+            raise ValueError(
+                f"No ORCA geometry provided for component(s): {missing}. "
+                "Cannot perform EM fine-tuning without geometry information."
+            )
 
         design_goal_checker: DesignGoalChecker = context["design_goal_checker"]
         fine_tuning_optimizer_stage = self._build_fine_tuning_optimizer_stage()
@@ -410,7 +418,7 @@ class COBRA:
             # Run Palace for every ONNX component; carry forward .snp networks unchanged
             assembled_networks = []
             for comp_name, is_ts in zip(
-                self.em_surrogate_stage.component_names, self.em_surrogate_stage.is_touchstone
+                surrogate_stage.component_names, surrogate_stage.is_touchstone
             ):
                 if is_ts:
                     ntwk = prior_networks_by_comp.get(comp_name)

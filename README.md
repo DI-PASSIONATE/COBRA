@@ -345,7 +345,7 @@ Results are saved to a timestamped folder `results/<timestamp>_<netlist_name>/` 
 If you enable fine-tuning:
 
 - pass `palace_fine_tuning_command` to `COBRA` (or enable it in the GUI),
-- provide an ORCA geometry object via `orca_geometry=` in `cobra.run(...)`,
+- provide one ORCA geometry object per ONNX component via `orca_geometries={"X1": geometry}` in `cobra.run(...)`,
 - choose `fine_tuning_optimizer="reuse"` to continue with the surrogate optimizer, or `"gradient_descent"` to switch to gradient descent for the fine-tuning phase,
 - COBRA will generate a GDS file, mesh it with gmsh, run a full Palace EM simulation, and iterate.
 

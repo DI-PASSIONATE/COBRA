@@ -10,8 +10,8 @@
 COBRA(
     netlist_parser,
     component_onnx_mapping,
-    optimizer=OptunaOptimizer(),
-    circuit_simulator=XyceSimulator(),
+    optimizer=None,              # defaults to a fresh OptunaOptimizer()
+    circuit_simulator=None,      # defaults to a fresh XyceSimulator()
     palace_fine_tuning_command=None,
     fine_tuning_iterations=3,
     fine_tuning_optimizer="reuse",
@@ -31,9 +31,11 @@ cobra.run(
     design_goals,
     optimization_parameters,
     max_iterations=500,
-    orca_geometry=None,
+    orca_geometries=None,
     callback=None,
     results_name=None,
+    sim_params_by_type=None,
+    run_configuration=None,
 )
 ```
 

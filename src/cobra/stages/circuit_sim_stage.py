@@ -15,8 +15,8 @@ class CircuitSimulationStage(COBRABaseStage):
 
     """
 
-    def __init__(self, simulator: BaseSimulator = XyceSimulator("Xyce")):
-        self.simulator = simulator
+    def __init__(self, simulator: BaseSimulator | None = None):
+        self.simulator = simulator if simulator is not None else XyceSimulator("Xyce")
 
     def run(self, context: dict) -> dict:
         ntwks: list[rf.Network] = context["predicted_networks"]
@@ -36,8 +36,8 @@ class CircuitSimulationStage(COBRABaseStage):
         if native_sim_type is not SimulationType.UNKNOWN:
             required_types.add(native_sim_type)
 
-        goal_types = context.get("design_goal_checker").design_goals.keys() 
-        required_types.update(goal_types)
+        design_goal_checker = context["design_goal_checker"]
+        required_types.update(design_goal_checker.design_goals)
 
         # Per-type simulation parameters from the GUI (e.g. sweep range edits)
         sim_params_by_type: dict[SimulationType, dict[str, str]] = context.get("sim_params_by_type", {})

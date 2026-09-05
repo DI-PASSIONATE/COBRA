@@ -150,7 +150,7 @@ class HFQueryWorker(QThread):
             for m in raw:
                 try:
                     info = api.model_info(m.id, files_metadata=False)
-                except Exception:
+                except Exception:  # noqa: BLE001 - fall back to the listing entry when the API call fails
                     info = m
                 if getattr(info, "private", False):
                     continue
@@ -180,7 +180,7 @@ class HFQueryWorker(QThread):
                 })
             results.sort(key=lambda x: x["downloads"], reverse=True)
             self.models_loaded.emit(results)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
             self.error.emit(str(exc))
 
 
@@ -225,7 +225,7 @@ class HFDownloadWorker(QThread):
                 self.download_error.emit(
                     f"Download completed but expected file not found: {onnx_path}"
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
             self.download_error.emit(str(exc))
 
 

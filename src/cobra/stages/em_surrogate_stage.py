@@ -13,11 +13,12 @@ class EMSurrogateStage(COBRABaseStage):
     It takes the current design state, runs the surrogate model, and updates the design state with the new EM results.
     """
 
-    def __init__(self, em_surrogate_model: list[str], component_names: list[str] = None):
+    def __init__(self, em_surrogate_model: list[str], component_names: list[str] | None = None):
         self.em_surrogate_model = em_surrogate_model
         
-        self.session = []
-        self.is_touchstone = []
+        # Touchstone components store their file path; ONNX components an InferenceSession.
+        self.session: list[str | InferenceSession] = []
+        self.is_touchstone: list[bool] = []
         for model_path in em_surrogate_model:
             if str(model_path).lower().endswith(tuple(f".s{i}p" for i in range(1, 10)) + (".snp",)):
                 self.session.append(model_path)
@@ -34,7 +35,7 @@ class EMSurrogateStage(COBRABaseStage):
         context["predicted_networks"] = []
         for session, is_ts, comp_name in zip(self.session, self.is_touchstone, self.component_names):
             if is_ts:
-                ntwk = rf.Network(session)
+                ntwk = rf.Network(str(session))
             else:
                 comp_params = {}
                 for k, v in params.items():
@@ -91,7 +92,7 @@ class EMSurrogateStage(COBRABaseStage):
         outputs = session.run(output_names, feed_dict)
         output_dict = dict(zip(output_names, outputs))
 
-        N, ntwk, output_dict = self.s_param_dict_to_network(output_dict, frequency_points)
+        _, ntwk, _ = self.s_param_dict_to_network(output_dict, frequency_points)
 
         return ntwk
     

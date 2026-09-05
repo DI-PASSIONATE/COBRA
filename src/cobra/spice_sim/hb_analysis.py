@@ -17,9 +17,9 @@ class HBAnalysis:
         self,
         filename: str,
         sim_type: str = "hb",
-        freq_fundamental: float = None,
-        v_out: str = None,
-        i_out: str = None,
+        freq_fundamental: float | None = None,
+        v_out: str | None = None,
+        i_out: str | None = None,
         plot_quantity: str = "power",
         settle_time: float = 0.0,
         settle_fraction: float = 0.0,
@@ -141,9 +141,9 @@ class HBAnalysis:
                 xy=(freq, val),
                 xytext=(8, 8), textcoords="offset points",
                 fontsize=8,
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow",
-                          edgecolor="gray", alpha=0.9),
-                arrowprops=dict(arrowstyle="->", color="black", lw=0.8),
+                bbox={"boxstyle": "round,pad=0.3", "facecolor": "lightyellow",
+                      "edgecolor": "gray", "alpha": 0.9},
+                arrowprops={"arrowstyle": "->", "color": "black", "lw": 0.8},
             )
             fig.canvas.draw()
 
@@ -304,9 +304,9 @@ class HBAnalysis:
 
     def _settle_window(self, N: int, dt: float) -> tuple[int, int]:
         if self.settle_time > 0.0:
-            start = int(round(self.settle_time / dt))
+            start = round(self.settle_time / dt)
         elif self.settle_fraction > 0.0:
-            start = int(round(N * self.settle_fraction))
+            start = round(N * self.settle_fraction)
         else:
             return 0, N
 
@@ -318,7 +318,7 @@ class HBAnalysis:
             samples_per_period = (1.0 / self.freq_fundamental) / dt
             n_periods = int(n_keep / samples_per_period)
             if n_periods >= 1:
-                n_keep = int(round(n_periods * samples_per_period))
+                n_keep = round(n_periods * samples_per_period)
 
         if n_keep < 2:
             raise ValueError("Insufficient sample window remaining to calculate FFT.")
@@ -328,7 +328,7 @@ class HBAnalysis:
         if freq == 0:
             return 0
         if self.freq_fundamental:
-            return int(round(freq / self.freq_fundamental))
+            return round(freq / self.freq_fundamental)
         return None
 
     def _check_signals(self, signals: dict) -> None:

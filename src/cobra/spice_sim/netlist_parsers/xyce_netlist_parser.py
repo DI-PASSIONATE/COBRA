@@ -569,7 +569,7 @@ class XyceNetlistParser(BaseNetlistParser):
             code, inline_comment = self._split_inline_comment(raw)
             stripped = code.strip()
 
-            if not stripped or stripped.startswith(".") or stripped.startswith("*"):
+            if not stripped or stripped.startswith((".", "*")):
                 continue
 
             tokens = stripped.split()

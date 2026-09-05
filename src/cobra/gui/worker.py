@@ -77,7 +77,7 @@ class OptimizationWorker(QThread):
             
             self.finished.emit()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
             import traceback
             traceback.print_exc()
             self.error.emit(str(e))
