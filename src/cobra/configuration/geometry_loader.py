@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from cobra.configuration import ConfigurationError, GeometryConfig
+from cobra.configuration.configuration import ConfigurationError, GeometryConfig
 
 
 def _base_geometry_class() -> type:

@@ -1,6 +1,11 @@
 """Example COBRA workflow using mixed component sources and linked netlist values."""
 import os
 
+# ORCA is an optional dependency; this example only runs with it installed.
+from orca.geometry.presets.tf_octa_c_ports import (  # ty: ignore[unresolved-import]
+    TransformerOcta,
+)
+
 from cobra import (
     COBRA,
     DesignGoal,
@@ -9,10 +14,9 @@ from cobra import (
     OptunaOptimizer,
     XyceSimulator,
 )
+from cobra.optimizers.design_goal import DesignParameter
 from cobra.optimizers.design_goal_collection import find_parameter
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
-from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NETLIST_PATH = os.path.join(BASE_DIR, "Trafo", "netlist_multiple_SPFiles.cir")
@@ -20,9 +24,17 @@ ONNX_MODEL_PATH = os.path.join(BASE_DIR, "tf_octa_c_ports.onnx")
 FIXED_TOUCHSTONE_PATH = os.path.join(BASE_DIR, "XYLIN_Trafo_output_predicted.s6p")
 
 
+def _parameter(name: str) -> DesignParameter:
+    """Look up a catalogue parameter, failing loudly when the name is unknown."""
+    parameter = find_parameter(name)
+    if parameter is None:
+        raise SystemExit(f"Unknown design parameter '{name}'.")
+    return parameter
+
+
 design_goals = [
-    DesignGoal(find_parameter("S11_dB"), max_value=-9, frequency_range="125-135ghz"),
-    DesignGoal(find_parameter("S21_dB"), min_value=-3, max_value=0, frequency_range="125-135ghz"),
+    DesignGoal(_parameter("S11_dB"), max_value=-9, frequency_range="125-135ghz"),
+    DesignGoal(_parameter("S21_dB"), min_value=-3, max_value=0, frequency_range="125-135ghz"),
 ]
 
 parser = XyceNetlistParser().from_file(NETLIST_PATH)
@@ -56,7 +68,7 @@ context = cobra.run(
     netlist=str(NETLIST_PATH),
     design_goals=design_goals,
     optimization_parameters=parameters,
-    orca_geometry=TransformerOcta(),
+    orca_geometries={"X1": TransformerOcta()},
     max_iterations=200,
     results_name="main_mixed_sources_example",
 )

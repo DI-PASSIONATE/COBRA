@@ -1,13 +1,11 @@
-from typing import Dict, List, Set
 import os
-import shutil
+
+import skrf as rf
 
 from cobra.spice_sim.base_simulator import BaseSimulator
-from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
-from cobra.optimizers.design_goal import DesignGoalChecker
-import skrf as rf
 
 
 class CircuitSimulationStage(COBRABaseStage):
@@ -17,11 +15,11 @@ class CircuitSimulationStage(COBRABaseStage):
 
     """
 
-    def __init__(self, simulator: BaseSimulator = XyceSimulator("Xyce")):
-        self.simulator = simulator
+    def __init__(self, simulator: BaseSimulator | None = None):
+        self.simulator = simulator if simulator is not None else XyceSimulator("Xyce")
 
-    def run(self, context: Dict) -> Dict:
-        ntwks: List[rf.Network] = context["predicted_networks"]
+    def run(self, context: dict) -> dict:
+        ntwks: list[rf.Network] = context["predicted_networks"]
         results_dir = context.get("results_dir", ".")
 
         # Preprocess surrogate models (e.g. vector fitting)
@@ -34,15 +32,15 @@ class CircuitSimulationStage(COBRABaseStage):
         # 2. Also run any type required by a design goal (e.g. AC for S-params
         #    when the native type is HB).
         native_sim_type: SimulationType = context.get("native_sim_type", SimulationType.UNKNOWN)
-        required_types: Set[SimulationType] = set()
+        required_types: set[SimulationType] = set()
         if native_sim_type is not SimulationType.UNKNOWN:
             required_types.add(native_sim_type)
 
-        goal_types = context.get("design_goal_checker").design_goals.keys() 
-        required_types.update(goal_types)
+        design_goal_checker = context["design_goal_checker"]
+        required_types.update(design_goal_checker.design_goals)
 
         # Per-type simulation parameters from the GUI (e.g. sweep range edits)
-        sim_params_by_type: Dict[SimulationType, Dict[str, str]] = context.get("sim_params_by_type", {})
+        sim_params_by_type: dict[SimulationType, dict[str, str]] = context.get("sim_params_by_type", {})
 
         netlist_path: str = context["netlist"]
 
@@ -66,7 +64,7 @@ class CircuitSimulationStage(COBRABaseStage):
     def _prepare_netlist_for_type(
         netlist_path: str,
         sim_type: SimulationType,
-        sim_params: Dict[str, str],
+        sim_params: dict[str, str],
         results_dir: str,
         simulator: "BaseSimulator",
     ) -> str:
@@ -81,7 +79,9 @@ class CircuitSimulationStage(COBRABaseStage):
         defaults for any missing parameter).
         """
         # Import here to avoid a top-level circular dependency
-        from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+        from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import (
+            XyceNetlistParser,
+        )
 
         parser = XyceNetlistParser().from_file(netlist_path)
         existing = [d for d in parser.simulation_directives

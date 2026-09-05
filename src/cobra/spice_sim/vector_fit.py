@@ -1,8 +1,8 @@
 import os
 import re
 import warnings
+
 import skrf
-import numpy as np
 from skrf.vectorFitting import VectorFitting
 
 # TODO: make configurable, find better values, or implement some sort of dynamic strategy
@@ -31,6 +31,11 @@ def _try_enforce(vf: VectorFitting, n_samples: int):
     return None
 
 
+def _pole_count(vf: VectorFitting) -> int:
+    """Number of poles in *vf*, or 0 before a fit has been performed."""
+    return 0 if vf.poles is None else len(vf.poles)
+
+
 def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
     """Apply the iterative passivity enforcement strategy.
 
@@ -40,7 +45,7 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
 
     Returns the (possibly re-fitted) VectorFitting object.
     """
-    n_poles = len(vf.poles)
+    n_poles = _pole_count(vf)
     print(f"  Passive before enforcement: {vf.is_passive()}  (poles={n_poles}, RMS={vf.get_rms_error():.4e})")
 
     if vf.is_passive():
@@ -87,7 +92,7 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
         if not found:
             print("  Could not achieve passivity — using best auto-fit result.")
 
-    print(f"  Final: Passive={vf.is_passive()}, poles={len(vf.poles)}, RMS={vf.get_rms_error():.4e}")
+    print(f"  Final: Passive={vf.is_passive()}, poles={_pole_count(vf)}, RMS={vf.get_rms_error():.4e}")
     return vf
 
 

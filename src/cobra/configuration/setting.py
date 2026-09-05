@@ -8,7 +8,7 @@ defaults, and tooltips — without requiring manual wiring.
 
 Example::
 
-    from cobra.setting import CobraSetting
+    from cobra.configuration.setting import CobraSetting
 
     class MySimulator(BaseSimulator):
         _settings = [
@@ -21,7 +21,7 @@ Example::
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 

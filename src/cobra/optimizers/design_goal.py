@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple, Union
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 
-import numpy as np
-import skrf as rf
 import numpy as np
 
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
+
 
 @dataclass
 class DesignParameter:
@@ -33,8 +32,8 @@ class DesignParameter:
 
     name: str
     simulation_type: SimulationType
-    formula: Callable[[SimulationResult, Optional[str]], Union[np.ndarray, float]]
-    loss: Callable[[Optional[float], Optional[float], Union[np.ndarray, float]], float]
+    formula: Callable[[SimulationResult, str | None], np.ndarray | float]
+    loss: Callable[[float | None, float | None, np.ndarray | float], float]
     description: str = ""
     min_ports: int = 1
     """Minimum number of netlist ports required to evaluate this parameter."""
@@ -58,9 +57,9 @@ class DesignGoal:
     def __init__(
         self,
         parameter: DesignParameter,
-        frequency_range: Optional[str] = None,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None,
+        frequency_range: str | None = None,
+        min_value: float | None = None,
+        max_value: float | None = None,
         weight: float = 1.0,
     ):
         if not isinstance(parameter, DesignParameter):
@@ -76,26 +75,25 @@ class DesignGoal:
         self._eps = 1e-9
         self._current_value = None
         self._current_penalty = None
-        print(f"Created DesignGoal: {self.parameter.name}, freq_range={self.frequency_range}, min={self.min_value}, max={self.max_value}, weight={self.weight}")
-
+        
     @property
     def parameter_name(self) -> str:
         return self.parameter.name
     
     @property
-    def current_value(self) -> Optional[float | np.ndarray]:
+    def current_value(self) -> float | np.ndarray | None:
         return self._current_value
     
     @current_value.setter
-    def current_value(self, value: Optional[float | np.ndarray]):
+    def current_value(self, value: float | np.ndarray | None):
         self._current_value = value
 
     @property
-    def current_penalty(self) -> Optional[float]:
+    def current_penalty(self) -> float | None:
         return self._current_penalty
 
     @current_penalty.setter
-    def current_penalty(self, value: Optional[float]):
+    def current_penalty(self, value: float | None):
         self._current_penalty = value
 
     @property
@@ -126,7 +124,7 @@ class DesignGoal:
         )
     
     @staticmethod
-    def str_to_frequency_range(freq_range_str: Optional[str]) -> Tuple[Optional[float], Optional[float]]:
+    def str_to_frequency_range(freq_range_str: str | None) -> tuple[float | None, float | None]:
         """
         Convert a frequency range string like "1-20GHz" into a tuple of floats (1e9, 20e9), and single values like "5GHz" into (5e9, 5e9).
         Returns
@@ -171,7 +169,7 @@ class DesignGoalChecker:
 
     def __init__(self, design_goals: list[DesignGoal]):
         # Group goals by simulation type for efficient evaluation
-        self.design_goals: Dict[SimulationType, list[DesignGoal]] = {}
+        self.design_goals: dict[SimulationType, list[DesignGoal]] = {}
         for goal in design_goals:
             st = goal.required_simulation_type
             self.design_goals.setdefault(st, []).append(goal)

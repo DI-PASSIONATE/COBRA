@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
 
 
 class SimulationType(Enum):
@@ -40,7 +39,7 @@ class SimulationType(Enum):
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_directive(cls, directive: str) -> "SimulationType":
+    def from_directive(cls, directive: str) -> SimulationType:
         """
         Convert a raw dot-directive string (e.g. ``.AC``, ``.tran``) to the
         corresponding ``SimulationType``.  Both ``.AC`` and ``.LIN`` map to
@@ -48,7 +47,7 @@ class SimulationType(Enum):
         not a separate simulation.  Unrecognised directives map to ``UNKNOWN``.
         """
         normalized = directive.strip().upper()
-        _map: dict[str, "SimulationType"] = {
+        _map: dict[str, SimulationType] = {
             ".LIN":  cls.AC,   # .LIN post-processes .AC results; treat as the same type
             ".AC":   cls.AC,
             ".HB":   cls.HB,
@@ -70,19 +69,25 @@ class SimulationType(Enum):
     # Parameter discovery (catalogue-based, simulator-agnostic)
     # ------------------------------------------------------------------
 
-    def available_parameters(self, num_ports: int) -> List[str]:
-        from cobra.optimizers.design_goal_collection import get_available_parameters  # lazy – avoids circular import
+    def available_parameters(self, num_ports: int) -> list[str]:
+        from cobra.optimizers.design_goal_collection import (
+            get_available_parameters,  # lazy – avoids circular import
+        )
         return [p.name for p in get_available_parameters(num_ports, simulation_type=self)]
 
     @classmethod
-    def for_parameter(cls, param_name: str) -> "SimulationType":
-        from cobra.optimizers.design_goal_collection import find_parameter  # lazy – avoids circular import
+    def for_parameter(cls, param_name: str) -> SimulationType:
+        from cobra.optimizers.design_goal_collection import (
+            find_parameter,  # lazy – avoids circular import
+        )
         p = find_parameter(param_name)
         return p.simulation_type if p is not None else cls.UNKNOWN
 
     @classmethod
-    def all_available_parameters(cls, num_ports: int) -> List[str]:
-        from cobra.optimizers.design_goal_collection import get_available_parameters  # lazy – avoids circular import
+    def all_available_parameters(cls, num_ports: int) -> list[str]:
+        from cobra.optimizers.design_goal_collection import (
+            get_available_parameters,  # lazy – avoids circular import
+        )
         return [p.name for p in get_available_parameters(num_ports)]
 
 
@@ -103,16 +108,16 @@ class SimulationTypeMetadata:
 
     #: Named slots for the positional tokens that follow the directive keyword.
     #: E.g. ``.AC LIN 500 100G 170G`` → ``["sweep_type", "points", "start_freq", "stop_freq"]``
-    positional_param_names: List[str] = field(default_factory=list)
+    positional_param_names: list[str] = field(default_factory=list)
 
     #: Human-readable tooltip for each positional param (keyed by param name).
-    positional_param_descriptions: Dict[str, str] = field(default_factory=dict)
+    positional_param_descriptions: dict[str, str] = field(default_factory=dict)
 
     #: Sensible default value for each positional param (keyed by param name).
-    positional_param_defaults: Dict[str, str] = field(default_factory=dict)
+    positional_param_defaults: dict[str, str] = field(default_factory=dict)
 
     #: The ``.options`` subcategory for this sim type, if any (e.g. ``"hbint"`` for HB).
-    options_category: Optional[str] = None
+    options_category: str | None = None
 
     #: Human-readable tooltip for each ``.options <category>`` parameter.
-    options_param_descriptions: Dict[str, str] = field(default_factory=dict)
+    options_param_descriptions: dict[str, str] = field(default_factory=dict)

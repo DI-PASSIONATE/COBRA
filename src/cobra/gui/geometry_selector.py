@@ -1,11 +1,23 @@
 import os
 
-from cobra.configuration import ConfigurationError, GeometryConfig
-from cobra.geometry_loader import discover_custom_geometries, discover_preset_geometries
-
 from PySide6.QtWidgets import (
-    QGroupBox, QVBoxLayout, QFormLayout, QLabel, QComboBox,
-    QLineEdit, QPushButton, QWidget, QHBoxLayout, QMessageBox, QFileDialog,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from cobra.configuration import ConfigurationError, GeometryConfig
+from cobra.configuration.geometry_loader import (
+    discover_custom_geometries,
+    discover_preset_geometries,
 )
 
 
@@ -87,7 +99,7 @@ class GeometrySelectorWidget(QGroupBox):
                 idx = self._preset_combo.findText(current_label)
                 if idx >= 0:
                     self._preset_combo.setCurrentIndex(idx)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - ORCA is optional; report and keep the GUI usable
             if show_errors:
                 QMessageBox.critical(self, "ORCA Geometry", f"Failed to load ORCA presets:\n{exc}")
         finally:
@@ -109,7 +121,7 @@ class GeometrySelectorWidget(QGroupBox):
                 self._class_combo.addItem(class_name, cls)
 
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - user-supplied geometry modules can fail in any way
             if show_errors:
                 QMessageBox.critical(self, "ORCA Geometry", f"Failed to load custom geometry:\n{exc}")
             return False

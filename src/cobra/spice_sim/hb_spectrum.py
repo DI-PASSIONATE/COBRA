@@ -8,15 +8,15 @@ Phasor convention: Xyce stores two-sided spectra, i.e. each bin holds amplitude/
 The apparent power therefore is ``S = Vrms * Irms = 2 * |V_pk * I_pk|``.
 """
 
-from itertools import product
-from typing import Dict, List, Optional, Sequence, Tuple
 import re
+from collections.abc import Sequence
+from itertools import product
 
 import numpy as np
 import pandas as pd
 
 # Axis metadata per quantity, mirroring hb_analysis._QUANTITY_META.
-QUANTITY_META: Dict[str, Dict[str, str]] = {
+QUANTITY_META: dict[str, dict[str, str]] = {
     "power":   {"label": "Power",   "unit": "dBm"},
     "gain":    {"label": "Gain",    "unit": "dB"},
     "voltage": {"label": "Voltage", "unit": "dBV"},
@@ -26,7 +26,7 @@ QUANTITY_META: Dict[str, Dict[str, str]] = {
 _PROBE_RE = re.compile(r"^Re\(([VI])\(([^)]+)\)\)$", re.IGNORECASE)
 
 # SPICE engineering suffixes; MEG must be matched before M.
-_SPICE_SUFFIXES: Sequence[Tuple[str, float]] = (
+_SPICE_SUFFIXES: Sequence[tuple[str, float]] = (
     ("MEG", 1e6), ("MIL", 25.4e-6),
     ("T", 1e12), ("G", 1e9), ("K", 1e3),
     ("M", 1e-3), ("U", 1e-6), ("N", 1e-9), ("P", 1e-12), ("F", 1e-15),
@@ -55,7 +55,7 @@ def spice_float(token: str) -> float:
     raise ValueError(f"Cannot interpret '{token}' as a SPICE number.")
 
 
-def parse_fundamentals(text: Optional[str]) -> List[float]:
+def parse_fundamentals(text: str | None) -> list[float]:
     """Parse the ``.HB`` frequency tokens (e.g. ``"95E9 10E9"``) into Hz values."""
     if not text:
         return []
@@ -74,9 +74,9 @@ def available_power_dbm(sin_amplitude: float, z0: float = 50.0) -> float:
     return 10.0 * np.log10(max(p_avail_w / 1e-3, _FLOOR))
 
 
-def probe_nodes(df: pd.DataFrame) -> List[str]:
+def probe_nodes(df: pd.DataFrame) -> list[str]:
     """Return node names that have both a ``V(X)`` and an ``I(VX)`` column."""
-    voltages: Dict[str, str] = {}
+    voltages: dict[str, str] = {}
     currents: set = set()
     for column in df.columns:
         match = _PROBE_RE.match(str(column).strip())
@@ -104,8 +104,8 @@ def has_probe(df: pd.DataFrame, node: str, quantity: str = "power") -> bool:
 
 
 def find_dataframe(
-    dataframes: Dict[str, pd.DataFrame], node: str, quantity: str = "power"
-) -> Optional[pd.DataFrame]:
+    dataframes: dict[str, pd.DataFrame], node: str, quantity: str = "power"
+) -> pd.DataFrame | None:
     """Return the first DataFrame that can supply *quantity* at *node*."""
     return next((df for df in dataframes.values() if has_probe(df, node, quantity)), None)
 
@@ -114,9 +114,9 @@ def spectrum(
     df: pd.DataFrame,
     node: str,
     quantity: str = "power",
-    frequency_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+    frequency_range: tuple[float | None, float | None] | None = None,
     pin_dbm: float = 0.0,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Return ``(frequencies_Hz, values)`` of the one-sided HB spectrum at *node*.
 
     Values are dBm for ``power``, dB for ``gain`` (output power referred to *pin_dbm*),
@@ -181,7 +181,7 @@ def classify_bins(
     fundamentals: Sequence[float],
     max_order: int = 10,
     rtol: float = 1e-3,
-) -> List[str]:
+) -> list[str]:
     """Label every bin as ``DC``, a harmonic (``H2``) or a mixing product (``2f1-f2``).
 
     Each bin is matched against ``sum(m_i * f_i)`` over the fundamentals, choosing

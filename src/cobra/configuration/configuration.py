@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 import json
 import os
-from pathlib import Path
 from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
 from math import isfinite
+from pathlib import Path
 from typing import Any, ClassVar
 
 from cobra.optimizers.base_optimizer import OptimizationType

@@ -167,6 +167,18 @@ Run the same configuration without opening the GUI:
 cobra run path/to/cobra_config.json
 ```
 
+Check a configuration or a netlist before starting a run:
+
+```bash
+cobra parse path/to/cobra_config.json
+```
+
+The report lists the parsed netlist, ports, surrogate components, goals, and
+tunable variables, and cross-checks the configuration against the netlist it
+references (missing model mappings, unresolvable optimization parameters,
+unavailable HB nodes, missing include or library files). It exits with `2` when
+it finds an error that would stop a run.
+
 Relative netlist, model, and custom geometry paths are resolved from the directory
 containing the JSON file. Every GUI or CLI run also archives its exact input as
 `cobra_config.json` inside the timestamped results directory. This input file is
@@ -333,7 +345,7 @@ Results are saved to a timestamped folder `results/<timestamp>_<netlist_name>/` 
 If you enable fine-tuning:
 
 - pass `palace_fine_tuning_command` to `COBRA` (or enable it in the GUI),
-- provide an ORCA geometry object via `orca_geometry=` in `cobra.run(...)`,
+- provide one ORCA geometry object per ONNX component via `orca_geometries={"X1": geometry}` in `cobra.run(...)`,
 - choose `fine_tuning_optimizer="reuse"` to continue with the surrogate optimizer, or `"gradient_descent"` to switch to gradient descent for the fine-tuning phase,
 - COBRA will generate a GDS file, mesh it with gmsh, run a full Palace EM simulation, and iterate.
 

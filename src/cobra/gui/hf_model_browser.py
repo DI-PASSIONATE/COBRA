@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
@@ -31,7 +30,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -55,18 +53,18 @@ class ModelEntry:
     source: str  # "local" | "hf"
 
     # File paths (populated for local models)
-    onnx_path: Optional[str] = None
-    py_path: Optional[str] = None  # ORCA geometry - None means fine-tuning unavailable
+    onnx_path: str | None = None
+    py_path: str | None = None  # ORCA geometry - None means fine-tuning unavailable
 
     # HuggingFace metadata (populated after HF query)
-    downloads: Optional[int] = None
-    likes: Optional[int] = None
-    description: Optional[str] = None
+    downloads: int | None = None
+    likes: int | None = None
+    description: str | None = None
     tags: list[str] = field(default_factory=list)
-    pipeline_tag: Optional[str] = None
-    library_name: Optional[str] = None
-    created_at: Optional[str] = None
-    last_modified: Optional[str] = None
+    pipeline_tag: str | None = None
+    library_name: str | None = None
+    created_at: str | None = None
+    last_modified: str | None = None
 
     @property
     def is_local(self) -> bool:
@@ -152,7 +150,7 @@ class HFQueryWorker(QThread):
             for m in raw:
                 try:
                     info = api.model_info(m.id, files_metadata=False)
-                except Exception:
+                except Exception:  # noqa: BLE001 - fall back to the listing entry when the API call fails
                     info = m
                 if getattr(info, "private", False):
                     continue
@@ -182,7 +180,7 @@ class HFQueryWorker(QThread):
                 })
             results.sort(key=lambda x: x["downloads"], reverse=True)
             self.models_loaded.emit(results)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
             self.error.emit(str(exc))
 
 
@@ -227,7 +225,7 @@ class HFDownloadWorker(QThread):
                 self.download_error.emit(
                     f"Download completed but expected file not found: {onnx_path}"
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
             self.download_error.emit(str(exc))
 
 
@@ -255,16 +253,16 @@ class HuggingFaceModelDialog(QDialog):
     - ``selected_geometry_path`` - path to ``<repo>.py`` if present, else ``None``
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("HuggingFace Surrogate Models")
         self.resize(920, 600)
 
-        self.selected_file_path: Optional[str] = None
-        self.selected_geometry_path: Optional[str] = None
+        self.selected_file_path: str | None = None
+        self.selected_geometry_path: str | None = None
 
         self._entries: dict[str, ModelEntry] = {}  # model_id → ModelEntry
-        self._download_worker: Optional[HFDownloadWorker] = None
+        self._download_worker: HFDownloadWorker | None = None
         self._scanner = LocalModelScanner()
 
         self._build_ui()

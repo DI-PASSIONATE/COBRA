@@ -1,11 +1,13 @@
+import glob
+import os
 import re
 import subprocess
-from typing import Optional
-import skrf as rf
-import glob, os
-import pandas as pd
+from typing import ClassVar
 
-from cobra.setting import CobraSetting
+import pandas as pd
+import skrf as rf
+
+from cobra.configuration.setting import CobraSetting
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
@@ -86,7 +88,7 @@ class XyceSimulator(BaseSimulator):
         """Return Xyce-specific metadata for *sim_type*."""
         return _XYCE_METADATA.get(sim_type, SimulationTypeMetadata())
 
-    _settings = [
+    _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
             name="xyce_command",
             dtype=str,
@@ -128,7 +130,7 @@ class XyceSimulator(BaseSimulator):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
         return vector_fit(ntwk, name=name, enforce_passivity=self.enforce_passivity)
 
-    def run_simulation(self, netlist_name: str) -> Optional[SimulationResult]:
+    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
         results_dir = os.path.dirname(netlist_name)
         netlist_base = os.path.basename(netlist_name)  # e.g. "circuit_hb.cir"
 
@@ -150,7 +152,10 @@ class XyceSimulator(BaseSimulator):
         command = parallel_command + [
             self.xyce_command, netlist_base
         ]
-        proc = subprocess.run(command, capture_output=True, text=True, cwd=results_dir)
+        # check=False: a non-zero return code is reported below, not raised.
+        proc = subprocess.run(
+            command, capture_output=True, text=True, cwd=results_dir, check=False
+        )
 
         if proc.returncode != 0:
             print(f"Simulation Failed! Return code: {proc.returncode}")
@@ -163,14 +168,14 @@ class XyceSimulator(BaseSimulator):
         if sim_type is SimulationType.AC:
             # AC sweep output is written to <netlist>.s*p (Touchstone) 
             # To avoid .sp files we don't use * to match but rather use regex to match .s followed by a single digit and then p (e.g. .s1p, .s2p, etc.)
-            matched_files = glob.glob(os.path.join(results_dir, f"*.s[0-9]p"))
+            matched_files = glob.glob(os.path.join(results_dir, "*.s[0-9]p"))
             found.extend(matched_files)
 
         elif sim_type is SimulationType.HB:
             # Xyce HB writes <netlist>.HB.FD.prn (freq-domain) and
             # <netlist>.HB.TD.prn (time-domain); ".PRINT hb format=csv" yields .csv instead.
-            found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.csv")))
-            found.extend(glob.glob(os.path.join(results_dir, f"*.HB.FD.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.HB.FD.csv")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.HB.FD.prn")))
 
         elif sim_type in (SimulationType.TRAN, SimulationType.DC):
             # Default PRN output for transient / DC sweeps
@@ -178,8 +183,8 @@ class XyceSimulator(BaseSimulator):
 
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
-            found.extend(glob.glob(os.path.join(results_dir, f"*.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, f".s[0-9]p")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.prn")))
+            found.extend(glob.glob(os.path.join(results_dir, ".s[0-9]p")))
 
         # Add any files explicitly named in .PRINT file= directives
         for path in custom_print_files:
@@ -191,7 +196,7 @@ class XyceSimulator(BaseSimulator):
             return None
 
         # --- Load Touchstone output as rf.Network (AC only) ------------------
-        network: Optional[rf.Network] = None
+        network: rf.Network | None = None
         sp_files = [f for f in found if re.search(r'\.s\d+p$', f, re.IGNORECASE)]
         if sp_files:
             network = rf.Network(sp_files[0])
@@ -209,7 +214,7 @@ class XyceSimulator(BaseSimulator):
                 first_col = df.columns[0]
                 df = df[pd.to_numeric(df[first_col], errors="coerce").notna()].reset_index(drop=True)
                 dataframes[prn_path] = df.apply(pd.to_numeric, errors="coerce")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one unreadable output file must not abort the run
                 print(f"Warning: could not parse {prn_path}: {exc}")
 
         return SimulationResult(output_files=found, network=network, dataframes=dataframes)

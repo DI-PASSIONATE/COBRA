@@ -2,3 +2,9 @@
 from cobra.optimizers.base_optimizer import BaseOptimizer
 from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
+
+__all__ = [
+    "BaseOptimizer",
+    "GradientDescentOptimizer",
+    "OptunaOptimizer",
+]

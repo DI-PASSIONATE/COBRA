@@ -1,16 +1,18 @@
-from cobra.stages.base_stage import COBRABaseStage
-from typing import Any, Dict, Optional, cast
-from concurrent.futures import ProcessPoolExecutor
 import importlib
 import multiprocessing as mp
 import os
+from concurrent.futures import ProcessPoolExecutor
+from typing import Any, cast
+
 import skrf as rf
+
+from cobra.stages.base_stage import COBRABaseStage
 
 
 def _mesh_gds_and_run_palace(
     *,
     name: str,
-    parameters: Dict[str, Any],
+    parameters: dict[str, Any],
     base_dir: str,
     gds_output_path: str,
     stackup_xml: str,
@@ -56,7 +58,7 @@ class EMFineTuningStage(COBRABaseStage):
         self.palace_executable = palace_executable
 
         
-    def run(self, context: Dict, orca_geometry=None, comp_name: Optional[str] = None) -> Dict:
+    def run(self, context: dict, orca_geometry=None, comp_name: str | None = None) -> dict:
         """
         Creates a GDS file based on the current parameters, meshes it.
         If comp_name is provided, only parameters for that component are forwarded.
@@ -66,7 +68,7 @@ class EMFineTuningStage(COBRABaseStage):
         
         PDK.activate()
         if not isinstance(orca_geometry, BaseGeometry):
-            raise ValueError("orca_geometry must be an instance of BaseGeometry")
+            raise TypeError("orca_geometry must be an instance of BaseGeometry")
         geometry = cast(Any, orca_geometry)
         
         base_dir = os.path.abspath(context.get("results_dir", os.path.join(os.getcwd(), "results")))
@@ -79,7 +81,7 @@ class EMFineTuningStage(COBRABaseStage):
         all_parameters = context["model_parameters"]
         if comp_name:
             prefix = f"{comp_name}:"
-            parameters: Dict[str, Any] = {}
+            parameters: dict[str, Any] = {}
             for k, v in all_parameters.items():
                 if k.startswith(prefix):
                     parameters[k[len(prefix):]] = v  # strip component prefix

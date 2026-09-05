@@ -1,18 +1,26 @@
 import json
-from typing import List, Optional
-from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QComboBox, QLineEdit,
-    QDoubleSpinBox, QMessageBox, QLabel,
-)
+
 from PySide6.QtGui import QDoubleValidator
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+)
 
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+
 from .help_texts import tooltip
+
 
 class DesignGoalDialog(QDialog):
     def __init__(self, parent=None, goal: "DesignGoal | None" = None,
-                 available_parameters: "Optional[List[DesignParameter]]" = None):
+                 available_parameters: "list[DesignParameter] | None" = None):
         super().__init__(parent)
         self.setWindowTitle("Design Goal")
         self.setMinimumWidth(400)
@@ -219,9 +227,9 @@ class OptimizationParamDialog(QDialog):
         from_source=None,
         source_data=None,
         parent=None,
-        param: Optional[OptimizationProperty] = None,
-        metadata: Optional[dict] = None,
-        link_candidates: Optional[List[str]] = None,
+        param: OptimizationProperty | None = None,
+        metadata: dict | None = None,
+        link_candidates: list[str] | None = None,
     ):
         super().__init__(parent)
         self.metadata = metadata or {}

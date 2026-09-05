@@ -1,11 +1,13 @@
-from typing import Any, List, Optional
 import threading
+from typing import Any
+
 from PySide6.QtCore import QThread, Signal
 
 from cobra.cobra import COBRA
 from cobra.configuration import RunConfiguration
 from cobra.optimizers.base_optimizer import OptimizationProperty
-from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
+from cobra.optimizers.design_goal import DesignGoal
+
 
 class OptimizationWorker(QThread):
     progress = Signal(dict)
@@ -13,11 +15,11 @@ class OptimizationWorker(QThread):
     error = Signal(str)
     ask_continue = Signal(int)
 
-    def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: List[DesignGoal], 
-                 optimization_parameters: List[OptimizationProperty], 
-                 max_iterations: int, orca_geometries: Optional[Any] = None,
-                 sim_params_by_type: Optional[Any] = None,
-                 run_configuration: Optional[RunConfiguration] = None):
+    def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: list[DesignGoal], 
+                 optimization_parameters: list[OptimizationProperty], 
+                 max_iterations: int, orca_geometries: Any | None = None,
+                 sim_params_by_type: Any | None = None,
+                 run_configuration: RunConfiguration | None = None):
         super().__init__()
         self.cobra = cobra_instance
         self.netlist = netlist
@@ -75,7 +77,7 @@ class OptimizationWorker(QThread):
             
             self.finished.emit()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
             import traceback
             traceback.print_exc()
             self.error.emit(str(e))
