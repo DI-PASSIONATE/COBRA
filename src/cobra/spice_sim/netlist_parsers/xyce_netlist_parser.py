@@ -4,6 +4,7 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import (
     BaseNetlistParser,
     Component,
     Include,
+    Library,
     NetlistElement,
     PrintDirective,
     SimulationDirective,
@@ -54,6 +55,11 @@ class XyceNetlistParser(BaseNetlistParser):
     # .INCLUDE directives that reference fitted-subcircuit files.
     _include_re      = re.compile(
         r"^\s*\.include\s+[\"']?([^\s\"']+)[\"']?\s*$",               re.IGNORECASE
+    )
+
+    # .LIB directives that reference PDK model libraries: ".LIB <file> [entry]".
+    _lib_re          = re.compile(
+        r"^\s*\.lib\s+[\"']?([^\s\"']+)[\"']?(?:\s+(\S+))?\s*$",           re.IGNORECASE
     )
 
     # .options lines: ".options <category> [key=val ...]"
@@ -244,6 +250,20 @@ class XyceNetlistParser(BaseNetlistParser):
             m_include = self._include_re.match(stripped)
             if m_include:
                 self._includes.append(Include(file_path=m_include.group(1), line_index=idx))
+                continue
+
+            # ------------------------------------------------------------------
+            # .LIB directives referencing PDK model libraries.
+            # ------------------------------------------------------------------
+            m_lib = self._lib_re.match(stripped)
+            if m_lib:
+                self._libraries.append(
+                    Library(
+                        file_path=m_lib.group(1),
+                        entry=m_lib.group(2),
+                        line_index=idx,
+                    )
+                )
                 continue
 
             # ------------------------------------------------------------------

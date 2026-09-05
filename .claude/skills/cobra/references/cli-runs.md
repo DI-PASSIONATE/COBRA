@@ -13,6 +13,17 @@ Prefer the repository environment:
 .venv/bin/python -m cobra --help
 ```
 
+Report what COBRA reads from a config or netlist without running it:
+
+```bash
+.venv/bin/cobra parse /absolute/path/config.json
+.venv/bin/cobra parse /absolute/path/design.cir
+```
+
+It exits with `2` when it reports an error that would stop a run, so it can gate
+execution. Run it before every `cobra run` and before writing a config from a
+netlist. Add `--json` for machine-readable output.
+
 Check Xyce independently:
 
 ```bash

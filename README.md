@@ -167,6 +167,18 @@ Run the same configuration without opening the GUI:
 cobra run path/to/cobra_config.json
 ```
 
+Check a configuration or a netlist before starting a run:
+
+```bash
+cobra parse path/to/cobra_config.json
+```
+
+The report lists the parsed netlist, ports, surrogate components, goals, and
+tunable variables, and cross-checks the configuration against the netlist it
+references (missing model mappings, unresolvable optimization parameters,
+unavailable HB nodes, missing include or library files). It exits with `2` when
+it finds an error that would stop a run.
+
 Relative netlist, model, and custom geometry paths are resolved from the directory
 containing the JSON file. Every GUI or CLI run also archives its exact input as
 `cobra_config.json` inside the timestamped results directory. This input file is

@@ -25,6 +25,51 @@ cobra run path/to/cobra_config.json
 The command prints iteration progress and the final results directory. Running
 `cobra` without a subcommand continues to open the GUI.
 
+## Inspect Before Running
+
+`cobra parse` reports what COBRA reads from an input file without starting a
+simulation. It accepts either a JSON configuration or a netlist:
+
+```bash
+cobra parse path/to/cobra_config.json
+cobra parse path/to/design.cir
+```
+
+For a netlist it lists the detected analysis, ports and their sources, HB probe
+nodes, surrogate components, included and library files, the design-goal
+parameters the netlist supports, and every tunable netlist variable with its
+current value.
+
+For a configuration it additionally cross-checks the configuration against the
+netlist it references:
+
+- every surrogate component in the netlist has a `component_models` entry, and
+  every mapped model file exists, loads, and has as many ports as the instance
+  has nodes;
+- every `netlist_variable` resolves to an element (or an `instance:parameter`)
+  that exists, and every `model_input` matches an input of the mapped ONNX model;
+- every design goal is buildable, its frequency range parses, and the analysis it
+  needs is present or will be injected;
+- `simulation_parameters` name directives and `.options` categories the netlist
+  actually has;
+- fine-tuning geometries resolve and cover every ONNX component.
+
+Findings are grouped by severity. The command exits with `0` when no error was
+found and `2` when at least one error would stop a run, so it can gate a run:
+
+```bash
+cobra parse config.json && cobra run config.json
+```
+
+Useful options:
+
+| Option | Effect |
+| --- | --- |
+| `--json` | Print the report as JSON instead of text |
+| `--kind {auto,config,netlist}` | Override the automatic file-type detection |
+| `--full` | Print long lists in full instead of truncating them |
+| `--no-model-check` | Skip opening ONNX and Touchstone model files |
+
 ## Path Rules
 
 Relative paths are interpreted relative to the directory containing the JSON

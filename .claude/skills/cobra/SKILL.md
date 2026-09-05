@@ -13,6 +13,9 @@ COBRA combines Xyce simulation, ONNX or Touchstone models, and Optuna for RFIC o
 ## Rules
 
 - Read repository docs first; inspect source when docs are unclear.
+- Inspect inputs with `cobra parse CONFIG_OR_NETLIST` before writing a config or
+  starting a run; it prints the parsed netlist and cross-checks a config against
+  it, and exits with `2` when a run would fail.
 - Do not invent paths, component names, ports, HB nodes, bounds, frequencies, or
   simulator settings.
 - Ask for missing inputs before writing or running anything.

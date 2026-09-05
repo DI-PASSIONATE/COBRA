@@ -15,7 +15,16 @@ Ask for missing values before creating JSON:
 - Palace command and ORCA geometries for fine-tuning.
 
 Inspect the netlist first when it can reveal component names, ports, variables, or
-HB probes. Do not choose variables or bounds by guesswork.
+HB probes. Do not choose variables or bounds by guesswork:
+
+```bash
+.venv/bin/cobra parse /absolute/path/design.cir
+```
+
+The report lists surrogate components needing a model, ports and their source
+amplitude and impedance, HB probe nodes, the design-goal parameters the netlist
+supports, and every tunable netlist variable with its current value. Add `--json`
+for machine-readable output.
 
 ## Goal Translation
 
@@ -60,15 +69,20 @@ strings, such as `.AC`, `.HB`, and `.OPTIONS:hbint`.
 
 Before execution:
 
-1. Use `cobra --help` and `cobra run --help` if needed.
+1. Use `cobra --help`, `cobra run --help`, and `cobra parse --help` if needed.
 2. Validate without running optimization:
 
    ```bash
-   .venv/bin/python -c "from cobra.configuration import RunConfiguration; RunConfiguration.load('/absolute/path/config.json')"
+   .venv/bin/cobra parse /absolute/path/config.json
    ```
 
-3. Confirm files, mappings, analysis settings, and Xyce.
+3. Read the `Issues` section. Exit code `0` means no error, `2` means at least one
+   error would stop the run. Fix every error and review the warnings.
 4. Show the config and command; run only after user confirmation.
 
-`RunConfiguration.load` checks JSON, schema, paths, fields, bounds, types, and
-links. JSON syntax alone is not enough.
+`cobra parse` loads the configuration with `RunConfiguration.load` (JSON, schema,
+paths, fields, bounds, types, links) and then cross-checks it against the parsed
+netlist: model mappings and their port counts, ONNX model inputs, resolvable
+optimization parameters, buildable design goals, simulation-parameter directives,
+included and library files, and fine-tuning geometries. JSON syntax alone is not
+enough.

@@ -37,6 +37,14 @@ class Include:
 
 
 @dataclass
+class Library:
+    """A ``.LIB`` directive found in the netlist."""
+    file_path: str             # e.g. "cornerHBT.lib"
+    entry: str | None          # library section, e.g. "hbt_typ"
+    line_index: int
+
+
+@dataclass
 class SimulationDirective:
     """A simulation/analysis directive found in the netlist (e.g. .AC, .LIN, .HB)."""
     directive: str             # e.g. ".AC", ".LIN", ".TRAN"
@@ -62,6 +70,7 @@ class BaseNetlistParser(ABC):
         self._elements: dict[str, NetlistElement] = {}   # all elements, including MODEL entries
         self._components: dict[str, Component] = {}      # X-instances requiring surrogate models
         self._includes: list[Include] = []               # .INCLUDE directives
+        self._libraries: list[Library] = []              # .LIB directives
         self._inline_subckt_names: set[str] = set()      # .SUBCKT names defined within this file
         self.netlist_path: str | Path | None = None
         self._simulation_type: SimulationType = SimulationType.UNKNOWN
@@ -92,6 +101,7 @@ class BaseNetlistParser(ABC):
         self._elements.clear()
         self._components.clear()
         self._includes.clear()
+        self._libraries.clear()
         self._inline_subckt_names.clear()
         self._simulation_type = SimulationType.UNKNOWN
         self._num_ports = 0
@@ -146,6 +156,11 @@ class BaseNetlistParser(ABC):
         return self._includes.copy()
 
     @property
+    def libraries(self) -> list[Library]:
+        """List of .LIB directives found in the netlist."""
+        return self._libraries.copy()
+
+    @property
     def simulation_type(self) -> SimulationType:
         """The primary analysis type detected in the netlist (e.g. LIN, AC, HB)."""
         return self._simulation_type
@@ -193,6 +208,10 @@ class BaseNetlistParser(ABC):
     def add_include(self, include: Include) -> None:
         """Register an .INCLUDE directive."""
         self._includes.append(include)
+
+    def add_library(self, library: Library) -> None:
+        """Register a .LIB directive."""
+        self._libraries.append(library)
 
     # -------------------------------------------------------------------------
     # Abstract interface — subclasses must implement these
