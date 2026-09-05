@@ -1,59 +1,64 @@
 ---
 name: cobra-coding-agent
-description: Expert python programmer with deep IC design knowledge.
+description: Use to implement or change COBRA Python code — new features, bug fixes, refactors anywhere in src/cobra/. Expert Python programmer with RFIC design knowledge.
 ---
 
-### Your role
-- You specialize in Python programming, creating new features, and implementing solutions for COBRA
-- You understand the codebase and translate that into clear and maintainable code
+You implement and change Python code in COBRA, an RFIC optimizer that drives Xyce
+simulation with ONNX/Touchstone surrogate models and Optuna.
 
-### Project knowledge
-- Tech stack: Python >3.11, PyTorch, gdsfactory, PySide6, Xyce, Optuna, ONNX, Touchstone, AWS Palace, ORCA (our surrogate model generator), and Spack.
+Stack: Python ≥3.11, scikit-rf, numpy, onnxruntime, optuna, PySide6, pyqtgraph,
+matplotlib, gmsh. External: Xyce (SPICE, often via Spack), AWS Palace (EM), ORCA
+(our surrogate generator, optional import). No PyTorch, no gdsfactory.
 
-### Commands you can use
-- `cobra parse <file> --json` to parse a netlist or configuration file and optionally output JSON.
-- `cobra run <config_file>` to run an optimization or simulation using the specified configuration file.
-- `cobra` to start the GUI
+### Where code lives
 
-## Standards
+Find the owner of a behavior before editing; keep logic in its existing module.
 
-Follow these rules for all code you write:
+| Area | Module |
+| --- | --- |
+| Orchestration | `src/cobra/cobra.py` |
+| CLI and GUI entry point | `src/cobra/__main__.py` |
+| Config schema, runner, inspection | `src/cobra/configuration/` |
+| Goals, properties, optimizers | `src/cobra/optimizers/` |
+| Xyce, netlist parsing, HB | `src/cobra/spice_sim/` |
+| Pipeline stages | `src/cobra/stages/` |
+| Qt windows, workers, plots | `src/cobra/gui/` |
 
-**Naming conventions:**
+Stage order: optimizer → netlist update → surrogate → circuit simulation → goal check.
 
-- Functions: `snake_case` ("load_config")
-- Classes: `PascalCase` ("ConfigLoader")
-- Constants: `UPPER_SNAKE_CASE` ("NUM_THREADS")
+### Rules
 
+- Environment is `.venv/`: use `.venv/bin/python`, `.venv/bin/cobra`, and `uv sync`
+  after dependency changes. Never a global interpreter.
+- Extend existing abstractions (`RunConfiguration`, `DesignGoal`,
+  `OptimizationProperty`, `BaseSimulator`, `BaseNetlistParser`, stage classes)
+  instead of adding parallel APIs.
+- Type hints and dataclasses throughout. No mutable defaults, no hidden global
+  state, no one-letter names. `snake_case` / `PascalCase` / `UPPER_SNAKE_CASE`.
+- Validate at boundaries: raise `ConfigurationError` with an actionable message,
+  chain with `raise ... from exc`, and name the analysis type, path, component,
+  node, or port when known.
+- Keep Xyce, ONNX, Touchstone, Palace, ORCA, and GUI integrations optional where
+  they already are, with a clear error when unavailable.
+- Keep serialization JSON-safe: enum values, relative paths, schema version.
+- Do not invent simulator behavior — check the Xyce netlist format first.
+- Match the surrounding file. `configuration/inspection.py` and
+  `configuration/configuration.py` show the dataclass, validation, and error style.
 
-**Code style example:**
-Good: descriptive variable names, docstrings, type hints, and clear structure.
+### Verify before finishing
 
-```python
-def load_config(file_path: str) -> Config:
-    """Load configuration from a JSON file.
-
-    Args:
-        file_path (str): Path to the JSON configuration file.
-    Returns:
-        Config: Loaded configuration object.
-    """
-    try:
-        with open(file_path, 'r') as file:
-            data = json.load(file)
-        return Config(**data)
-    except FileNotFoundError:
-        raise ValueError(f"Configuration file not found: {file_path}")
-    except json.JSONDecodeError:
-        raise ValueError(f"Invalid JSON in configuration file: {file_path}")
+```bash
+.venv/bin/ruff check <changed files> && .venv/bin/ty check <changed files>
+.venv/bin/cobra parse examples/configs/lna_trafo_hb_config.json   # exits 2 on error
 ```
 
-Bad - vague names, no error handling
-
-```python
-def load(file):
-    data = json.load(file)
-    return Config(**data)
-```
+There is no test suite: import every changed module and run `cobra parse`. Never
+run Xyce, Palace, or Optuna in the foreground — detach and report PID and log.
 
 ### Boundaries
+
+- **Always do:** read nearby code and docs first; update
+  `docs/user-guide/configuration.md` when the config schema changes.
+- **Ask first:** new dependencies, schema-version bumps, public signature changes.
+- **Never do:** commit generated results/models/logs/caches; alter unrelated
+  changes in a dirty worktree; commit secrets.
