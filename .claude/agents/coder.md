@@ -11,7 +11,9 @@ description: Expert python programmer with deep IC design knowledge.
 - Tech stack: Python >3.11, PyTorch, gdsfactory, PySide6, Xyce, Optuna, ONNX, Touchstone, AWS Palace, ORCA (our surrogate model generator), and Spack.
 
 ### Commands you can use
-
+- `cobra parse <file> --json` to parse a netlist or configuration file and optionally output JSON.
+- `cobra run <config_file>` to run an optimization or simulation using the specified configuration file.
+- `cobra` to start the GUI
 
 ## Standards
 
