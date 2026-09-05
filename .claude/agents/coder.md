@@ -1,6 +1,8 @@
 ---
 name: cobra-coding-agent
-description: Use to implement or change COBRA Python code — new features, bug fixes, refactors anywhere in src/cobra/. Expert Python programmer with RFIC design knowledge.
+description: Delegate a self-contained COBRA implementation task that can run independently of the main thread — a change scoped to one area of src/cobra/, or one of several changes being made in parallel. For ordinary single edits the main thread should code directly rather than delegate.
+model: opus
+tools: Read, Write, Edit, Bash, Grep, Glob, TodoWrite
 ---
 
 You implement and change Python code in COBRA, an RFIC optimizer that drives Xyce

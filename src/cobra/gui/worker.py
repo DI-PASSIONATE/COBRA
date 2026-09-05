@@ -1,12 +1,8 @@
 import threading
-from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
-from cobra.cobra import COBRA
-from cobra.configuration import RunConfiguration
-from cobra.optimizers.base_optimizer import OptimizationProperty
-from cobra.optimizers.design_goal import DesignGoal
+from cobra.configuration.config_runner import ConfiguredRun
 
 
 class OptimizationWorker(QThread):
@@ -15,20 +11,12 @@ class OptimizationWorker(QThread):
     error = Signal(str)
     ask_continue = Signal(int)
 
-    def __init__(self, cobra_instance: COBRA, netlist: str, design_goals: list[DesignGoal], 
-                 optimization_parameters: list[OptimizationProperty], 
-                 max_iterations: int, orca_geometries: Any | None = None,
-                 sim_params_by_type: Any | None = None,
-                 run_configuration: RunConfiguration | None = None):
+    def __init__(self, configured_run: ConfiguredRun):
         super().__init__()
-        self.cobra = cobra_instance
-        self.netlist = netlist
-        self.design_goals = design_goals
-        self.optimization_parameters = optimization_parameters
-        self.max_iterations = max_iterations
-        self.orca_geometries = orca_geometries
-        self.sim_params_by_type = sim_params_by_type or {}
-        self.run_configuration = run_configuration
+        self.configured_run = configured_run
+        # Runtime knob: the ask-continue dialog raises this mid-run, and the
+        # callback pushes the new value into the running loop via the context.
+        self.max_iterations = configured_run.configuration.max_iterations
         self.stop_requested = False
         self.paused = False
         self.resume_event = threading.Event()
@@ -63,18 +51,9 @@ class OptimizationWorker(QThread):
                 
                 return True
 
-            # Call COBRA run directly
-            self.cobra.run(
-                netlist=self.netlist,
-                design_goals=self.design_goals,
-                optimization_parameters=self.optimization_parameters,
-                max_iterations=self.max_iterations,
-                orca_geometries=self.orca_geometries,
-                callback=optimization_callback,
-                sim_params_by_type=self.sim_params_by_type,
-                run_configuration=self.run_configuration,
-            )
-            
+            # Same entry point a headless `cobra run CONFIG` takes.
+            self.configured_run.run(optimization_callback)
+
             self.finished.emit()
 
         except Exception as e:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal

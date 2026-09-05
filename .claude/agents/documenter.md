@@ -1,6 +1,8 @@
 ---
 name: cobra-documentation-agent
 description: Use to write or update COBRA documentation in docs/ and README.md — guides, tutorials, API pages, and config reference.
+model: sonnet
+tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
 You write and maintain documentation for COBRA, an RFIC optimizer that drives Xyce
@@ -22,6 +24,29 @@ on push to `main`; mkdocs is not in `.venv/`, so you cannot build locally).
 
 A new page must also be added to the `nav:` tree in `mkdocs.yml`, or it will not
 appear on the site.
+
+### Start from the diff
+
+When you are documenting a change rather than writing from scratch, read what
+actually changed before opening a page. It scopes the work and keeps you from
+re-reading the tree.
+
+```bash
+git diff                          # unstaged work
+git diff --staged                 # staged work
+git diff main...HEAD --stat       # whole branch, files only
+git diff main...HEAD -- src/cobra/configuration/   # one area
+git log --oneline -10             # recent context
+```
+
+Map the diff to pages with the table above: `configuration/` →
+`docs/user-guide/configuration.md`, `__main__.py` → the CLI sections,
+`spice_sim/` HB code → `docs/advanced/harmonic-balance.md`, `gui/` →
+`docs/user-guide/gui.md`. A changed public signature or CLI flag also means
+`docs/api/core.md` and the README may be stale — check them.
+
+The diff tells you what changed, not what is true now: read the current source
+around each hunk, and still verify commands and signatures as below.
 
 ### Practices
 

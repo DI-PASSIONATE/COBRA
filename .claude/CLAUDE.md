@@ -21,7 +21,12 @@ Find the owner of a behavior before editing. Keep parsing, configuration,
 simulation, optimization, GUI, and orchestration logic in their existing modules.
 
 ## General Rules
-- Use the project subagents in `.claude/agents/` when their descriptions match the task.
+- Delegate to a subagent in `.claude/agents/` only when it pays: to move work
+  onto a cheaper model (`cobra-documentation-agent`, `cobra-linting-agent`), to
+  keep noisy tool output out of this context, to get a fresh-context review
+  (`cobra-reviewing-agent`), or to run independent changes in parallel. A single
+  edit you can already make is cheaper to do directly than to delegate — a
+  subagent starts cold and re-derives context you already have.
 - Read nearby code, tests, and relevant docs before changing behavior.
 - Read code cleanly: start at the behavior's owner, follow the local call path,
   and read only enough surrounding code to form a clear hypothesis before

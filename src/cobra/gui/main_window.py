@@ -1098,14 +1098,6 @@ class MainWindow(QMainWindow):
                 any_visible = True
         self.component_geometry_container.setVisible(any_visible)
 
-    def create_orca_geometries(self) -> dict[str, object]:
-        """Instantiate and return a geometry for every visible ONNX-component selector."""
-        geometries: dict[str, object] = {}
-        for comp_name, selector in self.component_geometry_selectors.items():
-            if selector.isVisible():
-                geometries[comp_name] = selector.get_geometry()
-        return geometries
-
     @staticmethod
     def _widget_value(widget):
         if isinstance(widget, QComboBox):
@@ -1560,44 +1552,6 @@ class MainWindow(QMainWindow):
 
         self.sim_params_container.setVisible(bool(self._sim_param_edits))
 
-    def _apply_simulation_parameters(self, parser) -> None:
-        """Apply GUI-edited simulation parameters to an in-memory parser.
-
-        Only updates directives that already exist in the netlist.  Directives
-        that are absent (e.g. .AC when the native type is .HB) will be injected
-        with the correct parameters by CircuitSimulationStage at run-time.
-        """
-        existing_directives = {
-            SimulationType.from_directive(d.directive)
-            for d in self._parsed_directives
-        }
-
-        updates: dict[str, dict[str, str]] = {}
-        options_updates: dict[str, dict[str, str]] = {}
-        for key, edit in self._sim_param_edits.items():
-            if key.startswith(".OPTIONS:"):
-                # Format: ".OPTIONS:<category>:<param>"
-                _, category, param_name = key.split(":", 2)
-                options_updates.setdefault(category, {})[param_name] = edit.text().strip()
-            else:
-                directive, param_name = key.split(":", 1)
-                st = SimulationType.from_directive(directive)
-                if st not in existing_directives:
-                    continue  # will be injected at run-time — skip
-                updates.setdefault(directive, {})[param_name] = edit.text().strip()
-
-        for directive, params in updates.items():
-            try:
-                parser.update_simulation_directive(directive, params)
-            except Exception as e:  # noqa: BLE001 - a rejected directive must not stop the remaining updates
-                print(f"Warning: Could not update directive {directive}: {e}")
-
-        for category, params in options_updates.items():
-            try:
-                parser.update_options_directive(category, params)
-            except Exception as e:  # noqa: BLE001 - a rejected directive must not stop the remaining updates
-                print(f"Warning: Could not update .options {category}: {e}")
-
     def update_component_onnx_selectors(self, components: dict, netlist_path: str):
         """Create ONNX/Touchstone selectors for each detected component."""
         # Clear existing component selectors if any
@@ -1978,16 +1932,7 @@ class MainWindow(QMainWindow):
         
         self.draw_overlays()
         
-        self.worker = OptimizationWorker(
-            configured_run.cobra,
-            run_configuration.netlist,
-            configured_run.design_goals,
-            configured_run.optimization_parameters,
-            run_configuration.max_iterations,
-            configured_run.orca_geometries,
-            sim_params_by_type=configured_run.simulation_parameters,
-            run_configuration=run_configuration,
-        )
+        self.worker = OptimizationWorker(configured_run)
         self.worker.progress.connect(self.on_progress)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
         self.worker.finished.connect(self.on_finished)

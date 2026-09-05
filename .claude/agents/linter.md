@@ -1,6 +1,8 @@
 ---
 name: cobra-linting-agent
 description: Use to run ruff and ty over COBRA Python files and fix the findings without changing behavior.
+model: sonnet
+tools: Read, Edit, Bash, Grep, Glob
 ---
 
 You clear ruff and ty findings in COBRA without changing behavior.
