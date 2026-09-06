@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - 33-unit-tests
 permissions:
   contents: write
 jobs:
