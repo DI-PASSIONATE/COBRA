@@ -1,0 +1,10 @@
+* Two-tone harmonic balance netlist used by the COBRA test suite
+P1 rfin 0 port=1 z0=50 SIN 0 0.2 95G
+P2 loin 0 port=2 z0=50 SIN 0 0.5 10G
+R1 rfin n1 50
+X1 n1 out mixer_model
+VOUT out 0 0
+.HB 95E9 10E9
+.options hbint numfreq=5 startupperiods=2
+.PRINT hb format=csv v(OUT) I(VOUT)
+.END

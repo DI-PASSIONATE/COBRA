@@ -1,0 +1,18 @@
+* Subcircuit nesting, .INCLUDE, .LIB and .MODEL coverage for the COBRA test suite
+.INCLUDE "extra_models.sp"
+.LIB "cornerHBT.lib" hbt_typ
+.MODEL nch NMOS LEVEL=1 VTO=0.7
+.SUBCKT buffer buf_in buf_out vdd
+MB1 buf_out buf_in 0 0 nch W=1u L=0.1u
+.SUBCKT inner a b
+RIN a b 1k
+.ENDS
+XI9 a b inner
+.ENDS
+Q1 c b e npn_model
+D1 anode cathode diode_model
+M2 d g s bulk nch W=2u L=0.1u
+XB1 in out vdd buffer
+X2 p1 p2 external_sub param1=5
+.TRAN 1n 100n
+.END
