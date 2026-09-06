@@ -9,12 +9,14 @@ can run without any of the gitignored example assets.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from cobra.console import LOGGER_NAME
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -31,6 +33,30 @@ MINIMAL_S2P = """\
 2e9  -0.2 0.0  0.8 0.0  0.8 0.0  -0.2 0.0
 3e9  -0.3 0.0  0.7 0.0  0.7 0.0  -0.3 0.0
 """
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cobra_logging():
+    """Give every test a pristine ``cobra`` logger.
+
+    ``configure_logging`` installs handlers and disables propagation process
+    wide, so without this a CLI test would leak its handlers -- and its
+    captured stream -- into every test that runs after it.
+    """
+    logger = logging.getLogger(LOGGER_NAME)
+    root = logging.getLogger()
+    saved = [(target, list(target.handlers), target.level) for target in (logger, root)]
+    propagate = logger.propagate
+    logger.handlers.clear()
+    logger.setLevel(logging.NOTSET)
+    logger.propagate = True
+    try:
+        yield logger
+    finally:
+        for target, handlers, level in saved:
+            target.handlers[:] = handlers
+            target.setLevel(level)
+        logger.propagate = propagate
 
 
 def netlist_path(name: str) -> Path:
