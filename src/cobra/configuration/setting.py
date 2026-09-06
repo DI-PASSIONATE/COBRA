@@ -30,7 +30,7 @@ class CobraSetting:
     """
     Metadata for a single configurable parameter of a COBRA component.
 
-    Attributes
+    Attributes:
     ----------
     name:
         The ``__init__`` (or ``run()``) keyword-argument name this setting maps to.

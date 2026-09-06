@@ -114,6 +114,19 @@ class BaseNetlistParser(ABC):
     # Serialisation
     # -------------------------------------------------------------------------
 
+    @property
+    def lines(self) -> list[str]:
+        """A copy of the raw netlist text lines currently held by the parser."""
+        return self._lines[:]
+
+    @lines.setter
+    def lines(self, lines: list[str]) -> None:
+        """Replace the raw text lines *without* re-parsing.
+
+        Use :meth:`from_lines` instead when the parsed view has to follow the edit.
+        """
+        self._lines = lines[:]
+
     def to_string(self) -> str:
         """Return the current (possibly modified) netlist as a single string."""
         return "".join(self._lines)

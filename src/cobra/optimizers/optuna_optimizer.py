@@ -149,10 +149,7 @@ class OptunaOptimizer(BaseOptimizer):
         )
 
     def initialize(self, num_goals: int):
-        if self.multi_objective:
-            directions = ["minimize"] * num_goals
-        else:
-            directions = ["minimize"]
+        directions = ["minimize"] * num_goals if self.multi_objective else ["minimize"]
         self.study = optuna.create_study(
             directions=directions,
             sampler=self._create_sampler(),
@@ -202,7 +199,7 @@ class OptunaOptimizer(BaseOptimizer):
 
                 self._param_to_trial_name[param.name] = trial_name
                 if with_unit:
-                    unit = param.unit if param.unit else (master.unit if master.unit else "")
+                    unit = param.unit or (master.unit or "")
                     values[param.name] = f"{value}{unit}"
                 else:
                     values[param.name] = value
@@ -224,11 +221,9 @@ class OptunaOptimizer(BaseOptimizer):
             if trial_name in best:
                 best[param_name] = best[trial_name]
         return best
-    
+
     def get_moo_results(self) -> Any:
         if self.multi_objective:
             return self._get_study().best_trials
-        else:
-            raise ValueError("Multi-objective optimization is not enabled for this optimizer.")
+        raise ValueError("Multi-objective optimization is not enabled for this optimizer.")
 
-    

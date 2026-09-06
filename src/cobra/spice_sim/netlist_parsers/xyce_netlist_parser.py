@@ -1,3 +1,4 @@
+import contextlib
 import re
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import (
@@ -100,7 +101,7 @@ class XyceNetlistParser(BaseNetlistParser):
         elif e.etype in ("V", "I"):
             if len(tokens) < 3:
                 raise ValueError("V/I line too short.")
-            tokens = tokens[:3] + [new_value]
+            tokens = [*tokens[:3], new_value]
 
         else:
             raise ValueError(
@@ -377,7 +378,7 @@ class XyceNetlistParser(BaseNetlistParser):
                 self._components[name] = Component(
                     name=name,
                     nodes=nodes,
-                    model=model if model else "",
+                    model=model or "",
                     params=params,
                 )
 
@@ -507,7 +508,7 @@ class XyceNetlistParser(BaseNetlistParser):
             else:
                 new_kv[param_name] = str(value)
 
-        tokens = [target.directive] + new_positional
+        tokens = [target.directive, *new_positional]
         for k, v in new_kv.items():
             tokens.append(f"{k}={v}")
 
@@ -601,7 +602,7 @@ class XyceNetlistParser(BaseNetlistParser):
             # Qucs-S emits each port as <signal_node> 0; drop the literal zeros
             # because the fitted subcircuit only expects the signal nodes.
             port_nodes      = [n for n in tokens[2:-1] if n != "0"]
-            instance_tokens = [x_name] + port_nodes + [f"{x_name}_subct"]
+            instance_tokens = [x_name, *port_nodes, f"{x_name}_subct"]
 
             tfile = model_tstonefile.get(model_name)
             if tfile:
@@ -631,28 +632,22 @@ class XyceNetlistParser(BaseNetlistParser):
         for tok in tokens:
             m = self._kv_re.match(tok)
             if m and m.group(1).lower() == "z0":
-                try:
+                with contextlib.suppress(ValueError):
                     result["z0"] = float(m.group(2))
-                except ValueError:
-                    pass
 
         # Scan for positional AC/SIN waveform keywords.
         i = 0
         while i < len(tokens):
             upper = tokens[i].upper()
             if upper == "AC" and i + 1 < len(tokens):
-                try:
+                with contextlib.suppress(ValueError):
                     result["ac_amplitude"] = float(tokens[i + 1])
-                except ValueError:
-                    pass
                 i += 2
                 continue
             if upper == "SIN" and i + 2 < len(tokens):
                 # SIN <offset> <amplitude> [freq] [td] [theta]
-                try:
+                with contextlib.suppress(ValueError):
                     result["sin_amplitude"] = float(tokens[i + 2])
-                except ValueError:
-                    pass
                 i += 3
                 continue
             i += 1

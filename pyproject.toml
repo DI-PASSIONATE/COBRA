@@ -31,23 +31,40 @@ requires-python = ">=3.11"
 dependencies = [
     "scikit-rf",
     "numpy",
+    "pandas",
     "PySide6",
     "onnxruntime",
-    "colorlog",
     "tqdm",
     "optuna",
     "optunahub",
-    "pillow",
     "matplotlib",
     "pyqtgraph",
     "huggingface-hub",
     "gmsh",
-    "ruff",
-    "ty",
+]
+
+# ORCA supplies the geometry presets/classes used by EM fine-tuning.  COBRA guards
+# every ORCA import and degrades gracefully when it is absent, so it stays optional:
+#   uv sync --extra orca      (or)   pip install -e ".[orca]"
+#
+# The marker is required: ORCA pins itself to 3.12 (via ihp-gdsfactory), while COBRA
+# itself supports 3.11-3.14.  Without it the universal resolve fails on every other
+# interpreter.  Drop the marker once ORCA supports the same range as COBRA.
+[project.optional-dependencies]
+orca = [
+    "orca @ git+https://github.com/DI-PASSIONATE/ORCA.git ; python_version >= '3.12' and python_version < '3.13'",
 ]
 
 [project.scripts]
 cobra = "cobra.__main__:main"
+
+# Linters are development tools, not runtime requirements.  `uv sync` installs
+# this group by default; `uv sync --no-dev` skips it for a runtime-only install.
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
+]
 
 [tool.setuptools]
 include-package-data = true
@@ -60,3 +77,76 @@ cobra = "src/cobra"
 
 [tool.setuptools.package-data]
 "cobra" = ["**/*.simcfg", "**/*.xml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Resolve first-party imports out of the src layout.
+src = ["src"]
+# Scratch/vendored trees that are not part of the package.
+extend-exclude = ["Ignore"]
+
+[tool.ruff.lint]
+select = [
+    "ALL", # include all the rules, including new ones
+]
+ignore = [
+    #### modules
+    "ANN", # flake8-annotations: full annotation coverage is not a project goal
+    "COM", # flake8-commas: trailing commas are the formatter's job
+    "C90", # mccabe complexity: PLR0912/PLR0915 cover this better
+    "CPY", # flake8-copyright: no per-file copyright headers in this project
+    "DJ",  # django
+    "EM",  # exception messages inline, consistent with TRY003 below
+    "EXE", # flake8-executable
+    "FBT", # boolean traps: unavoidable in Qt slots and config flags
+    "PD",  # pandas-vet: false positives on numpy/scikit-rf `.values`
+    "T10", # debugger
+    "TID", # flake8-tidy-imports
+
+    #### specific rules
+    "D100",    # ignore missing docs
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D106",
+    "D107",
+    "D200",
+    "D203",    # incompatible with D211; D211 is the convention here
+    "D205",
+    "D212",    # summary placement is not enforced; both styles exist in the tree
+    "D400",
+    "D401",
+    "D415",
+    "E402",    # false positives for local imports
+    "E501",    # line too long
+    "N802",    # RF symbols keep their conventional casing (S, Z, Y, N, K, ...)
+    "N803",
+    "N806",
+    "PLC0415", # imports are deliberately local to keep Palace/ORCA/GUI optional
+    "PLR0911", # simulation and GUI setup code is legitimately branch-heavy
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR0917",
+    "PLR2004", # magic-value comparison is noise in numeric/engineering code
+    "PTH",     # os.path is used throughout; migrating is a separate refactor
+    "RUF001",  # ambiguous unicode: units and symbols (µ, Ω, °) are intentional
+    "RUF002",
+    "RUF003",
+    "S603",    # the Xyce subprocess call is the point of the simulator
+    "T201",    # CLI and GUI progress output goes to stdout on purpose
+    "TRY003",  # external messages in exceptions are too verbose
+    "TD002",
+    "TD003",
+    "FIX002",  # too verbose descriptions of todos
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Examples are standalone scripts, not an importable package.
+"examples/*" = ["INP001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

@@ -104,8 +104,8 @@ def vector_fit(nw: skrf.Network, name: str, enforce_passivity: bool = False) -> 
         vf = _enforce_passivity(vf, nw)
 
     # write SPICE netlist
-    netlist_filename = name + '.sp'
-    subcircuit_name = os.path.basename(name) + '_subct'
+    netlist_filename = name + ".sp"
+    subcircuit_name = os.path.basename(name) + "_subct"
     vf.write_spice_subcircuit_s(netlist_filename, fitted_model_name=subcircuit_name)
 
     return netlist_filename

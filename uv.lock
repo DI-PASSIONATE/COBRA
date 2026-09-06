@@ -206,7 +206,6 @@ name = "cobra"
 version = "1.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "colorlog" },
     { name = "gmsh" },
     { name = "huggingface-hub" },
     { name = "matplotlib" },
@@ -214,31 +213,38 @@ dependencies = [
     { name = "onnxruntime" },
     { name = "optuna" },
     { name = "optunahub" },
-    { name = "pillow" },
+    { name = "pandas" },
     { name = "pyqtgraph" },
     { name = "pyside6" },
-    { name = "ruff" },
     { name = "scikit-rf" },
     { name = "tqdm" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
     { name = "ty" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "colorlog" },
-    { name = "gmsh", specifier = ">=4.15.2" },
+    { name = "gmsh" },
     { name = "huggingface-hub" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "optuna" },
     { name = "optunahub" },
-    { name = "pillow" },
+    { name = "pandas" },
     { name = "pyqtgraph" },
     { name = "pyside6" },
-    { name = "ruff" },
     { name = "scikit-rf" },
     { name = "tqdm" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ruff" },
     { name = "ty" },
 ]
 

@@ -2,14 +2,12 @@ import inspect
 import os
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import gmsh
 import numpy as np
 import onnxruntime
-import pandas as pd
 import pyqtgraph as pg
-from pyqtgraph.GraphicsScene import GraphicsScene
 from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -72,17 +70,21 @@ from .hf_model_browser import HuggingFaceModelDialog
 from .theme import apply_theme
 from .worker import OptimizationWorker
 
+if TYPE_CHECKING:
+    import pandas as pd
+    from pyqtgraph.GraphicsScene import GraphicsScene
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         gmsh.initialize()
-        
+
         # Initialize component ONNX selector dictionaries
         self.component_onnx_edits: dict[str, QLineEdit] = {}
         self.component_onnx_btns: dict[str, QPushButton] = {}
         self.component_hf_btns: dict[str, QPushButton] = {}
-        
+
         self.setWindowTitle("COBRA GUI")
         self.resize(1200, 800)
         self._last_config_path: str | None = None
@@ -91,7 +93,7 @@ class MainWindow(QMainWindow):
         self._run_elapsed_display_timer.setInterval(250)
         self._run_elapsed_display_timer.timeout.connect(self._update_elapsed_time)
         self._elapsed_before_pause = 0
-        
+
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
@@ -166,14 +168,14 @@ class MainWindow(QMainWindow):
 
         self.panel_stack = QStackedWidget()
         root_layout.addWidget(self.panel_stack, stretch=1)
-        
+
         # Left Panel: Configuration
         config_group = QGroupBox("Configuration")
         config_layout = QVBoxLayout(config_group)
-        
+
         # 1. File Selection
         self.config_form_layout = QFormLayout()
-        
+
         self.netlist_edit = QLineEdit()
         self.netlist_btn = QPushButton("Browse")
         self.netlist_btn.setToolTip(tooltip("netlist_btn"))
@@ -219,7 +221,7 @@ class MainWindow(QMainWindow):
         self.component_onnx_layout.setSpacing(6)
         self.component_onnx_container.setVisible(False)
         self.config_form_layout.addRow("", self.component_onnx_container)
-        
+
         # ---- Optimizer selection + dynamic per-optimizer options ----
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
@@ -235,7 +237,7 @@ class MainWindow(QMainWindow):
         self.simulator_combo = QComboBox()
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
         self.config_form_layout.addRow("Simulator:", self.simulator_combo)
-        
+
         # Track position for inserting dynamic simulator options
         self.sim_options_insert_pos = self.config_form_layout.rowCount()
         self.sim_options_count = 0
@@ -249,9 +251,6 @@ class MainWindow(QMainWindow):
         self.max_iter_spin.setValue(500)
         self.max_iter_spin.setToolTip(_cobra_tips.get("max_iterations", ""))
         self.config_form_layout.addRow("Max Iterations:", self.max_iter_spin)
-
-        # self.moo_cb = QCheckBox("Multi-Objective Optimization")
-        # form_layout.addRow("", self.moo_cb)
 
         #### OPTIONAL - Fine-tuning with palace ####
         self.finetune_cb = QCheckBox("Perform finetuning")
@@ -310,7 +309,7 @@ class MainWindow(QMainWindow):
         self.config_scroll_layout.addWidget(self.component_geometry_container)
         self.config_scroll_layout.addStretch()
         self.config_scroll_area.setWidget(self.config_scroll_widget)
-        
+
         # 2. Optimization Parameters
         param_group = QGroupBox("Optimization Parameters")
         param_layout = QVBoxLayout(param_group)
@@ -321,14 +320,14 @@ class MainWindow(QMainWindow):
         self.param_table.customContextMenuRequested.connect(self.param_context_menu)
         self.param_table.doubleClicked.connect(lambda idx: self.edit_param(idx.row()))
         param_layout.addWidget(self.param_table)
-        
+
         h_param_btns = QHBoxLayout()
         add_net_btn = QPushButton("Add from Netlist")
         add_net_btn.setToolTip(tooltip("add_net_btn"))
         add_net_btn.clicked.connect(self.add_netlist_param)
         h_param_btns.addWidget(add_net_btn)
         param_layout.addLayout(h_param_btns)
-        
+
         # 3. Design Goals
         goal_group = QGroupBox("Design Goals")
         goal_layout = QVBoxLayout(goal_group)
@@ -341,9 +340,9 @@ class MainWindow(QMainWindow):
         add_goal_btn.setToolTip(tooltip("add_goal_btn"))
         add_goal_btn.clicked.connect(self.add_design_goal)
         goal_layout.addWidget(add_goal_btn)
-        
+
         config_layout.addWidget(self.config_scroll_area, stretch=1)
-        
+
         # Right panel: Optimization Parameters on top, Design Goals on bottom
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
@@ -357,11 +356,11 @@ class MainWindow(QMainWindow):
         config_panel_layout.setContentsMargins(0, 0, 0, 0)
         config_panel_layout.addWidget(config_group, stretch=3)
         config_panel_layout.addWidget(right_widget, stretch=2)
-        
+
         # Visualization Panel
         viz_group = QGroupBox("Visualization")
         viz_layout = QVBoxLayout(viz_group)
-        
+
         # 1. Plots Area (Horizontal split)
         plot_controls = QHBoxLayout()
         self.plot_view_combo = QComboBox()
@@ -380,18 +379,19 @@ class MainWindow(QMainWindow):
 
         self.hb_input_port_combo = QComboBox()
         self.hb_input_port_combo.setToolTip(tooltip("hb_input_port_combo"))
-        self.hb_input_port_combo.currentIndexChanged.connect(lambda: self.update_hb_spectrum_plot())
+        # The lambda drops the index Qt emits; it must not land in `sim_result`.
+        self.hb_input_port_combo.currentIndexChanged.connect(lambda: self.update_hb_spectrum_plot())  # noqa: PLW0108
 
         self.show_goals_cb = QCheckBox("Show Goals")
         self.show_goals_cb.setChecked(True)
         self.show_goals_cb.stateChanged.connect(self.refresh_overlays)
-        
+
         self.plot_prev_cb = QCheckBox("Plot Previous Result")
-        
+
         self.zoom_btn = QPushButton("Zoom to Goal Frequency Range")
         self.zoom_btn.setToolTip(tooltip("zoom_btn"))
         self.zoom_btn.clicked.connect(self.zoom_to_range)
-        
+
         plot_controls.addWidget(QLabel("Plot:"))
         plot_controls.addWidget(self.plot_view_combo)
         plot_controls.addWidget(self.hb_quantity_combo)
@@ -400,47 +400,47 @@ class MainWindow(QMainWindow):
         plot_controls.addWidget(self.plot_prev_cb)
         plot_controls.addWidget(self.zoom_btn)
         plot_controls.addStretch()
-        
+
         viz_layout.addLayout(plot_controls)
 
         plots_layout = QHBoxLayout()
-        
+
         # S-Param Plot
         self.s_param_plot = pg.PlotWidget(title="S-Parameters (dB)")
         self.s_param_plot.addLegend()
-        self.s_param_plot.setLabel('left', 'Magnitude', units='dB')
-        self.s_param_plot.setLabel('bottom', 'Frequency', units='Hz')
-        self.s_param_plot.setBackground('w')
+        self.s_param_plot.setLabel("left", "Magnitude", units="dB")
+        self.s_param_plot.setLabel("bottom", "Frequency", units="Hz")
+        self.s_param_plot.setBackground("w")
 
         # HB Spectrum Plot — shares the left slot with the S-parameter plot
         self.hb_spectrum_plot = pg.PlotWidget(title="HB Spectrum")
         self.hb_spectrum_plot.addLegend()
-        self.hb_spectrum_plot.setLabel('left', 'Power', units='dBm')
-        self.hb_spectrum_plot.setLabel('bottom', 'Frequency', units='Hz')
-        self.hb_spectrum_plot.setBackground('w')
+        self.hb_spectrum_plot.setLabel("left", "Power", units="dBm")
+        self.hb_spectrum_plot.setLabel("bottom", "Frequency", units="Hz")
+        self.hb_spectrum_plot.setBackground("w")
         # PlotWidget.scene() is declared as QGraphicsScene by Qt, but pyqtgraph
         # returns its own GraphicsScene, which provides the mouse-click signal.
-        hb_scene = cast(GraphicsScene, self.hb_spectrum_plot.scene())
+        hb_scene = cast("GraphicsScene", self.hb_spectrum_plot.scene())
         hb_scene.sigMouseClicked.connect(self.on_hb_spectrum_clicked)
 
         self.left_plot_stack = QStackedWidget()
         self.left_plot_stack.addWidget(self.s_param_plot)
         self.left_plot_stack.addWidget(self.hb_spectrum_plot)
         plots_layout.addWidget(self.left_plot_stack)
-        
+
         # Loss Plot
         self.loss_plot = pg.PlotWidget(title="Goal Losses")
         self.loss_plot.addLegend()
-        self.loss_plot.setLabel('left', 'Loss')
-        self.loss_plot.setBackground('w')
+        self.loss_plot.setLabel("left", "Loss")
+        self.loss_plot.setBackground("w")
         plots_layout.addWidget(self.loss_plot)
 
         self._style_plot_for_light_background(self.s_param_plot)
         self._style_plot_for_light_background(self.hb_spectrum_plot)
         self._style_plot_for_light_background(self.loss_plot)
-        
+
         viz_layout.addLayout(plots_layout, stretch=2)
-        
+
         # 2. Tables Area (Horizontal split)
         tables_layout = QHBoxLayout()
 
@@ -463,10 +463,10 @@ class MainWindow(QMainWindow):
         tables_layout.addWidget(goal_group_viz)
 
         viz_layout.addLayout(tables_layout, stretch=1)
-        
+
         self.panel_stack.addWidget(config_panel_widget)
         self.panel_stack.addWidget(viz_group)
-        
+
         # Data storage
         self.opt_params: list[OptimizationProperty] = []
         self.goals: list[DesignGoal] = []
@@ -557,10 +557,7 @@ class MainWindow(QMainWindow):
         self.progress_label.setText(f"Iteration {iteration}/{max_iterations} ({percentage:.1f}%)")
 
     def _add_current_param_row(self, name, value):
-        if isinstance(value, (float, np.floating)):
-            display_val = f"{round(float(value), 4)}"
-        else:
-            display_val = str(value)
+        display_val = f"{round(float(value), 4)}" if isinstance(value, (float, np.floating)) else str(value)
 
         row = self.current_param_table.rowCount()
         self.current_param_table.insertRow(row)
@@ -572,8 +569,8 @@ class MainWindow(QMainWindow):
         self.current_param_table.setItem(row, 1, val_item)
 
     def _style_plot_for_light_background(self, plot_widget: pg.PlotWidget):
-        axis_pen = pg.mkPen('k')
-        for axis_name in ('left', 'bottom', 'top', 'right'):
+        axis_pen = pg.mkPen("k")
+        for axis_name in ("left", "bottom", "top", "right"):
             axis = plot_widget.getAxis(axis_name)
             axis.setPen(axis_pen)
             axis.setTextPen(axis_pen)
@@ -735,7 +732,7 @@ class MainWindow(QMainWindow):
         baseline = max(float(np.min(values)), v_max - 150.0)
         span = max(v_max - baseline, 1.0)
 
-        fundamental_mask = np.array([hb_spectrum.is_fundamental(l) for l in labels], dtype=bool)
+        fundamental_mask = np.array([hb_spectrum.is_fundamental(label) for label in labels], dtype=bool)
         for mask, color, name in (
             (~fundamental_mask, (65, 105, 225), "Harmonics / mixing products"),
             (fundamental_mask, (220, 20, 60), "Fundamental"),
@@ -787,20 +784,20 @@ class MainWindow(QMainWindow):
             self.hb_spectrum_plot.addItem(item)
             self._hb_markers.append(item)
 
-    def refresh_overlays(self, state):
+    def refresh_overlays(self, _state):
         self.draw_overlays()
 
     def zoom_to_range(self):
         # Range = min and max frequency from the goals if specified
-        min_f = float('inf')
-        max_f = float('-inf')
+        min_f = float("inf")
+        max_f = float("-inf")
         found_any = False
 
         for goal in self.goals:
             try:
                 if not goal.frequency_range:
                     continue
-                
+
                 freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
                 if "-" in freq_str:
                     parts = freq_str.split("-")
@@ -810,7 +807,7 @@ class MainWindow(QMainWindow):
                         # Convert to Hz
                         f_start_hz = f_start * 1e9
                         f_end_hz = f_end * 1e9
-                        
+
                         min_f = min(min_f, f_start_hz)
                         max_f = max(max_f, f_end_hz)
                         found_any = True
@@ -839,7 +836,7 @@ class MainWindow(QMainWindow):
                 # The underlying C++ item was already deleted; nothing to remove.
                 continue
         self.overlay_items = []
-        
+
         if not self.show_goals_cb.isChecked():
             return
 
@@ -848,11 +845,11 @@ class MainWindow(QMainWindow):
             try:
                 if not goal.frequency_range:
                     continue
-                
+
                 freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
                 if "-" not in freq_str:
                     continue
-                
+
                 parts = freq_str.split("-")
                 if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
                     continue
@@ -861,22 +858,22 @@ class MainWindow(QMainWindow):
                 f_end = float(parts[1])
                 f_start_hz = f_start * 1e9
                 f_end_hz = f_end * 1e9
-                
+
                 p_name = goal.parameter_name
                 if p_name.startswith("S") and "_dB" in p_name:
                     if goal.min_value is not None:
                         # Draw line segment
                         min_y = goal.min_value
                         line = pg.PlotCurveItem(
-                            x=[f_start_hz, f_end_hz], 
+                            x=[f_start_hz, f_end_hz],
                             y=[min_y, min_y],
-                            pen=pg.mkPen('g', width=3, style=Qt.PenStyle.SolidLine)
+                            pen=pg.mkPen("g", width=3, style=Qt.PenStyle.SolidLine)
                         )
                         self.s_param_plot.addItem(line)
                         self.overlay_items.append(line)
-                        
+
                         # Add label for min
-                        text = pg.TextItem(f"{p_name} > {goal.min_value}", color='g', anchor=(0, 1))
+                        text = pg.TextItem(f"{p_name} > {goal.min_value}", color="g", anchor=(0, 1))
                         text.setPos(f_start_hz, min_y)
                         self.s_param_plot.addItem(text)
                         self.overlay_items.append(text)
@@ -885,15 +882,15 @@ class MainWindow(QMainWindow):
                         # Draw line segment
                         max_y = goal.max_value
                         line = pg.PlotCurveItem(
-                            x=[f_start_hz, f_end_hz], 
+                            x=[f_start_hz, f_end_hz],
                             y=[max_y, max_y],
-                            pen=pg.mkPen('r', width=3, style=Qt.PenStyle.SolidLine)
+                            pen=pg.mkPen("r", width=3, style=Qt.PenStyle.SolidLine)
                         )
                         self.s_param_plot.addItem(line)
                         self.overlay_items.append(line)
-                        
+
                         # Add label for max
-                        text = pg.TextItem(f"{p_name} < {goal.max_value}", color='r', anchor=(0, 0))
+                        text = pg.TextItem(f"{p_name} < {goal.max_value}", color="r", anchor=(0, 0))
                         text.setPos(f_start_hz, max_y)
                         self.s_param_plot.addItem(text)
                         self.overlay_items.append(text)
@@ -909,7 +906,7 @@ class MainWindow(QMainWindow):
         ``QFormLayout.getWidgetPosition`` is annotated as returning ``object`` by
         the PySide6 stubs; at runtime it yields a ``(row, role)`` tuple.
         """
-        row, _role = cast(tuple[int, int], self.config_form_layout.getWidgetPosition(widget))
+        row, _role = cast("tuple[int, int]", self.config_form_layout.getWidgetPosition(widget))
         return row
 
     def update_optimizer_options(self):
@@ -926,10 +923,12 @@ class MainWindow(QMainWindow):
             result = self.config_form_layout.takeRow(row)
             if result.labelItem:
                 w = result.labelItem.widget()
-                if w: w.deleteLater()
+                if w:
+                    w.deleteLater()
             if result.fieldItem:
                 w = result.fieldItem.widget()
-                if w: w.deleteLater()
+                if w:
+                    w.deleteLater()
 
         self.opt_options_count = 0
         self.optimizer_widgets.clear()
@@ -980,16 +979,18 @@ class MainWindow(QMainWindow):
         )
         for row in rows:
             result = self.config_form_layout.takeRow(row)
-            if result.labelItem: 
+            if result.labelItem:
                 w = result.labelItem.widget()
-                if w: w.deleteLater()
+                if w:
+                    w.deleteLater()
             if result.fieldItem:
                 w = result.fieldItem.widget()
-                if w: w.deleteLater()
-        
+                if w:
+                    w.deleteLater()
+
         self.sim_options_count = 0
         self.simulator_widgets.clear()
-        
+
         # Get selected simulator class
         sim_cls = self.simulator_combo.currentData()
         if not sim_cls:
@@ -1041,16 +1042,16 @@ class MainWindow(QMainWindow):
                     widget.setCurrentIndex(i)
                     break
             return widget
-        if dtype == bool or isinstance(default, bool):
+        if dtype is bool or isinstance(default, bool):
             widget = QCheckBox()
             if isinstance(default, bool):
                 widget.setChecked(default)
-        elif dtype == int or (isinstance(default, int) and not isinstance(default, bool)):
+        elif dtype is int or (isinstance(default, int) and not isinstance(default, bool)):
             widget = QSpinBox()
             widget.setRange(-1_000_000, 1_000_000)
             if isinstance(default, int):
                 widget.setValue(default)
-        elif dtype == float or isinstance(default, float):
+        elif dtype is float or isinstance(default, float):
             widget = QDoubleSpinBox()
             widget.setRange(-1e9, 1e9)
             if isinstance(default, float):
@@ -1070,8 +1071,8 @@ class MainWindow(QMainWindow):
         self.ft_optimizer_combo.setVisible(checked)
         self._update_geometry_selectors_visibility()
 
-    def browse_file(self, line_edit, filter):
-        fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", filter)
+    def browse_file(self, line_edit, name_filter):
+        fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", name_filter)
         if fname:
             line_edit.setText(fname)
 
@@ -1083,7 +1084,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _is_touchstone_path(path: str) -> bool:
         lower = path.lower()
-        return lower.endswith(tuple(f".s{i}p" for i in range(1, 10)) + (".snp",))
+        return lower.endswith((*tuple(f".s{i}p" for i in range(1, 10)), ".snp"))
 
     def _update_geometry_selectors_visibility(self):
         """Show a geometry selector for each ONNX component when fine-tuning is enabled."""
@@ -1354,7 +1355,7 @@ class MainWindow(QMainWindow):
             self.opt_params.clear()
             self.param_table.setRowCount(0)
             self.parse_and_update_components(fname)
-    
+
     def parse_and_update_components(self, netlist_path: str):
         """Parse netlist and update UI with detected components, simulation type and port count."""
         try:
@@ -1451,7 +1452,7 @@ class MainWindow(QMainWindow):
     def on_hb_point_changed(self) -> None:
         self._rebuild_design_parameters()
         self.update_hb_spectrum_plot()
-    
+
     def _refresh_sim_params_for_goals(self) -> None:
         """Rebuild sim-param widgets for the native sim type and any goal-required additions."""
         required: set = set()
@@ -1556,7 +1557,7 @@ class MainWindow(QMainWindow):
         """Create ONNX/Touchstone selectors for each detected component."""
         # Clear existing component selectors if any
         self.clear_component_onnx_selectors()
-        
+
         # Create component ONNX selector widgets
         self.component_onnx_edits = {}
         self.component_onnx_btns = {}
@@ -1564,41 +1565,41 @@ class MainWindow(QMainWindow):
         self.component_onnx_container.setVisible(bool(components))
         if not components:
             return
-        
+
         netlist_dir = os.path.dirname(netlist_path) if netlist_path else ""
 
         # Insert ONNX/Touchstone selectors for each component
         for comp_name, comp_data in sorted(components.items()):
             comp_edit = QLineEdit()
-            
+
             # Check for a static TSTONEFILE parameter from the netlist
             tstone_file = comp_data.params.get("TSTONEFILE")
             if tstone_file:
                 # If the path is not absolute, resolve it relative to the netlist directory
                 if not os.path.isabs(tstone_file) and netlist_dir:
                     tstone_file = os.path.normpath(os.path.join(netlist_dir, tstone_file))
-                
+
                 # Always populate the GUI, even if the file isn't found locally yet
                 comp_edit.setText(tstone_file)
-            
+
             comp_btn = QPushButton("Browse")
             comp_btn.clicked.connect(
-                lambda checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone Files (*.onnx *.s*p *.snp)")
+                lambda _checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone Files (*.onnx *.s*p *.snp)")
             )
             comp_hf_btn = QPushButton("Select from HuggingFace")
             comp_hf_btn.setToolTip("Browse and download ORCA surrogate models from HuggingFace")
             comp_hf_btn.clicked.connect(
-                lambda checked, edit=comp_edit: self._open_hf_model_dialog(edit)
+                lambda _checked, edit=comp_edit: self._open_hf_model_dialog(edit)
             )
             comp_edit.textChanged.connect(
                 lambda text, c=comp_name: self.on_onnx_file_changed(c, text)
             )
-            
+
             h_layout = QHBoxLayout()
             h_layout.addWidget(comp_edit)
             h_layout.addWidget(comp_btn)
             h_layout.addWidget(comp_hf_btn)
-            
+
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -1623,43 +1624,43 @@ class MainWindow(QMainWindow):
 
     def clear_component_onnx_selectors(self):
         """Remove all component ONNX selectors from the UI."""
-        if hasattr(self, 'component_onnx_edits'):
+        if hasattr(self, "component_onnx_edits"):
             for edit in self.component_onnx_edits.values():
                 edit.deleteLater()
             self.component_onnx_edits.clear()
-        
-        if hasattr(self, 'component_onnx_btns'):
+
+        if hasattr(self, "component_onnx_btns"):
             for btn in self.component_onnx_btns.values():
                 btn.deleteLater()
             self.component_onnx_btns.clear()
 
-        if hasattr(self, 'component_hf_btns'):
+        if hasattr(self, "component_hf_btns"):
             for btn in self.component_hf_btns.values():
                 btn.deleteLater()
             self.component_hf_btns.clear()
 
-        if hasattr(self, 'component_onnx_container'):
+        if hasattr(self, "component_onnx_container"):
             self.component_onnx_container.setVisible(False)
 
-        if hasattr(self, 'component_onnx_layout'):
+        if hasattr(self, "component_onnx_layout"):
             while self.component_onnx_layout.count():
                 item = self.component_onnx_layout.takeAt(0)
                 widget = item.widget() if item else None
                 if widget:
                     widget.deleteLater()
 
-        if hasattr(self, 'component_inputs'):
+        if hasattr(self, "component_inputs"):
             self.component_inputs.clear()
 
         # Clear geometry selectors
-        if hasattr(self, 'component_geometry_selectors'):
+        if hasattr(self, "component_geometry_selectors"):
             for selector in self.component_geometry_selectors.values():
                 self.component_geometry_layout.removeWidget(selector)
                 selector.deleteLater()
             self.component_geometry_selectors.clear()
-        if hasattr(self, 'component_geometry_container'):
+        if hasattr(self, "component_geometry_container"):
             self.component_geometry_container.setVisible(False)
-    
+
     def on_onnx_file_changed(self, comp_name: str, path: str):
         path = path.strip()
         # Always refresh geometry selector visibility when file selection changes
@@ -1667,24 +1668,24 @@ class MainWindow(QMainWindow):
 
         if not path or not os.path.exists(path):
             return
-        
+
         try:
             sess = onnxruntime.InferenceSession(path)
             all_inputs = [i.name for i in sess.get_inputs()]
             metadata = sess.get_modelmeta().custom_metadata_map
 
-            if not hasattr(self, 'component_inputs'):
+            if not hasattr(self, "component_inputs"):
                 self.component_inputs = {}
-                
+
             # Filter out 'frequency' from inputs
             filtered_inputs = [p for p in all_inputs if p.lower() != "frequency"]
-            
+
             prefixed_inputs = [f"{comp_name}:{p}" for p in filtered_inputs]
             self.component_inputs[comp_name] = prefixed_inputs
-            
+
             current_param_names = {p.name for p in self.opt_params}
-            
-            for original_name, prefixed_name in zip(filtered_inputs, prefixed_inputs):
+
+            for prefixed_name in prefixed_inputs:
                 if prefixed_name not in current_param_names:
                     dlg = OptimizationParamDialog(
                         from_source="ONNX",
@@ -1712,7 +1713,8 @@ class MainWindow(QMainWindow):
                 self.delete_param(row)
 
     def edit_param(self, row):
-        if row < 0 or row >= len(self.opt_params): return
+        if row < 0 or row >= len(self.opt_params):
+            return
         param = self.opt_params[row]
         dlg = OptimizationParamDialog(
             parent=self,
@@ -1725,25 +1727,26 @@ class MainWindow(QMainWindow):
             self._update_param_row(row, new_param)
 
     def delete_param(self, row):
-        if row < 0 or row >= len(self.opt_params): return
+        if row < 0 or row >= len(self.opt_params):
+            return
         del self.opt_params[row]
         self.param_table.removeRow(row)
 
     def _update_param_row(self, row, param):
         self.param_table.setItem(row, 0, QTableWidgetItem(param.name))
-        
+
         type_item = QTableWidgetItem(param.type.value)
         type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.param_table.setItem(row, 1, type_item)
-        
+
         self.param_table.setItem(row, 2, QTableWidgetItem(str(param.min_value)))
-        
+
         # Preserve current val if possible, otherwise N/A
         if not self.param_table.item(row, 3):
              curr_item = QTableWidgetItem("N/A")
              curr_item.setFlags(curr_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
              self.param_table.setItem(row, 3, curr_item)
-        
+
         self.param_table.setItem(row, 4, QTableWidgetItem(str(param.max_value)))
         self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
         self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
@@ -1758,9 +1761,7 @@ class MainWindow(QMainWindow):
             # Since parser needs instance but we just want to scan, we instantiate it
             parser = XyceNetlistParser().from_file(path)
             # Find R, C, L, V, I elements
-            prospects = []
-            for elem in parser.list_elements(["R", "C", "L", "V", "I"]):
-                prospects.append(elem.name)
+            prospects = [elem.name for elem in parser.list_elements(["R", "C", "L", "V", "I"])]
 
             # Also expose key=value parameters on X instances whose subcircuit
             # is defined inline (via .SUBCKT). These are treated as netlist
@@ -1768,8 +1769,7 @@ class MainWindow(QMainWindow):
             inline_names = parser.inline_subckt_names
             for elem in parser.list_elements(["X"]):
                 if elem.model in inline_names:
-                    for key in elem.params:
-                        prospects.append(f"{elem.name}:{key}")
+                    prospects.extend(f"{elem.name}:{key}" for key in elem.params)
 
             # Filter out already added parameters
             current_param_names = {p.name for p in self.opt_params}
@@ -1778,7 +1778,7 @@ class MainWindow(QMainWindow):
             if not available_prospects:
                 QMessageBox.information(self, "Info", "All valid netlist parameters have already been added.")
                 return
-            
+
             dlg = OptimizationParamDialog(
                 "NETLIST",
                 available_prospects,
@@ -1802,19 +1802,19 @@ class MainWindow(QMainWindow):
         row = self.param_table.rowCount()
         self.param_table.insertRow(row)
         self.param_table.setItem(row, 0, QTableWidgetItem(param.name))
-        
+
         # Type
         type_item = QTableWidgetItem(param.type.value)
         type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.param_table.setItem(row, 1, type_item)
-        
+
         self.param_table.setItem(row, 2, QTableWidgetItem(str(param.min_value)))
-        
+
         # Current Value (Not editable)
         curr_item = QTableWidgetItem("N/A")
         curr_item.setFlags(curr_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.param_table.setItem(row, 3, curr_item)
-        
+
         self.param_table.setItem(row, 4, QTableWidgetItem(str(param.max_value)))
         self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
         self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
@@ -1847,10 +1847,11 @@ class MainWindow(QMainWindow):
 
     def edit_goal(self, item):
         row = self.goal_list.row(item)
-        if row < 0 or row >= len(self.goals): return
-        
+        if row < 0 or row >= len(self.goals):
+            return
+
         goal = self.goals[row]
-        dlg = DesignGoalDialog(self, goal=goal, available_parameters=self._available_parameters if self._available_parameters else None)
+        dlg = DesignGoalDialog(self, goal=goal, available_parameters=self._available_parameters or None)
         if dlg.exec():
             new_goal = dlg.get_data()
             self.goals[row] = new_goal
@@ -1858,17 +1859,18 @@ class MainWindow(QMainWindow):
 
     def delete_goal(self, item):
         row = self.goal_list.row(item)
-        if row < 0 or row >= len(self.goals): return
-        
+        if row < 0 or row >= len(self.goals):
+            return
+
         del self.goals[row]
         if row in self.loss_history:
              del self.loss_history[row]
-        
-        # Re-index remaining loss history? 
-        # Actually loss history indices will shift so this is tricky if run continuously. 
+
+        # Re-index remaining loss history?
+        # Actually loss history indices will shift so this is tricky if run continuously.
         # Ideally we rebuild. For now just clear.
         self.loss_history = {}
-        
+
         self.goal_list.takeItem(row)
         self._refresh_sim_params_for_goals()
 
@@ -1883,13 +1885,17 @@ class MainWindow(QMainWindow):
     def _update_goal_item(self, item, goal):
         item.setText(self._goal_label(goal))
         self._refresh_sim_params_for_goals()
-    
+
     def _goal_label(self, goal):
         label = f"{goal.parameter_name} "
-        if goal.min_value is not None: label += f"> {goal.min_value} "
-        if goal.max_value is not None: label += f"< {goal.max_value}"
-        if goal.frequency_range: label += f" @ {goal.frequency_range}"
-        if goal.weight != 1.0: label += f" (w={goal.weight})"
+        if goal.min_value is not None:
+            label += f"> {goal.min_value} "
+        if goal.max_value is not None:
+            label += f"< {goal.max_value}"
+        if goal.frequency_range:
+            label += f" @ {goal.frequency_range}"
+        if goal.weight != 1.0:
+            label += f" (w={goal.weight})"
         return label
 
     def on_action_clicked(self):
@@ -1897,7 +1903,7 @@ class MainWindow(QMainWindow):
         if not self.worker or not self.worker.isRunning():
             self.start_optimization()
             return
-        
+
         # If running, toggle pause
         if self.worker.paused:
             self.worker.resume()
@@ -1915,7 +1921,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
             QMessageBox.critical(self, "Invalid Configuration", str(exc))
             return
-        
+
         # Change button to PAUSE (running state)
         self._set_action_button_state("pause")
         self.stop_btn.setEnabled(True)
@@ -1923,15 +1929,15 @@ class MainWindow(QMainWindow):
         self._start_elapsed_clock()
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
-        
+
         # Clear plots
         self.s_param_plot.clear()
         self.loss_plot.clear()
         self.loss_history = {i: [] for i in range(len(self.goals))}
         self.overlay_items = [] # clear tracked items since plot.clear() removed them
-        
+
         self.draw_overlays()
-        
+
         self.worker = OptimizationWorker(configured_run)
         self.worker.progress.connect(self.on_progress)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
@@ -1984,19 +1990,20 @@ class MainWindow(QMainWindow):
                     self.fine_tuning_notification_shown = True
         else:
             self._update_progress_display(iteration, max_iterations)
-        
+
         # 1. Update Parameters Table (Current Values)
         net_params = context.get("netlist_parameters", {})
         model_params = context.get("model_parameters", {})
-        
+
         # Combine maps for easier lookup
         current_values = {**net_params, **model_params}
-        
+
         for row in range(self.param_table.rowCount()):
             name_item = self.param_table.item(row, 0)
-            if not name_item: continue
+            if not name_item:
+                continue
             name = name_item.text()
-            
+
             if name in current_values:
                 val = current_values[name]
                 display_val = f"{(round(val, 4)) if isinstance(val, (float, np.floating)) else str(val)}"
@@ -2005,46 +2012,46 @@ class MainWindow(QMainWindow):
                     item.setText(display_val)
 
         self.current_param_table.setRowCount(0)
-        
+
         # Determine how to display the current parameters: Group them by component if any
-        if hasattr(self, 'component_inputs') and self.component_inputs:
+        if hasattr(self, "component_inputs") and self.component_inputs:
             all_comp_inputs = {inp for inputs in self.component_inputs.values() for inp in inputs}
             other_params = [name for name in current_values if name not in all_comp_inputs]
-            
+
             for comp_name, inputs in sorted(self.component_inputs.items()):
                 # Add component header row
                 r = self.current_param_table.rowCount()
                 self.current_param_table.insertRow(r)
-                
+
                 header_item = QTableWidgetItem(f"--- {comp_name} ---")
                 header_item.setFlags(Qt.ItemFlag.NoItemFlags)
                 header_item.setBackground(Qt.GlobalColor.lightGray)
                 self.current_param_table.setItem(r, 0, header_item)
-                
+
                 empty_item = QTableWidgetItem("")
                 empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
                 empty_item.setBackground(Qt.GlobalColor.lightGray)
                 self.current_param_table.setItem(r, 1, empty_item)
-                
+
                 for name in sorted(inputs):
                     if name in current_values:
                         display_name = name.split(":", 1)[1] if ":" in name else name
                         self._add_current_param_row(display_name, current_values[name])
-            
+
             if other_params:
                 r = self.current_param_table.rowCount()
                 self.current_param_table.insertRow(r)
-                
+
                 header_item = QTableWidgetItem("--- Netlist / Other ---")
                 header_item.setFlags(Qt.ItemFlag.NoItemFlags)
                 header_item.setBackground(Qt.GlobalColor.lightGray)
                 self.current_param_table.setItem(r, 0, header_item)
-                
+
                 empty_item = QTableWidgetItem("")
                 empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
                 empty_item.setBackground(Qt.GlobalColor.lightGray)
                 self.current_param_table.setItem(r, 1, empty_item)
-                
+
                 for name in sorted(other_params):
                     self._add_current_param_row(name, current_values[name])
         else:
@@ -2054,19 +2061,15 @@ class MainWindow(QMainWindow):
         # Update Goal Status Table
         # Metrics are now pre-calculated in COBRA.run and stored in context
         current_goals = context.get("goals", [])  # Update goals with latest values
-        
-        #metrics = context.get("goal_values", {})
-        
+
         self.goal_table.setRowCount(0)
 
-        # print(f"Updating Goal Table with metrics: {metrics} and losses: {losses}")
-        
-        for i, goal in enumerate(current_goals):
+        for goal in current_goals:
             p_name = goal.parameter.name
             # Get value from metrics
             # metrics contains arrays usually, we might want mean/min/max or just show range
             current_value_s = goal.current_value
-            
+
             display_val = "N/A"
             if current_value_s is not None:
                     # Check if array
@@ -2086,24 +2089,24 @@ class MainWindow(QMainWindow):
                 target_str = f"> {goal.min_value:.4f}"
             elif goal.max_value is not None:
                 target_str = f"< {goal.max_value:.4f}"
-            
+
             loss_val = goal.current_penalty if goal.current_penalty is not None else 0.0
 
             r = self.goal_table.rowCount()
             self.goal_table.insertRow(r)
-            
+
             name_item = QTableWidgetItem(p_name)
             name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.goal_table.setItem(r, 0, name_item)
-            
+
             target_item = QTableWidgetItem(target_str)
             target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.goal_table.setItem(r, 1, target_item)
-            
+
             val_item = QTableWidgetItem(f"{display_val} (Penalty={loss_val:.2f})")
             val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.goal_table.setItem(r, 2, val_item)
-            
+
             # Color-code the penalty cell based on loss value
             item = self.goal_table.item(r, 2)
             if item:
@@ -2192,7 +2195,7 @@ class MainWindow(QMainWindow):
     def on_finished(self):
         self._stop_elapsed_clock()
         self._set_action_button_state("start", enabled=True)
-        
+
         self.stop_btn.setEnabled(False)
 
         QMessageBox.information(self, "Done", "Optimization Finished!")
@@ -2201,7 +2204,7 @@ class MainWindow(QMainWindow):
     def on_error(self, msg):
         self._stop_elapsed_clock()
         self._set_action_button_state("start", enabled=True)
-        
+
         self.stop_btn.setEnabled(False)
 
         QMessageBox.critical(self, "Error", msg)

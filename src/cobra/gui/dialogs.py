@@ -236,15 +236,15 @@ class OptimizationParamDialog(QDialog):
         self.link_candidates = link_candidates or []
         self.setWindowTitle("Optimization Parameter")
         self.form_layout = QFormLayout(self)
-        
+
         self.name_edit = QLineEdit()
         self.type_combo = QComboBox()
         self.type_combo.addItems([t.value for t in OptimizationType])
-        
+
         self.min_spin = QDoubleSpinBox()
         self.min_spin.setRange(-1e15, 1e15)
         self.min_spin.setDecimals(15)
-        
+
         self.max_spin = QDoubleSpinBox()
         self.max_spin.setRange(-1e15, 1e15)
         self.max_spin.setDecimals(15)
@@ -252,12 +252,12 @@ class OptimizationParamDialog(QDialog):
         self.step_spin = QDoubleSpinBox()
         self.step_spin.setRange(0, 1e15)
         self.step_spin.setDecimals(15)
-        
+
         self.unit_edit = QLineEdit()
         self.unit_edit.setPlaceholderText("Optional (e.g. F (=femto)) for Xyce")
         self.link_to_combo = QComboBox()
         self.link_to_combo.addItem("None", None)
-        
+
         if param:
             self.name_edit.setText(param.name)
             self.type_combo.setCurrentText(param.type.value)
@@ -270,7 +270,7 @@ class OptimizationParamDialog(QDialog):
             if param.linked_to:
                 self.link_to_combo.addItem(param.linked_to, param.linked_to)
                 self.link_to_combo.setCurrentIndex(self.link_to_combo.count() - 1)
-        
+
         if from_source == "ONNX" and source_data:
             self.name_combo = QComboBox()
             self.name_combo.addItems(source_data)
@@ -278,7 +278,7 @@ class OptimizationParamDialog(QDialog):
             self.type_combo.setCurrentText(OptimizationType.MODEL_INPUT.value)
             self.type_combo.setEnabled(False)
             self.use_combo_name = True
-            
+
             self.step_spin.setValue(0.1)
             self.name_combo.currentTextChanged.connect(self._update_onnx_metadata)
             self._update_onnx_metadata(self.name_combo.currentText())
@@ -296,7 +296,7 @@ class OptimizationParamDialog(QDialog):
             self.form_layout.addRow("Name:", self.name_edit)
             self.use_combo_name = False
             self.name_edit.textChanged.connect(self._refresh_link_targets)
-            
+
         self.form_layout.addRow("Type:", self.type_combo)
         self.form_layout.addRow("Min:", self.min_spin)
         self.form_layout.addRow("Max:", self.max_spin)
@@ -312,7 +312,7 @@ class OptimizationParamDialog(QDialog):
 
         self.link_to_combo.currentIndexChanged.connect(self._on_link_target_changed)
         self._on_link_target_changed()
-        
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -321,7 +321,7 @@ class OptimizationParamDialog(QDialog):
     def _update_onnx_metadata(self, name):
         # Allow checking metadata natively and without prefix (e.g. 'W' from 'X1:W')
         base_name = name.split(":", 1)[1] if ":" in name else name
-        
+
         if "input_parameter_ranges" in self.metadata:
             try:
                 meta_data = json.loads(self.metadata["input_parameter_ranges"])

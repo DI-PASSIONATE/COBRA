@@ -6,7 +6,6 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
-import skrf as rf
 import tqdm
 
 from cobra.configuration.setting import CobraSetting
@@ -28,6 +27,8 @@ from cobra.stages import (
 )
 
 if TYPE_CHECKING:
+    import skrf as rf
+
     from cobra.configuration import RunConfiguration
 
 
@@ -52,11 +53,11 @@ def _sanitize_for_json(obj):
 class COBRA:
     """
     COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
-    
+
     Can be initialized with:
     Pass a NetlistParser and component_onnx_mapping dict
        >>> parser = XyceNetlistParser().from_file("netlist.cir")
-       >>> cobra = COBRA(netlist_parser=parser, 
+       >>> cobra = COBRA(netlist_parser=parser,
        ...               component_onnx_mapping={"X1": "model.onnx"})
     """
 
@@ -104,7 +105,7 @@ class COBRA:
         # Validate initialization arguments
         if not isinstance(netlist_parser, BaseNetlistParser):
             raise TypeError("netlist_parser must be an instance of BaseNetlistParser")
-        
+
         components = netlist_parser.components
         if component_onnx_mapping is None:
             component_onnx_mapping = {}
@@ -128,7 +129,7 @@ class COBRA:
             )
         else:
             self.em_surrogate_stage = None
-        
+
         self.optimizer_stage = OptimizerStage(optimizer if optimizer is not None else OptunaOptimizer())
         self.circuit_simulation_stage = CircuitSimulationStage(
             circuit_simulator if circuit_simulator is not None else XyceSimulator()
@@ -164,15 +165,15 @@ class COBRA:
         Run the optimization workflow.
 
         Parameters:
-        - netlist: A path to the netlist file. If a netlist_parser was provided in __init__, 
+        - netlist: A path to the netlist file. If a netlist_parser was provided in __init__,
                    it should correspond to this file.
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
-        - optimization_parameters: A list of OptimizationProperty objects representing the parameters 
+        - optimization_parameters: A list of OptimizationProperty objects representing the parameters
                                    to be optimized, their types, and their ranges.
         - max_iterations: The maximum number of optimization iterations to perform.
         - orca_geometries: Optional dict mapping component names to ORCA geometry objects for EM
                            fine-tuning. Only required for ONNX-based (non-Touchstone) components.
-        - callback: An optional callback function that takes the current context as an argument. 
+        - callback: An optional callback function that takes the current context as an argument.
                     If the callback returns False, the optimization is stopped.
         - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
 
@@ -188,17 +189,17 @@ class COBRA:
 
         if run_configuration is not None:
             run_configuration.save(results_dir / "cobra_config.json")
-        
+
         # Copy original netlist to results directory
         original_netlist_path = Path(netlist)
         netlist_in_results = results_dir / original_netlist_path.name
         shutil.copy(netlist, netlist_in_results)
-        
+
         # Update netlist path to point to the results directory for all operations
         netlist = str(netlist_in_results)
-        
+
         netlist_parser = self.netlist_parser
-        
+
         # Replace the component model names in the netlist to match the vector fitted subcircuits
         for comp_name in self.component_onnx_mapping:
             try:
@@ -206,7 +207,7 @@ class COBRA:
             except (KeyError, ValueError, NotImplementedError) as e:
                 print(f"Warning: Could not set subcircuit model for {comp_name}: {e}")
         netlist_parser.save(netlist)
-        
+
         design_goal_checker = DesignGoalChecker(design_goals)
         self.optimizer_stage.optimizer.initialize(len(design_goals))
 
@@ -233,7 +234,7 @@ class COBRA:
 
         # Perform optimizer step
         pbar = tqdm.tqdm(total=context["max_iterations"], desc="COBRA Optimization Progress")
-        
+
         iteration = 0
         while iteration < context["max_iterations"]:
             iteration += 1
@@ -277,7 +278,7 @@ class COBRA:
                 if should_continue is False:
                     print("Optimization stopped by callback.")
                     break
-            
+
             pbar.update(1)
             if pbar.total != context["max_iterations"]:
                 pbar.total = context["max_iterations"]
@@ -290,15 +291,15 @@ class COBRA:
             if context["goal_achieved"]:
                 break
 
-            
+
         pbar.close()
-        
+
         # If goals not achieved, try to retrieve best parameters from optimizer and use those for final context
         if not context["goal_achieved"]:
             context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, netlist_parser, context)
         else:
             print(f"Design goals achieved at iteration {context['iteration']}.")
-        
+
         # Save the surrogate model's predicted S-parameters to the results directory for the user
         ntwks: list[rf.Network] = context.get("predicted_networks", [])
         for i, ntwk in enumerate(ntwks):
@@ -332,7 +333,7 @@ class COBRA:
 
     def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, netlist_parser, context):
         print("Maximum iterations reached without achieving design goals.")
-            
+
             # If not MOO, retrieve best parameters and update context to reflect them
         if not self.optimizer_stage.optimizer.multi_objective:
             best_params_flat = self.optimizer_stage.optimizer.get_best_parameters()
@@ -340,36 +341,36 @@ class COBRA:
             # Split best_params_flat into model parameters and netlist parameters based on optimization_parameters list
             model_params = {}
             netlist_params = {}
-                
+
             for prop in optimization_parameters:
                 if prop.name in best_params_flat:
                     val = best_params_flat[prop.name]
                     if prop.type == OptimizationType.NETLIST_VARIABLE:
-                        unit = prop.unit if prop.unit else ""
+                        unit = prop.unit or ""
                         netlist_params[prop.name] = f"{val}{unit}"
                     elif prop.type == OptimizationType.MODEL_INPUT:
                         model_params[prop.name] = val
-                
+
             context["netlist_parameters"] = netlist_params
             context["model_parameters"] = model_params
-                
+
             # Update netlist
             netlist_parser.update_parameters(netlist_params)
             netlist_parser.save(netlist)
-                
+
             # Rerun simulation to update context with best result
             print("Re-simulating with best parameters...")
             if self.em_surrogate_stage is not None:
                 context = self.em_surrogate_stage.run(context)
             context = self.circuit_simulation_stage.run(context)
             context = design_goal_checker.check_goals(context)
-        
+
         return context
 
 
 
     def fine_tuning(self, context: dict, callback=None) -> dict:
-        """ Perform EM fine-tuning using the EM fine-tuning stage. """
+        """Perform EM fine-tuning using the EM fine-tuning stage."""
         if self.em_fine_tuning_stage is None:
             raise ValueError("EM fine-tuning stage is not defined. Cannot perform fine-tuning.")
 
@@ -385,7 +386,7 @@ class COBRA:
         # Validate that every ONNX-based component has a geometry
         onnx_components = [
             comp for comp, is_ts in zip(
-                surrogate_stage.component_names, surrogate_stage.is_touchstone
+                surrogate_stage.component_names, surrogate_stage.is_touchstone, strict=True
             )
             if not is_ts
         ]
@@ -418,7 +419,7 @@ class COBRA:
             # Run Palace for every ONNX component; carry forward .snp networks unchanged
             assembled_networks = []
             for comp_name, is_ts in zip(
-                surrogate_stage.component_names, surrogate_stage.is_touchstone
+                surrogate_stage.component_names, surrogate_stage.is_touchstone, strict=True
             ):
                 if is_ts:
                     ntwk = prior_networks_by_comp.get(comp_name)
@@ -450,8 +451,7 @@ class COBRA:
             if context["goal_achieved"]:
                 print(f"Design goals achieved after EM fine-tuning at iteration {iteration}.")
                 break
-            else:
-                print(f"Design goals not achieved after EM fine-tuning at iteration {iteration}. Continuing optimization...")
+            print(f"Design goals not achieved after EM fine-tuning at iteration {iteration}. Continuing optimization...")
 
             fine_tuning_optimizer_stage.tell(context)
             context = fine_tuning_optimizer_stage.run(context)
@@ -462,7 +462,7 @@ class COBRA:
             print("Design goals achieved and geometry verified with EM simulation. Returning optimized parameters.")
 
         return context
-    
+
     def print_time(self, context: dict):
         """
         Prints the percentage of time spent in each stage of the optimization process.
@@ -470,7 +470,7 @@ class COBRA:
         total_time = context["times"]["total_time"]
         if total_time == 0:
             return
-        
+
         print(f"Time spent in Optimizer: {context['times']['optimizer'] / total_time * 100:.2f}%")
         print(f"Time spent in EM Surrogate: {context['times']['em_surrogate'] / total_time * 100:.2f}%")
         print(f"Time spent in Circuit Simulation: {context['times']['circuit_simulation'] / total_time * 100:.2f}%")

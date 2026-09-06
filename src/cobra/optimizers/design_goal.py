@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import numpy as np
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-from cobra.spice_sim.base_simulator import SimulationResult
-from cobra.spice_sim.simulation_type import SimulationType
+    import numpy as np
+
+    from cobra.spice_sim.base_simulator import SimulationResult
+    from cobra.spice_sim.simulation_type import SimulationType
 
 
 @dataclass
@@ -15,7 +18,7 @@ class DesignParameter:
     """
     A named, self-describing design parameter.
 
-    Attributes
+    Attributes:
     ----------
     name:
         Unique identifier used in the GUI, context dict, and log output
@@ -75,15 +78,15 @@ class DesignGoal:
         self._eps = 1e-9
         self._current_value = None
         self._current_penalty = None
-        
+
     @property
     def parameter_name(self) -> str:
         return self.parameter.name
-    
+
     @property
     def current_value(self) -> float | np.ndarray | None:
         return self._current_value
-    
+
     @current_value.setter
     def current_value(self, value: float | np.ndarray | None):
         self._current_value = value
@@ -106,15 +109,15 @@ class DesignGoal:
         values = self.parameter.formula(sim_result, self.frequency_range)
 
         # Store the current value for later reference
-        self.current_value = values  
+        self.current_value = values
 
         # Calculate the penalty using the parameter's loss function and the goal's min/max values
         penalty_value = self.parameter.loss(self.min_value, self.max_value, values) * self.weight
         self.current_penalty = penalty_value
         return penalty_value
-    
+
     def __str__(self):
-        freq_range_str = self.frequency_range if self.frequency_range else "full range"
+        freq_range_str = self.frequency_range or "full range"
         return (
             f"DesignGoal(parameter={self.parameter.name}, "
             f"frequency_range={freq_range_str}, "
@@ -122,12 +125,13 @@ class DesignGoal:
             f"weight={self.weight}, "
             f"current_penalty={self.current_penalty}"
         )
-    
+
     @staticmethod
     def str_to_frequency_range(freq_range_str: str | None) -> tuple[float | None, float | None]:
         """
         Convert a frequency range string like "1-20GHz" into a tuple of floats (1e9, 20e9), and single values like "5GHz" into (5e9, 5e9).
-        Returns
+
+        Returns:
         -------
         Tuple[Optional[float], Optional[float]]
             A tuple of (min_freq, max_freq) in Hz, or a single value if only one frequency is specified. Returns (None, None) if the input is None.
@@ -146,11 +150,11 @@ class DesignGoal:
 
         # Convert to Hz based on unit
         multiplier = 1.0
-        if unit.startswith('k'):
+        if unit.startswith("k"):
             multiplier = 1e3
-        elif unit.startswith('m'):
+        elif unit.startswith("m"):
             multiplier = 1e6
-        elif unit.startswith('g'):
+        elif unit.startswith("g"):
             multiplier = 1e9
 
         min_freq_hz = min_freq * multiplier
@@ -185,7 +189,7 @@ class DesignGoalChecker:
 
         context["goal_achieved"] = all(p <= 0.0 for p in penalties)
         context["goals"] = [goal for goals in self.design_goals.values() for goal in goals]
-        
+
         return context
 
     def loss(self, sim_results: dict[SimulationType, SimulationResult]) -> list[float]:
@@ -205,8 +209,7 @@ class DesignGoalChecker:
             if not goals_for_type:
                 continue  # No goals for this simulation type
 
-            for goal in goals_for_type:
-                penalties.append(goal.penalty(sim_result))
+            penalties.extend(goal.penalty(sim_result) for goal in goals_for_type)
 
         return penalties
 

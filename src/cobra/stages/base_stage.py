@@ -15,6 +15,7 @@ class COBRABaseStage(ABC):
 
         Parameters:
             context (dict): A dictionary representing the current state of the design.
+
         Returns:
             dict: An updated state of the design after processing.
         """

@@ -148,7 +148,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             master = self._master_properties[master_name]
             value = master_values[master_name]
             if with_unit:
-                unit = param.unit if param.unit else (master.unit if master.unit else "")
+                unit = param.unit or (master.unit or "")
                 values[param.name] = f"{value}{unit}"
             else:
                 values[param.name] = value
@@ -179,7 +179,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             candidate[name] = self._clip(candidate[name], prop)
         return candidate
 
-    def initialize(self, num_goals: int):
+    def initialize(self, num_goals: int):  # noqa: ARG002 - part of the BaseOptimizer interface
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
         self._master_properties = {}
@@ -219,7 +219,8 @@ class GradientDescentOptimizer(BaseOptimizer):
         else:
             # If the probe state is stale, restart from the latest point.
             self._pending_probe = None
-            return self.step(context, model_input_ranges, netlist_property_ranges)
+            self.step(context, model_input_ranges, netlist_property_ranges)
+            return
 
         current_candidate = self._pending_probe["plus_candidate"] if self._pending_probe["side"] == "plus" else self._pending_probe["minus_candidate"]
         context["model_parameters"] = self._format_values(current_candidate, model_input_ranges, with_unit=False)
@@ -229,10 +230,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
 
-        if isinstance(penalty, list):
-            penalty_value = float(np.sum(penalty))
-        else:
-            penalty_value = float(penalty)
+        penalty_value = float(np.sum(penalty)) if isinstance(penalty, list) else float(penalty)
 
         if not np.isfinite(penalty_value):
             return
@@ -299,10 +297,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         raise ValueError("GradientDescentOptimizer does not produce MOO results.")
 
     def get_best_parameters(self) -> dict[str, float]:
-        if self._best_parameters:
-            best = dict(self._best_parameters)
-        else:
-            best = dict(self._current_point)
+        best = dict(self._best_parameters) if self._best_parameters else dict(self._current_point)
         for alias_name, master_name in self._alias_to_master.items():
             if master_name in best:
                 best[alias_name] = best[master_name]

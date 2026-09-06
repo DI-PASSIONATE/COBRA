@@ -57,7 +57,7 @@ class EMFineTuningStage(COBRABaseStage):
     def __init__(self, palace_executable):
         self.palace_executable = palace_executable
 
-        
+
     def run(self, context: dict, orca_geometry=None, comp_name: str | None = None) -> dict:
         """
         Creates a GDS file based on the current parameters, meshes it.
@@ -65,18 +65,18 @@ class EMFineTuningStage(COBRABaseStage):
         """
         from ihp import PDK
         BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-        
+
         PDK.activate()
         if not isinstance(orca_geometry, BaseGeometry):
             raise TypeError("orca_geometry must be an instance of BaseGeometry")
-        geometry = cast(Any, orca_geometry)
-        
+        geometry = cast("Any", orca_geometry)
+
         base_dir = os.path.abspath(context.get("results_dir", os.path.join(os.getcwd(), "results")))
         fine_tuning_run = context.get("fine_tuning_iteration", 0)
         name_suffix = f"_{comp_name}" if comp_name else ""
         name = f"cobra_result_ft_{fine_tuning_run}_{context['iteration']}{name_suffix}"
         gds_output_path = os.path.join(base_dir, f"{name}.gds")
-        
+
         # Filter parameters for this specific component if comp_name is given
         all_parameters = context["model_parameters"]
         if comp_name:
@@ -89,7 +89,7 @@ class EMFineTuningStage(COBRABaseStage):
                     parameters[k] = v  # shared / unscoped parameter
         else:
             parameters = all_parameters
-        
+
         geometry.create_gds_file(name=name, output_path=gds_output_path, params=parameters)
 
         # !!!

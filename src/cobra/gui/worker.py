@@ -33,13 +33,13 @@ class OptimizationWorker(QThread):
                     self.resume_event.wait()
                     if self.stop_requested:
                         return False
-                
+
                 # Handle prev_network logic for plotting
                 context["prev_network"] = self.prev_network
-                
+
                 # Emit progress
                 self.progress.emit(context)
-                
+
                 # Check if we reached max iterations and ask to continue
                 if context["iteration"] >= context["max_iterations"] and not context["goal_achieved"]:
                     self.ask_continue.emit(context["max_iterations"])
@@ -48,7 +48,7 @@ class OptimizationWorker(QThread):
                 # Update prev_network for next iteration
                 sim_results = context.get("simulation_results") or {}
                 self.prev_network = next((r.network for r in sim_results.values() if r.network is not None), None)
-                
+
                 return True
 
             # Same entry point a headless `cobra run CONFIG` takes.

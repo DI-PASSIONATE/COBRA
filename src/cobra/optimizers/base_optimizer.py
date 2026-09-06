@@ -31,7 +31,7 @@ class BaseOptimizer(ABC):
             multi_objective: A boolean indicating whether the optimizer should handle multiple objectives (design goals) simultaneously. If False, the optimizer will produce a single loss value by aggregating the losses from multiple design goals.
         """
         self.multi_objective = multi_objective
-        
+
     @abstractmethod
     def initialize(self, num_goals: int):
         """
@@ -65,9 +65,9 @@ class BaseOptimizer(ABC):
     @abstractmethod
     def get_moo_results(self) -> Any:
         """
-        Get the results of the multi-objective optimization process. This method should return a 
+        Get the results of the multi-objective optimization process. This method should return a
         list (i.e. a pareto front) of the best trials run.
-        
+
         Returns:
             A list of the best trials from the multi-objective optimization process, representing the Pareto front of optimal solutions.
         """
@@ -84,18 +84,18 @@ class BaseOptimizer(ABC):
     def _tell(self, context, loss: list[float]):
         """
         Internal method that converts the list of loss values into a single penalty value if multi_objective is False, and then calls the tell method with the appropriate penalty.
-        
+
         Args:
             context: A dictionary containing the current design state, including the netlist, design goals, and any other relevant information.
             loss: A list of loss values corresponding to each design goal, indicating how well the current parameters meet the design goals.
         """
         if self.multi_objective:
             return self.tell(context, loss)
-        
+
         # All values are above or all below zero -> sum them up for a single loss value
         # If some values are above and some below zero, sum the positive values and disregard the negative values
-        if all(l >= 0 for l in loss) or all(l <= 0 for l in loss):
+        if all(value >= 0 for value in loss) or all(value <= 0 for value in loss):
             penalty = sum(loss)
         else:
-            penalty = sum(l for l in loss if l > 0)
+            penalty = sum(value for value in loss if value > 0)
         return self.tell(context, penalty)

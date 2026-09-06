@@ -20,7 +20,7 @@ class OptimizerStage(COBRABaseStage):
 
         self.optimizer.step(context, model_input_parameters, netlist_variable_parameters)
         return context
-    
+
     def tell(self, context):
         goals = context.get("goals", [])
         loss_values = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in goals]
@@ -33,5 +33,5 @@ class OptimizerStage(COBRABaseStage):
             "losses": loss_values
         })
         # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False
-        self.optimizer._tell(context, loss_values)
+        self.optimizer._tell(context, loss_values)  # noqa: SLF001 - documented entry point for stages
 

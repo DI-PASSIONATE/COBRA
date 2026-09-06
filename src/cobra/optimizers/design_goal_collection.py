@@ -221,8 +221,7 @@ def s_param_formula(i: int, j: int, in_db: bool = True) -> Callable[[SimulationR
     """Return a formula function for S{i}{j} or S{i}{j}_dB."""
     if in_db:
         return lambda sim_result, frequency_range=None, _i=i, _j=j: np.asarray(_network(sim_result, frequency_range).s_db[:, _i - 1, _j - 1])
-    else:
-        return lambda sim_result, frequency_range=None, _i=i, _j=j: np.abs(_network(sim_result, frequency_range).s[:, _i - 1, _j - 1])
+    return lambda sim_result, frequency_range=None, _i=i, _j=j: np.abs(_network(sim_result, frequency_range).s[:, _i - 1, _j - 1])
 
 def make_s_param_db(i: int, j: int) -> DesignParameter:
     """Return a ``S{i}{j}_dB`` DesignParameter (dB magnitude)."""
@@ -289,14 +288,14 @@ def calculate_array_penalty(min_value: float | None, max_value: float | None, va
                 loss_val += np.sum(diff**2)
             return float(loss_val)
 
-        elif min_value is not None:
+        if min_value is not None:
             denom = np.abs(min_value) + eps
             if np.any(values < min_value):
                 violating = values[values < min_value]
                 return float(np.sum(((min_value - violating) / denom) ** 2))
             return float(-np.sum(((values - min_value) / denom) ** 2))
 
-        elif max_value is not None:
+        if max_value is not None:
             denom = np.abs(max_value) + eps
             if np.any(values > max_value):
                 violating = values[values > max_value]
@@ -306,7 +305,7 @@ def calculate_array_penalty(min_value: float | None, max_value: float | None, va
         raise ValueError("At least one of min_value or max_value must be provided.")
 
 # --------------------------------------------------------------------------
-# DesignParameter catalogue 
+# DesignParameter catalogue
 # --------------------------------------------------------------------------
 MAX_PORTS: int = 8
 
@@ -338,11 +337,11 @@ _ALL_PARAMETERS: list[DesignParameter] = [
         min_ports=1,
     ),
     DesignParameter(
-        "SRF", 
-        SimulationType.AC, 
-        _srf, 
-        calculate_array_penalty, 
-        "Self-resonance frequency in GHz.", 
+        "SRF",
+        SimulationType.AC,
+        _srf,
+        calculate_array_penalty,
+        "Self-resonance frequency in GHz.",
         min_ports=1
     ),
     DesignParameter(

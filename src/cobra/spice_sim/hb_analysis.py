@@ -159,7 +159,7 @@ class HBAnalysis:
     # ------------------------------------------------------------------
 
     def _parse(self) -> pd.DataFrame:
-        with open(self.filename, "r") as f:
+        with open(self.filename) as f:
             content = f.read()
 
         # Clean out potential line-wrap log blocks and simulation end message
@@ -183,7 +183,7 @@ class HBAnalysis:
 
         row_tokens = tokens[data_start_idx:]
         num_cols = len(headers)
-        
+
         # Safe check for unexpected partial or trailing text fragments
         excess = len(row_tokens) % num_cols
         if excess:
@@ -298,7 +298,7 @@ class HBAnalysis:
         if q == "voltage":
             vpk = signals[self.v_out][idx]
             return {"V_out_dBV": 20 * np.log10(max(abs(vpk), 1e-30))}
-        
+
         ipk = signals[self.i_out][idx]
         return {"I_out_dBmA": 20 * np.log10(max(abs(ipk) / 1e-3, 1e-30))}
 

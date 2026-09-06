@@ -119,12 +119,12 @@ class GeometrySelectorWidget(QGroupBox):
             for class_name, cls in discover_custom_geometries(abs_path):
                 self._custom_classes[class_name] = cls
                 self._class_combo.addItem(class_name, cls)
-
-            return True
         except Exception as exc:  # noqa: BLE001 - user-supplied geometry modules can fail in any way
             if show_errors:
                 QMessageBox.critical(self, "ORCA Geometry", f"Failed to load custom geometry:\n{exc}")
             return False
+        else:
+            return True
         finally:
             self._class_combo.blockSignals(False)
 

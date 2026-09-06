@@ -14,7 +14,7 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 from cobra.spice_sim.vector_fit import vector_fit
 
-_PRINT_FILE_RE = re.compile(r'\bfile=(\S+)', re.IGNORECASE)
+_PRINT_FILE_RE = re.compile(r"\bfile=(\S+)", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Xyce-specific simulation metadata
@@ -140,7 +140,7 @@ class XyceSimulator(BaseSimulator):
 
         # Collect any custom filenames declared via ".PRINT ... file=X"
         custom_print_files: list[str] = []
-        for line in parser._lines:
+        for line in parser.lines:
             stripped = line.strip()
             if stripped.lower().startswith(".print"):
                 m = _PRINT_FILE_RE.search(stripped)
@@ -149,9 +149,7 @@ class XyceSimulator(BaseSimulator):
 
         # --- Run Xyce --------------------------------------------------------
         parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
-        command = parallel_command + [
-            self.xyce_command, netlist_base
-        ]
+        command = [*parallel_command, self.xyce_command, netlist_base]
         # check=False: a non-zero return code is reported below, not raised.
         proc = subprocess.run(
             command, capture_output=True, text=True, cwd=results_dir, check=False
@@ -166,7 +164,7 @@ class XyceSimulator(BaseSimulator):
         found: list[str] = []
 
         if sim_type is SimulationType.AC:
-            # AC sweep output is written to <netlist>.s*p (Touchstone) 
+            # AC sweep output is written to <netlist>.s*p (Touchstone)
             # To avoid .sp files we don't use * to match but rather use regex to match .s followed by a single digit and then p (e.g. .s1p, .s2p, etc.)
             matched_files = glob.glob(os.path.join(results_dir, "*.s[0-9]p"))
             found.extend(matched_files)
@@ -197,13 +195,13 @@ class XyceSimulator(BaseSimulator):
 
         # --- Load Touchstone output as rf.Network (AC only) ------------------
         network: rf.Network | None = None
-        sp_files = [f for f in found if re.search(r'\.s\d+p$', f, re.IGNORECASE)]
+        sp_files = [f for f in found if re.search(r"\.s\d+p$", f, re.IGNORECASE)]
         if sp_files:
             network = rf.Network(sp_files[0])
 
         # --- Parse all PRN / table output files with pandas ------------------
         dataframes: dict[str, pd.DataFrame] = {}
-        prn_files = [f for f in found if not re.search(r'\.s\d+p$', f, re.IGNORECASE)]
+        prn_files = [f for f in found if not re.search(r"\.s\d+p$", f, re.IGNORECASE)]
         for prn_path in prn_files:
             try:
                 separator = "," if prn_path.lower().endswith(".csv") else r"\s+"

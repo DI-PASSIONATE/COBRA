@@ -204,7 +204,7 @@ def classify_bins(
         for combo in combos:
             if not any(combo):
                 continue
-            if abs(sum(m * f for m, f in zip(combo, tones)) - freq) <= tolerance:
+            if abs(sum(m * f for m, f in zip(combo, tones, strict=True)) - freq) <= tolerance:
                 labels[i] = _format_combo(combo, len(tones))
                 break
     return labels
@@ -212,7 +212,7 @@ def classify_bins(
 
 def is_fundamental(label: str) -> bool:
     """Whether *label* denotes a fundamental tone (``H1``, ``f1``, ``f2``, ...)."""
-    return label in ("H1",) or bool(re.fullmatch(r"f\d+", label))
+    return label == "H1" or bool(re.fullmatch(r"f\d+", label))
 
 
 def _format_combo(combo: Sequence[int], n_tones: int) -> str:

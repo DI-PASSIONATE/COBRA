@@ -1,11 +1,13 @@
 import os
-
-import skrf as rf
+from typing import TYPE_CHECKING
 
 from cobra.spice_sim.base_simulator import BaseSimulator
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
+
+if TYPE_CHECKING:
+    import skrf as rf
 
 
 class CircuitSimulationStage(COBRABaseStage):
@@ -24,7 +26,7 @@ class CircuitSimulationStage(COBRABaseStage):
 
         # Preprocess surrogate models (e.g. vector fitting)
         for n in ntwks:
-            out_name = os.path.join(results_dir, n.name if n.name else "cobra_output")
+            out_name = os.path.join(results_dir, n.name or "cobra_output")
             self.simulator.preprocess_ntwk(n, name=out_name)
 
         # Determine which simulation types to run:
@@ -118,7 +120,7 @@ class CircuitSimulationStage(COBRABaseStage):
                 extra_lines.append(f".PRINT HB format=csv {probes}\n")
 
         # Work on a copy of the raw lines.
-        lines = parser._lines[:]
+        lines = parser.lines
 
         # Remove all existing top-level simulation directives and their
         # companion lines (.PRINT, .options hbint, etc.) that belong to
@@ -146,14 +148,14 @@ class CircuitSimulationStage(COBRABaseStage):
 
         # Insert new directive(s) before the top-level .END line.
         end_idx = next(
-            (i for i, l in enumerate(pruned)
-             if l.strip().upper() == ".END"),
+            (i for i, line in enumerate(pruned)
+             if line.strip().upper() == ".END"),
             len(pruned),
         )
         for extra in reversed(extra_lines):
             pruned.insert(end_idx, extra)
         pruned.insert(end_idx, new_directive)
 
-        parser._lines = pruned
+        parser.lines = pruned
         parser.save(dest)
         return dest

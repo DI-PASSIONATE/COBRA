@@ -5,10 +5,12 @@ import importlib.util
 import inspect
 import pkgutil
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cobra.configuration.configuration import ConfigurationError, GeometryConfig
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
 def _base_geometry_class() -> type:
