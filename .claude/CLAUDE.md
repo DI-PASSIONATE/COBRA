@@ -27,15 +27,63 @@ simulation, optimization, GUI, and orchestration logic in their existing modules
   (`cobra-reviewing-agent`), or to run independent changes in parallel. A single
   edit you can already make is cheaper to do directly than to delegate — a
   subagent starts cold and re-derives context you already have.
-- Read nearby code, tests, and relevant docs before changing behavior.
-- Read code cleanly: start at the behavior's owner, follow the local call path,
-  and read only enough surrounding code to form a clear hypothesis before
-  editing.
-- Do not invent simulator behavior. Check Xyce and netlist formats first.
-- Keep Xyce, ONNX, Touchstone, Palace, ORCA, Spack, and GUI integrations
-  optional where possible, with clear errors when unavailable.
-- Do not commit generated results, models, logs, caches, or virtual environments.
-- Do not alter unrelated user changes in a dirty worktree.
+
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
 ## Python
 
@@ -53,13 +101,8 @@ simulation, optimization, GUI, and orchestration logic in their existing modules
   lifecycle; do not add parallel utility APIs without a clear need.
 - Keep classes cohesive, dependencies explicit, and public methods small enough
   to test. Avoid hidden global state, mutable defaults, and one-letter names.
-- Prefer existing abstractions: `RunConfiguration`, `DesignGoal`,
-  `OptimizationProperty`, `BaseSimulator`, `BaseNetlistParser`, and stage classes.
 - Validate inputs at boundaries and use existing errors, especially
   `ConfigurationError`, with actionable messages.
-- Keep serialization JSON-safe. Preserve enum values, relative paths, and schema
-  version checks.
-- Avoid mutable defaults and hidden global state.
 - After implementing or modifying Python files, run `ruff check path/to/file.py`
   and `ty check path/to/file.py`. Fix relevant findings before finishing.
 
@@ -75,8 +118,6 @@ simulation, optimization, GUI, and orchestration logic in their existing modules
 
 ## Simulation and Optimization
 
-- Keep stage order clear: optimizer -> netlist update -> surrogate -> circuit
-  simulation -> goal checking.
 - Xyce may be provided by Spack. In that case, load it before running COBRA:
 
   ```bash
@@ -86,7 +127,6 @@ simulation, optimization, GUI, and orchestration logic in their existing modules
   Keep this setup in the same shell as the COBRA command and verify Xyce with
   `command -v Xyce` and `Xyce --version`.
 - Do not run Xyce, Palace, or long Optuna jobs in the foreground.
-- Include analysis type, input path, component, node, or port in errors when known.
 
 ## GUI and Workers
 
