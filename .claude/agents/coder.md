@@ -51,11 +51,15 @@ Stage order: optimizer → netlist update → surrogate → circuit simulation �
 
 ```bash
 .venv/bin/ruff check <changed files> && .venv/bin/ty check <changed files>
+.venv/bin/python -m pytest                                        # full suite
 .venv/bin/cobra parse examples/configs/lna_trafo_hb_config.json   # exits 2 on error
 ```
 
-There is no test suite: import every changed module and run `cobra parse`. Never
-run Xyce, Palace, or Optuna in the foreground — detach and report PID and log.
+The suite in `tests/` covers the netlist parser, config schema, goal/penalty
+math, HB spectrum helpers and the CLI; it needs no display, no Xyce and no
+Palace. Add or extend a test for behavior you change. The GUI is not covered, so
+for `gui/` changes still import the module and exercise it by hand. Never run
+Xyce, Palace, or Optuna in the foreground — detach and report PID and log.
 
 ### Boundaries
 

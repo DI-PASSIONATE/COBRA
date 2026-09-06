@@ -1,0 +1,6 @@
+* Qucs-S YLIN/TSTONEFILE block that must normalise into an X subcircuit call
+.MODEL YLIN_Trafo1_model LIN TSTONEFILE=trafo.s6p
+YLIN Trafo1 n1 0 n2 0 n3 0 YLIN_Trafo1_model
+P1 n1 0 port=1 z0=50 AC 1
+.AC LIN 11 1G 10G
+.END

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobra"
-version = "1.1.0"
+version = "1.5.0"
 description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
 ]
 
 requires-python = ">=3.11"
@@ -58,12 +58,32 @@ orca = [
 [project.scripts]
 cobra = "cobra.__main__:main"
 
-# Linters are development tools, not runtime requirements.  `uv sync` installs
-# this group by default; `uv sync --no-dev` skips it for a runtime-only install.
+# Linters and the test runner are development tools, not runtime requirements.
+# `uv sync` installs this group by default; `uv sync --no-dev` skips it for a
+# runtime-only install.
 [dependency-groups]
 dev = [
     "ruff",
     "ty",
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+xfail_strict = true
+
+[tool.coverage.run]
+source = ["src/cobra"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
 ]
 
 [tool.setuptools]
@@ -74,9 +94,6 @@ where = ["src"]
 
 [tool.setuptools.package-dir]
 cobra = "src/cobra"
-
-[tool.setuptools.package-data]
-"cobra" = ["**/*.simcfg", "**/*.xml"]
 
 [tool.ruff]
 line-length = 100
@@ -147,6 +164,16 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Examples are standalone scripts, not an importable package.
 "examples/*" = ["INP001"]
+# Tests assert, reach into private helpers deliberately, and use fixtures that
+# look like shadowed or unused arguments to the linter.
+"tests/*" = [
+    "S101",    # assert is how pytest works
+    "ARG001",  
+    "ARG002",
+    "PLR6301", 
+    "SLF001",  # pinning private behaviour (_tell, _parse_target) is the point
+    "TC003",   
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

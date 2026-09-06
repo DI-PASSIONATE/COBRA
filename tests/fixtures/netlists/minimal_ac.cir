@@ -1,0 +1,17 @@
+* Minimal 2-port AC netlist used by the COBRA test suite
+.SUBCKT lowpass lp_in lp_out
+RLP lp_in lp_out 50
+CLP lp_out 0 1p
+.ENDS
+P1 in 0 port=1 z0=50 AC 1
+P2 out 0 port=2 z0=50
+R1 in n1 50
+C1 n1 0 1p
+L1 n1 out 2n
+V1 vdd 0 1.8
+X1 in out surrogate_model
+XF1 n1 0 lowpass
+.AC LIN 101 1G 10G
+.LIN format=touchstone sparcalc=1
+.PRINT ac format=csv v(out)
+.END
