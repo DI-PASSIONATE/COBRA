@@ -105,6 +105,23 @@ context = cobra.run(
 )
 ```
 
+## Logging
+
+COBRA reports progress and problems through the standard `logging` module, on
+the `cobra` logger tree, and installs no handlers of its own. A script sees
+nothing until it configures logging, either with `logging.basicConfig()` or with
+the same setup the CLI uses:
+
+```python
+from cobra.console import configure_logging
+
+configure_logging()                              # info level, on stderr
+configure_logging(verbose=1, log_file="run.log") # debug, plus a log file
+```
+
+Because it is ordinary `logging`, an embedding application can route COBRA's
+output anywhere by adding its own handler to `logging.getLogger("cobra")`.
+
 ## Optional Fine-Tuning
 
 You can configure optional EM fine-tuning by providing Palace command and ORCA geometry. See **Advanced -> Fine-Tuning**.

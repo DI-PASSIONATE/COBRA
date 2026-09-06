@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import re
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import (
@@ -11,6 +12,8 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import (
     SimulationDirective,
 )
 from cobra.spice_sim.simulation_type import SimulationType
+
+logger = logging.getLogger(__name__)
 
 
 class XyceNetlistParser(BaseNetlistParser):
@@ -191,11 +194,11 @@ class XyceNetlistParser(BaseNetlistParser):
                 if instance_name in self._elements:
                     self.set_param(instance_name, param_key, str(value))
                 else:
-                    print(f"Warning: Instance '{instance_name}' not found in netlist elements.")
+                    logger.warning("Instance '%s' not found in netlist elements.", instance_name)
             elif name in self._elements:
                 self.set_value(name, str(value))
             else:
-                print(f"Warning: Parameter '{name}' not found in netlist elements.")
+                logger.warning("Parameter '%s' not found in netlist elements.", name)
 
     # -------------------------------------------------------------------------
     # Parsing entry point

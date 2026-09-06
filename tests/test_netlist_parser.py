@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -296,13 +297,14 @@ def test_update_parameters_handles_both_conventions_at_once(editable_netlist):
     assert parser.get_element("X1").params["width"] == "12.5"
 
 
-def test_update_parameters_warns_but_continues_on_unknown_names(editable_netlist, capsys):
+def test_update_parameters_warns_but_continues_on_unknown_names(editable_netlist, caplog):
     parser = editable_netlist("minimal_ac")
-    parser.update_parameters({"DOES_NOT_EXIST": 1.0, "NOPE:key": 2.0, "R1": 33.0})
+    with caplog.at_level(logging.WARNING, logger="cobra"):
+        parser.update_parameters({"DOES_NOT_EXIST": 1.0, "NOPE:key": 2.0, "R1": 33.0})
 
-    out = capsys.readouterr().out
-    assert "DOES_NOT_EXIST" in out
-    assert "NOPE" in out
+    warnings = caplog.text
+    assert "DOES_NOT_EXIST" in warnings
+    assert "NOPE" in warnings
     assert parser.get_element("R1").value == "33.0"
 
 

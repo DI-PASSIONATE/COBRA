@@ -12,8 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and goal collections, simulation-type resolution, optimizer aggregation, HB
   spectrum handling, config inspection, and the `cobra` CLI, run in CI against
   Python 3.11, 3.12 and 3.13.
+- New logging-based CLI with new commands similar to other modern command-line tools (`-v`/`--verbose` (`-vv`
+  also includes third-party libraries), `-q`/`--quiet`, `--log-file PATH`, and
+  `--no-color` and `cobra doctor`, reporting the requirement status)
+- `cobra gui` as an explicit command for the default no-command behaviour, and
+  `cobra --version`.
+- `docs/user-guide/cli.md`, a reference for the commands, options, exit codes,
+  and the stdout/stderr split.
 
 ### Changed
+- Library code logs instead of printing: every `print()` outside the CLI is now a
+  `logging` call on the `cobra` logger tree, so callers control verbosity and can
+  capture output. `COBRA.print_time()` became `COBRA.log_stage_times()` and is
+  called at the end of a run.
+- `cobra run` prints a header describing the run before it starts and a summary
+  with the status, wall time, and results directory when it finishes.
+- Progress bars follow the log level: `--quiet` hides them.
 - The IHP PDK is imported dynamically in `EMFineTuningStage`, keeping the PDK
   optional like the other integrations.
 

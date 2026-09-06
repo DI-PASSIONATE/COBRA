@@ -193,6 +193,19 @@ references (missing model mappings, unresolvable optimization parameters,
 unavailable HB nodes, missing include or library files). It exits with `2` when
 it finds an error that would stop a run.
 
+Check the environment before a run, and turn up the detail when one misbehaves:
+
+```bash
+cobra doctor                                  # packages, Xyce, Palace
+cobra run config.json -v                      # debug output
+cobra run config.json --log-file results/run.log
+```
+
+Requested output goes to stdout and diagnostics to stderr, so reports stay
+pipeable (`cobra parse config.json --json > report.json`). See
+[the CLI reference](docs/user-guide/cli.md) for all commands, options, and exit
+codes.
+
 Relative netlist, model, and custom geometry paths are resolved from the directory
 containing the JSON file. Every GUI or CLI run also archives its exact input as
 `cobra_config.json` inside the timestamped results directory. This input file is

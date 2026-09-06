@@ -1,8 +1,11 @@
+import logging
 import re
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Column name and axis label for each plot_quantity mode
 _QUANTITY_META = {
@@ -152,7 +155,7 @@ class HBAnalysis:
         plt.tight_layout()
         plt.savefig(output_path, dpi=150)
         plt.show()
-        print(f"Plot saved to {output_path}")
+        logger.info("Plot saved to %s", output_path)
 
     # ------------------------------------------------------------------
     # Private parsing infrastructure

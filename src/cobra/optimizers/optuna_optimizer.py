@@ -1,10 +1,13 @@
 import importlib
+import logging
 from typing import Any, ClassVar
 
 import optuna
 
 from cobra.configuration.setting import CobraSetting
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+
+logger = logging.getLogger(__name__)
 
 
 class OptunaOptimizer(BaseOptimizer):
@@ -149,6 +152,11 @@ class OptunaOptimizer(BaseOptimizer):
         )
 
     def initialize(self, num_goals: int):
+        # Optuna installs its own handler and announces every trial; COBRA already
+        # reports progress, so let its chatter follow COBRA's own verbosity.
+        optuna.logging.set_verbosity(
+            optuna.logging.INFO if logger.isEnabledFor(logging.DEBUG) else optuna.logging.WARNING
+        )
         directions = ["minimize"] * num_goals if self.multi_objective else ["minimize"]
         self.study = optuna.create_study(
             directions=directions,

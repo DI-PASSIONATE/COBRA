@@ -22,8 +22,11 @@ stopped.
 cobra run path/to/cobra_config.json
 ```
 
-The command prints iteration progress and the final results directory. Running
-`cobra` without a subcommand continues to open the GUI.
+The command prints a header describing the run, shows iteration progress, and
+ends with a summary naming the results directory. Add `-v` for debug output,
+`-q` for warnings and errors only, or `--log-file PATH` to keep a full debug
+log of the run. Running `cobra` without a subcommand continues to open the GUI.
+See [Command Line](cli.md) for the full command and option reference.
 
 ## Inspect Before Running
 
@@ -69,6 +72,9 @@ Useful options:
 | `--kind {auto,config,netlist}` | Override the automatic file-type detection |
 | `--full` | Print long lists in full instead of truncating them |
 | `--no-model-check` | Skip opening ONNX and Touchstone model files |
+
+The report is written to stdout and diagnostics to stderr, so
+`cobra parse config.json --json > report.json` yields a clean JSON file.
 
 ## Path Rules
 
