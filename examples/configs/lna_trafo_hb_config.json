@@ -62,7 +62,7 @@
     {
       "parameter": "Gain_dB[P1@Out]",
       "frequency_range": "130-130ghz",
-      "min_value": 6.0,
+      "min_value": 5.0,
       "max_value": null,
       "weight": 1.0,
       "kind": "gain_db",
