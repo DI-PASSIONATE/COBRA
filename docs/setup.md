@@ -61,6 +61,34 @@ python examples/main.py
 !!! warning
 	`examples/main.py` requires external tools (including Xyce), valid model files, and compatible netlist inputs.
 
+## Running the Tests
+
+The test suite is a quick way to confirm an installation is sound.
+
+=== "Option A: uv (recommended)"
+
+	```bash
+	uv sync
+	uv run pytest
+	```
+
+=== "Option B: venv + pip"
+
+	```bash
+	pip install -e . pytest pytest-cov
+	pytest
+	```
+
+For a coverage report:
+
+```bash
+uv run pytest --cov
+```
+
+!!! note
+	The GUI is not covered by the suite; verify `cobra` interactively after
+	changing anything under `src/cobra/gui/`.
+
 ## External Tool Notes
 
 ### Xyce

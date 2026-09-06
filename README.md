@@ -111,6 +111,18 @@ pip install -U pip
 pip install -e .
 ```
 
+### Running the tests
+
+The suite covers the netlist parser, the run-configuration schema, the design-goal
+and penalty math, the harmonic-balance spectrum helpers and the CLI. It is headless
+and requires **no display, no Xyce and no Palace**:
+
+```bash
+uv sync          # or: pip install -e . pytest pytest-cov
+uv run pytest    # or: pytest
+uv run pytest --cov          # with a coverage report
+```
+
 ## Running COBRA
 
 COBRA supports three main usage modes.
