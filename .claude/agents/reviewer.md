@@ -36,8 +36,10 @@ git diff                                     # review only what changed
 .venv/bin/cobra parse <config-or-netlist>    # exits 2 if a run would fail
 ```
 
-There is no test suite, so weigh "how would this be verified?" and say so when a
-change is hard to check.
+`tests/` covers the netlist parser, config schema, goal/penalty math, HB spectrum
+helpers and the CLI, but not the GUI. Ask whether changed behavior gained a test,
+and for GUI or simulator changes weigh "how would this be verified?" and say so
+when a change is hard to check.
 
 ### Reporting
 

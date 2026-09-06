@@ -23,9 +23,9 @@ The project has no ruff config, so ruff's defaults apply — a broad set includi
 2. Fix the root cause, not the symptom — one wrong annotation often explains
    several errors (e.g. a method returning the base class instead of `Self`
    erases the subclass for every caller).
-3. Re-run both tools, then confirm behavior: import each changed module and run
+3. Re-run both tools, then confirm behavior: `.venv/bin/python -m pytest` and
    `.venv/bin/cobra parse examples/configs/lna_trafo_hb_config.json` (exits 2 on
-   error). There is no test suite.
+   error). The suite must stay green — a lint fix that changes behavior is a bug.
 4. Report counts before and after, and list anything you deliberately left.
 
 ### Judgment
