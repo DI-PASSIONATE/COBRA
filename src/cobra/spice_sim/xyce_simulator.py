@@ -1,4 +1,5 @@
 import glob
+import logging
 import os
 import re
 import subprocess
@@ -13,6 +14,8 @@ from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 from cobra.spice_sim.vector_fit import vector_fit
+
+logger = logging.getLogger(__name__)
 
 _PRINT_FILE_RE = re.compile(r"\bfile=(\S+)", re.IGNORECASE)
 
@@ -156,8 +159,14 @@ class XyceSimulator(BaseSimulator):
         )
 
         if proc.returncode != 0:
-            print(f"Simulation Failed! Return code: {proc.returncode}")
-            print(proc.stderr)
+            logger.error(
+                "Xyce failed for %s (return code %s) in %s",
+                sim_type,
+                proc.returncode,
+                results_dir,
+            )
+            if proc.stderr:
+                logger.error("Xyce stderr:\n%s", proc.stderr.strip())
             return None
 
         # --- Collect output files --------------------------------------------
@@ -190,7 +199,11 @@ class XyceSimulator(BaseSimulator):
                 found.append(path)
 
         if not found:
-            print(f"Simulation completed but no output files were found for {sim_type} in {results_dir}")
+            logger.error(
+                "Xyce completed but produced no output files for %s in %s",
+                sim_type,
+                results_dir,
+            )
             return None
 
         # --- Load Touchstone output as rf.Network (AC only) ------------------
@@ -213,6 +226,6 @@ class XyceSimulator(BaseSimulator):
                 df = df[pd.to_numeric(df[first_col], errors="coerce").notna()].reset_index(drop=True)
                 dataframes[prn_path] = df.apply(pd.to_numeric, errors="coerce")
             except Exception as exc:  # noqa: BLE001 - one unreadable output file must not abort the run
-                print(f"Warning: could not parse {prn_path}: {exc}")
+                logger.warning("Could not parse simulation output %s: %s", prn_path, exc)
 
         return SimulationResult(output_files=found, network=network, dataframes=dataframes)

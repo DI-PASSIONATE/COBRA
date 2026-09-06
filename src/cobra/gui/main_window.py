@@ -1,4 +1,5 @@
 import inspect
+import logging
 import os
 import re
 from pathlib import Path
@@ -73,6 +74,8 @@ from .worker import OptimizationWorker
 if TYPE_CHECKING:
     import pandas as pd
     from pyqtgraph.GraphicsScene import GraphicsScene
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -897,7 +900,7 @@ class MainWindow(QMainWindow):
 
 
             except Exception as e:  # noqa: BLE001 - one bad goal must not stop the overlay redraw
-                print(f"Error drawing overlay for goal: {e}")
+                logger.warning("Could not draw the overlay for a design goal: %s", e)
 
 
     def _form_row_of(self, widget: QWidget) -> int:
@@ -2181,7 +2184,7 @@ class MainWindow(QMainWindow):
             self.overlay_items = []  # plot.clear() removed prior overlay items
             self.draw_overlays()
         except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
-            print(f"S-parameter plot update failed: {exc}")
+            logger.warning("S-parameter plot update failed: %s", exc)
 
         # 5. Update HB Spectrum Plot
         try:
@@ -2189,7 +2192,7 @@ class MainWindow(QMainWindow):
             if hb_result is not None:
                 self.update_hb_spectrum_plot(hb_result)
         except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
-            print(f"HB spectrum plot update failed: {exc}")
+            logger.warning("HB spectrum plot update failed: %s", exc)
 
     @Slot()
     def on_finished(self):

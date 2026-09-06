@@ -1,4 +1,5 @@
 import json
+import logging
 import shutil
 import time
 from datetime import datetime
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
     import skrf as rf
 
     from cobra.configuration import RunConfiguration
+
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_for_json(obj):
@@ -205,7 +208,7 @@ class COBRA:
             try:
                 netlist_parser.set_model(comp_name, f"{comp_name}_subct")
             except (KeyError, ValueError, NotImplementedError) as e:
-                print(f"Warning: Could not set subcircuit model for {comp_name}: {e}")
+                logger.warning("Could not set the subcircuit model for %s: %s", comp_name, e)
         netlist_parser.save(netlist)
 
         design_goal_checker = DesignGoalChecker(design_goals)
@@ -232,8 +235,22 @@ class COBRA:
             }
         }
 
+        logger.info(
+            "Optimizing %s with %d parameter(s) against %d goal(s), up to %d iterations",
+            original_netlist_path.name,
+            len(optimization_parameters),
+            len(design_goals),
+            max_iterations,
+        )
+        logger.info("Writing results to %s", results_dir)
+
         # Perform optimizer step
-        pbar = tqdm.tqdm(total=context["max_iterations"], desc="COBRA Optimization Progress")
+        show_progress = logger.isEnabledFor(logging.INFO)
+        pbar = tqdm.tqdm(
+            total=context["max_iterations"],
+            desc="COBRA optimization",
+            disable=not show_progress,
+        )
 
         iteration = 0
         while iteration < context["max_iterations"]:
@@ -265,6 +282,14 @@ class COBRA:
 
             t5 = time.time()
 
+            logger.debug(
+                "Iteration %d/%d: goals achieved=%s, parameters=%s",
+                iteration,
+                context["max_iterations"],
+                context["goal_achieved"],
+                params,
+            )
+
             # Log times for each stage
             context["times"]["optimizer"] += t2 - t1
             context["times"]["em_surrogate"] += t3 - t2
@@ -276,7 +301,7 @@ class COBRA:
             if callback:
                 should_continue = callback(context)
                 if should_continue is False:
-                    print("Optimization stopped by callback.")
+                    logger.info("Optimization stopped by the callback at iteration %d", iteration)
                     break
 
             pbar.update(1)
@@ -298,7 +323,7 @@ class COBRA:
         if not context["goal_achieved"]:
             context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, netlist_parser, context)
         else:
-            print(f"Design goals achieved at iteration {context['iteration']}.")
+            logger.info("Design goals achieved at iteration %s", context["iteration"])
 
         # Save the surrogate model's predicted S-parameters to the results directory for the user
         ntwks: list[rf.Network] = context.get("predicted_networks", [])
@@ -317,7 +342,7 @@ class COBRA:
             if callback:
                 should_continue = callback(context)
                 if should_continue is False:
-                    print("Fine Tuning stopped by callback.")
+                    logger.info("EM fine-tuning stopped by the callback before it started")
                     return context
 
             context = self.fine_tuning(context, callback)
@@ -327,12 +352,13 @@ class COBRA:
         with open(context_file, "w") as f:
             json.dump(_sanitize_for_json(context), f, indent=4, default=str)
 
-        print(f"\nAll results saved to: {results_dir}")
+        self.log_stage_times(context)
+        logger.info("All results saved to %s", results_dir)
 
         return context
 
     def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, netlist_parser, context):
-        print("Maximum iterations reached without achieving design goals.")
+        logger.info("Maximum iterations reached without achieving the design goals")
 
             # If not MOO, retrieve best parameters and update context to reflect them
         if not self.optimizer_stage.optimizer.multi_objective:
@@ -359,7 +385,7 @@ class COBRA:
             netlist_parser.save(netlist)
 
             # Rerun simulation to update context with best result
-            print("Re-simulating with best parameters...")
+            logger.info("Re-simulating with the best parameters found")
             if self.em_surrogate_stage is not None:
                 context = self.em_surrogate_stage.run(context)
             context = self.circuit_simulation_stage.run(context)
@@ -403,7 +429,11 @@ class COBRA:
         if fine_tuning_optimizer_stage is not self.optimizer_stage:
             fine_tuning_optimizer_stage.optimizer.initialize(len(design_goal_checker.design_goals))
 
-        for iteration in tqdm.tqdm(range(self.fine_tuning_iterations), desc="COBRA EM Fine-Tuning Progress"):
+        for iteration in tqdm.tqdm(
+            range(self.fine_tuning_iterations),
+            desc="COBRA EM fine-tuning",
+            disable=not logger.isEnabledFor(logging.INFO),
+        ):
             context["iteration"] = iteration + 1
             context["fine_tuning_active"] = True
             context["fine_tuning_iteration"] = iteration + 1
@@ -444,36 +474,50 @@ class COBRA:
             if callback:
                 should_continue = callback(context)
                 if should_continue is False:
-                    print("Fine Tuning stopped by callback.")
+                    logger.info("EM fine-tuning stopped by the callback")
                     break
 
             # If design goals are achieved, break the loop
             if context["goal_achieved"]:
-                print(f"Design goals achieved after EM fine-tuning at iteration {iteration}.")
+                logger.info("Design goals achieved after EM fine-tuning iteration %d", iteration + 1)
                 break
-            print(f"Design goals not achieved after EM fine-tuning at iteration {iteration}. Continuing optimization...")
+            logger.info(
+                "Design goals not achieved after EM fine-tuning iteration %d; continuing",
+                iteration + 1,
+            )
 
             fine_tuning_optimizer_stage.tell(context)
             context = fine_tuning_optimizer_stage.run(context)
 
         if not context["goal_achieved"]:
-            print("EM fine-tuning completed without achieving design goals. Returning best parameters found.")
+            logger.info(
+                "EM fine-tuning finished without achieving the design goals; "
+                "returning the best parameters found"
+            )
         else:
-            print("Design goals achieved and geometry verified with EM simulation. Returning optimized parameters.")
+            logger.info(
+                "Design goals achieved and the geometry was verified with an EM simulation"
+            )
 
         return context
 
-    def print_time(self, context: dict):
-        """
-        Prints the percentage of time spent in each stage of the optimization process.
-        """
-        total_time = context["times"]["total_time"]
-        if total_time == 0:
+    def log_stage_times(self, context: dict) -> None:
+        """Log how the run's wall time was distributed over the stages."""
+        times = context.get("times") or {}
+        total_time = times.get("total_time", 0.0)
+        if not total_time:
             return
 
-        print(f"Time spent in Optimizer: {context['times']['optimizer'] / total_time * 100:.2f}%")
-        print(f"Time spent in EM Surrogate: {context['times']['em_surrogate'] / total_time * 100:.2f}%")
-        print(f"Time spent in Circuit Simulation: {context['times']['circuit_simulation'] / total_time * 100:.2f}%")
-        print(f"Time spent in Design Goal Checking: {context['times']['design_goal_checking'] / total_time * 100:.2f}%")
+        stages = [
+            ("optimizer", "optimizer"),
+            ("surrogate", "em_surrogate"),
+            ("circuit simulation", "circuit_simulation"),
+            ("goal checking", "design_goal_checking"),
+        ]
         if self.em_fine_tuning_stage is not None:
-            print(f"Time spent in EM Fine-Tuning: {context['times']['em_fine_tuning'] / total_time * 100:.2f}%")
+            stages.append(("EM fine-tuning", "em_fine_tuning"))
+
+        breakdown = ", ".join(
+            f"{label} {times.get(key, 0.0) / total_time * 100:.1f}%" for label, key in stages
+        )
+        logger.info("Stage times over %.1f s: %s", total_time, breakdown)

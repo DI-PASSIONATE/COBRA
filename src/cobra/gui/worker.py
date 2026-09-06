@@ -1,8 +1,11 @@
+import logging
 import threading
 
 from PySide6.QtCore import QThread, Signal
 
 from cobra.configuration.config_runner import ConfiguredRun
+
+logger = logging.getLogger(__name__)
 
 
 class OptimizationWorker(QThread):
@@ -56,9 +59,8 @@ class OptimizationWorker(QThread):
 
             self.finished.emit()
 
-        except Exception as e:  # noqa: BLE001 - worker thread boundary: failures are forwarded via the error signal
-            import traceback
-            traceback.print_exc()
+        except Exception as e:  # worker thread boundary: failures are forwarded via the error signal
+            logger.exception("The optimization run failed")
             self.error.emit(str(e))
 
     def stop(self):

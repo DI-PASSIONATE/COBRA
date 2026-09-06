@@ -1,9 +1,12 @@
+import logging
 import os
 import re
 import warnings
 
 import skrf
 from skrf.vectorFitting import VectorFitting
+
+logger = logging.getLogger(__name__)
 
 # TODO: make configurable, find better values, or implement some sort of dynamic strategy
 _MAX_MATRIX_OPS = 1_000_000
@@ -46,25 +49,38 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
     Returns the (possibly re-fitted) VectorFitting object.
     """
     n_poles = _pole_count(vf)
-    print(f"  Passive before enforcement: {vf.is_passive()}  (poles={n_poles}, RMS={vf.get_rms_error():.4e})")
+    logger.debug(
+        "Vector fit: passive before enforcement=%s (poles=%d, RMS=%.4e)",
+        vf.is_passive(),
+        n_poles,
+        vf.get_rms_error(),
+    )
 
     if vf.is_passive():
         return vf
 
     # Step 1 – cheap init attempt
     recommended = _try_enforce(vf, n_samples=_calc_n_samples(n_poles, init=True))
-    print(f"  After init enforcement: Passive={vf.is_passive()}, RMS={vf.get_rms_error():.4e}")
+    logger.debug(
+        "Vector fit: after init enforcement passive=%s, RMS=%.4e",
+        vf.is_passive(),
+        vf.get_rms_error(),
+    )
 
     if not vf.is_passive():
         # Step 2 – use skrf recommendation or full budget
         n_full = _calc_n_samples(n_poles, init=False)
         n_next = min(recommended, n_full) if recommended else n_full
         _try_enforce(vf, n_samples=n_next)
-        print(f"  After full enforcement:  Passive={vf.is_passive()}, RMS={vf.get_rms_error():.4e}")
+        logger.debug(
+            "Vector fit: after full enforcement passive=%s, RMS=%.4e",
+            vf.is_passive(),
+            vf.get_rms_error(),
+        )
 
     if not vf.is_passive():
         # Step 3 – reduce poles iteratively
-        print(f"  Reducing poles iteratively (start={n_poles}, step=-2)...")
+        logger.debug("Vector fit: reducing poles iteratively (start=%d, step=-2)", n_poles)
         n_poles_iter = n_poles - 2
         found = False
 
@@ -80,7 +96,9 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
 
             rms = vf_iter.get_rms_error()
             passive_now = vf_iter.is_passive()
-            print(f"    Poles={n_poles_iter}, RMS={rms:.4e}, Passive={passive_now}")
+            logger.debug(
+                "Vector fit: poles=%d, RMS=%.4e, passive=%s", n_poles_iter, rms, passive_now
+            )
 
             if passive_now:
                 vf = vf_iter
@@ -90,9 +108,16 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
             n_poles_iter -= 2
 
         if not found:
-            print("  Could not achieve passivity — using best auto-fit result.")
+            logger.warning(
+                "Vector fit could not achieve passivity; using the best auto-fit result"
+            )
 
-    print(f"  Final: Passive={vf.is_passive()}, poles={_pole_count(vf)}, RMS={vf.get_rms_error():.4e}")
+    logger.info(
+        "Vector fit: passive=%s, poles=%d, RMS=%.4e",
+        vf.is_passive(),
+        _pole_count(vf),
+        vf.get_rms_error(),
+    )
     return vf
 
 

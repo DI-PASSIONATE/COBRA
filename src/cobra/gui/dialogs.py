@@ -1,4 +1,5 @@
 import json
+import logging
 
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
@@ -16,6 +17,8 @@ from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationTy
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 
 from .help_texts import tooltip
+
+logger = logging.getLogger(__name__)
 
 
 class DesignGoalDialog(QDialog):
@@ -337,7 +340,7 @@ class OptimizationParamDialog(QDialog):
                     if "max" in params:
                         self.max_spin.setValue(float(params["max"]))
             except (json.JSONDecodeError, ValueError, TypeError) as e:
-                print(f"Error parsing ONNX metadata: {e}")
+                logger.warning("Could not read ONNX metadata: %s", e)
 
     def _refresh_link_targets(self, current_name):
         current_name = (current_name or "").strip()

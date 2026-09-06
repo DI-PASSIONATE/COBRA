@@ -12,8 +12,6 @@ information can be rendered as text for humans or emitted as JSON for agents.
 
 from __future__ import annotations
 
-import contextlib
-import io
 import json
 import math
 import re
@@ -981,9 +979,7 @@ def _check_design_goals(
         entry.directive_in_netlist = simulation_type in directives
         if parser is not None:
             try:
-                # build_design_goals prints a line per goal; the report renders its own.
-                with contextlib.redirect_stdout(io.StringIO()):
-                    build_design_goals([goal], parser)
+                build_design_goals([goal], parser)
             except ConfigurationError as exc:
                 report.issues.append(Issue(Severity.ERROR, location, str(exc)))
             else:
