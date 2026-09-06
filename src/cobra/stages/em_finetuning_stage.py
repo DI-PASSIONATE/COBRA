@@ -20,7 +20,7 @@ def _mesh_gds_and_run_palace(
     palace_executable: str,
 ) -> None:
     """Run gmsh-dependent model creation and Palace simulation in a child process."""
-    from ihp import PDK
+    PDK = importlib.import_module("ihp").PDK
 
     create_palace_model_from_gds = importlib.import_module(
         "orca.simulation.gds_converter"
@@ -63,7 +63,7 @@ class EMFineTuningStage(COBRABaseStage):
         Creates a GDS file based on the current parameters, meshes it.
         If comp_name is provided, only parameters for that component are forwarded.
         """
-        from ihp import PDK
+        PDK = importlib.import_module("ihp").PDK
         BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
 
         PDK.activate()
