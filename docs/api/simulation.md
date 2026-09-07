@@ -12,6 +12,13 @@ Responsibilities:
 
 One simulation is run per analysis type required by the goals. Results are returned as a `SimulationResult` holding an S-parameter `Network` for `.AC` runs and, for `.HB` runs, the frequency-domain table (`.HB.FD.csv` or `.HB.FD.prn`) as a DataFrame.
 
+`run_simulation` returns `None` when the simulation itself failed — a non-zero
+Xyce exit code or no output files. `CircuitSimulationStage` records no result
+for that analysis type, and `DesignGoalChecker` gives every goal that needed it
+`FAILED_SIMULATION_PENALTY`, so the optimizer avoids those parameters. A
+simulator that cannot be started at all (Xyce missing or not executable) raises
+`SimulatorError` instead and aborts the run.
+
 ## Netlist Parsing
 
 `XyceNetlistParser` handles netlist ingestion and controlled updates.

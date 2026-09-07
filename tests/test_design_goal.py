@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker, DesignParameter
+from cobra.optimizers.design_goal import (
+    FAILED_SIMULATION_PENALTY,
+    DesignGoal,
+    DesignGoalChecker,
+    DesignParameter,
+)
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
@@ -222,17 +227,10 @@ def test_check_goals_marks_failure_when_any_penalty_is_positive():
     assert context["goal_achieved"] is False
 
 
-def test_goals_without_matching_results_are_skipped():
-    """Only simulation types actually present in the results are evaluated."""
-    checker = DesignGoalChecker([_goal(50.0, max_value=10.0, sim_type=SimulationType.HB)])
-    assert checker.loss({SimulationType.AC: SimulationResult()}) == []
+def test_goals_without_matching_results_are_penalised():
+    """A goal whose simulation produced no result is a failure, not a skip.
 
-
-def test_check_goals_with_no_results_reports_success_vacuously():
-    """``all([])`` is True — an empty result set currently counts as achieved.
-
-    Pinned as current behaviour; it is the reason a silently failed simulation
-    can look like a satisfied run (see the backlog item on Xyce error handling).
+    See ``tests/test_simulation_failure.py`` for the rest of this behaviour.
     """
-    checker = DesignGoalChecker([_goal(50.0, max_value=10.0, sim_type=SimulationType.AC)])
-    assert checker.check_goals({"simulation_results": {}})["goal_achieved"] is True
+    checker = DesignGoalChecker([_goal(50.0, max_value=10.0, sim_type=SimulationType.HB)])
+    assert checker.loss({SimulationType.AC: SimulationResult()}) == [FAILED_SIMULATION_PENALTY]

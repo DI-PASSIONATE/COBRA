@@ -1,13 +1,16 @@
+import logging
 import os
 from typing import TYPE_CHECKING
 
-from cobra.spice_sim.base_simulator import BaseSimulator
+from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
 
 if TYPE_CHECKING:
     import skrf as rf
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitSimulationStage(COBRABaseStage):
@@ -46,6 +49,11 @@ class CircuitSimulationStage(COBRABaseStage):
 
         netlist_path: str = context["netlist"]
 
+        # Start from a clean slate: a result kept from the previous iteration would
+        # otherwise be attributed to the current parameters when a simulation fails.
+        simulation_results: dict[SimulationType, SimulationResult] = {}
+        failed_types: list[SimulationType] = []
+
         # Run each required simulation type (e.g. AC, HB, TRAN) and store the results in context.
         for sim_type in required_types:
             # Adjust the netlist to ensure it contains a directive for this simulation type.
@@ -57,8 +65,19 @@ class CircuitSimulationStage(COBRABaseStage):
             sim_result = self.simulator.run_simulation(prepared)
 
             # Store the results in context for later stages to use.
-            if sim_result is not None:
-                context.setdefault("simulation_results", {})[sim_type] = sim_result
+            if sim_result is None:
+                failed_types.append(sim_type)
+            else:
+                simulation_results[sim_type] = sim_result
+
+        context["simulation_results"] = simulation_results
+
+        if failed_types:
+            logger.warning(
+                "No %s result for these parameters; the design goals that need it "
+                "are penalised so the optimizer avoids them",
+                ", ".join(t.name for t in failed_types),
+            )
 
         return context
 

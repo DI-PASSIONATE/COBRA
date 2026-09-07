@@ -9,7 +9,11 @@ import pandas as pd
 import skrf as rf
 
 from cobra.configuration.setting import CobraSetting
-from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
+from cobra.spice_sim.base_simulator import (
+    BaseSimulator,
+    SimulationResult,
+    SimulatorError,
+)
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
@@ -154,19 +158,30 @@ class XyceSimulator(BaseSimulator):
         parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
         command = [*parallel_command, self.xyce_command, netlist_base]
         # check=False: a non-zero return code is reported below, not raised.
-        proc = subprocess.run(
-            command, capture_output=True, text=True, cwd=results_dir, check=False
-        )
+        try:
+            proc = subprocess.run(
+                command, capture_output=True, text=True, cwd=results_dir, check=False
+            )
+        except OSError as exc:
+            # The executable is missing or cannot be started: no choice of design
+            # parameters can fix this, so abort instead of penalising the trial.
+            raise SimulatorError(
+                f"Could not run '{' '.join(command)}': {exc}. "
+                "Check that Xyce is installed and on PATH (or set the xyce_command "
+                "setting to its absolute path); run `cobra doctor` to inspect the environment."
+            ) from exc
 
         if proc.returncode != 0:
-            logger.error(
+            # A convergence failure is a property of the parameters, not of the setup:
+            # report it and let the caller penalise this trial.
+            logger.warning(
                 "Xyce failed for %s (return code %s) in %s",
                 sim_type,
                 proc.returncode,
                 results_dir,
             )
             if proc.stderr:
-                logger.error("Xyce stderr:\n%s", proc.stderr.strip())
+                logger.warning("Xyce stderr:\n%s", proc.stderr.strip())
             return None
 
         # --- Collect output files --------------------------------------------
@@ -199,7 +214,7 @@ class XyceSimulator(BaseSimulator):
                 found.append(path)
 
         if not found:
-            logger.error(
+            logger.warning(
                 "Xyce completed but produced no output files for %s in %s",
                 sim_type,
                 results_dir,
