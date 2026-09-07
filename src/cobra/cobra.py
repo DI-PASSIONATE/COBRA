@@ -186,7 +186,7 @@ class COBRA:
         # Create results folder with timestamp and name
         if results_name is None:
             results_name = Path(netlist).stem
-        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H:%M:%S")
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S")
         results_dir = Path("results") / f"{timestamp}_{results_name}"
         results_dir.mkdir(parents=True, exist_ok=True)
 
