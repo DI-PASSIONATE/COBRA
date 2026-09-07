@@ -569,6 +569,7 @@ def inspect_configuration(path: str | Path, *, check_models: bool = True) -> Con
     report.fine_tuning = {
         "enabled": configuration.fine_tuning.enabled,
         "palace_command": configuration.fine_tuning.palace_command,
+        "palace_processes": configuration.fine_tuning.palace_processes,
         "iterations": configuration.fine_tuning.iterations,
         "optimizer": configuration.fine_tuning.optimizer,
     }
@@ -1434,6 +1435,7 @@ def render_configuration_report(report: ConfigurationReport, *, full: bool = Fal
         _heading(lines, "Fine-tuning")
         _field(lines, "enabled", report.fine_tuning.get("enabled"))
         _field(lines, "palace command", report.fine_tuning.get("palace_command"))
+        _field(lines, "palace processes", report.fine_tuning.get("palace_processes"))
         _field(lines, "iterations", report.fine_tuning.get("iterations"))
         _field(lines, "optimizer", report.fine_tuning.get("optimizer"))
         _entries(

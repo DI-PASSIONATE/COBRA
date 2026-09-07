@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 # COBRA imports
 from cobra.cobra import COBRA
 from cobra.configuration import (
+    DEFAULT_PALACE_PROCESSES,
     BackendConfig,
     ConfigurationError,
     DesignGoalConfig,
@@ -265,6 +266,13 @@ class MainWindow(QMainWindow):
         self.palace_edit.setToolTip(_cobra_tips.get("palace_fine_tuning_command", ""))
         self.config_form_layout.addRow(self.palace_label, self.palace_edit)
 
+        self.palace_procs_label = QLabel("Palace Processes:")
+        self.palace_procs_spin = QSpinBox()
+        self.palace_procs_spin.setRange(1, 4096)
+        self.palace_procs_spin.setValue(DEFAULT_PALACE_PROCESSES)
+        self.palace_procs_spin.setToolTip(_cobra_tips.get("palace_fine_tuning_processes", ""))
+        self.config_form_layout.addRow(self.palace_procs_label, self.palace_procs_spin)
+
         self.ft_iter_label = QLabel("Finetuning Iterations:")
         self.ft_iter_spin = QSpinBox()
         self.ft_iter_spin.setRange(1, 100)
@@ -289,6 +297,8 @@ class MainWindow(QMainWindow):
         # Disable fine-tuning fields by default
         self.palace_label.setVisible(False)
         self.palace_edit.setVisible(False)
+        self.palace_procs_label.setVisible(False)
+        self.palace_procs_spin.setVisible(False)
         self.ft_iter_label.setVisible(False)
         self.ft_iter_spin.setVisible(False)
         self.ft_optimizer_label.setVisible(False)
@@ -1068,6 +1078,8 @@ class MainWindow(QMainWindow):
     def on_finetune_toggled(self, checked):
         self.palace_label.setVisible(checked)
         self.palace_edit.setVisible(checked)
+        self.palace_procs_label.setVisible(checked)
+        self.palace_procs_spin.setVisible(checked)
         self.ft_iter_label.setVisible(checked)
         self.ft_iter_spin.setVisible(checked)
         self.ft_optimizer_label.setVisible(checked)
@@ -1221,6 +1233,7 @@ class MainWindow(QMainWindow):
             fine_tuning=FineTuningConfig(
                 enabled=self.finetune_cb.isChecked(),
                 palace_command=self.palace_edit.text().strip() or "palace",
+                palace_processes=self.palace_procs_spin.value(),
                 iterations=self.ft_iter_spin.value(),
                 optimizer=self.ft_optimizer_combo.currentData(),
                 geometries=geometries,
@@ -1312,6 +1325,7 @@ class MainWindow(QMainWindow):
         fine_tuning = config.fine_tuning
         self.finetune_cb.setChecked(fine_tuning.enabled)
         self.palace_edit.setText(fine_tuning.palace_command)
+        self.palace_procs_spin.setValue(fine_tuning.palace_processes)
         self.ft_iter_spin.setValue(fine_tuning.iterations)
         self._set_widget_value(self.ft_optimizer_combo, fine_tuning.optimizer)
         for component, geometry in fine_tuning.geometries.items():

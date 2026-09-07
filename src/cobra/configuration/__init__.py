@@ -5,6 +5,7 @@
 # which in turn imports ``cobra.configuration.setting``.  Import it explicitly via
 # ``from cobra.configuration.config_runner import ...`` instead.
 from cobra.configuration.configuration import (
+    DEFAULT_PALACE_PROCESSES,
     BackendConfig,
     ConfigurationError,
     DesignGoalConfig,
@@ -22,6 +23,7 @@ from cobra.configuration.geometry_loader import (
 from cobra.configuration.setting import CobraSetting
 
 __all__ = [
+    "DEFAULT_PALACE_PROCESSES",
     "BackendConfig",
     "CobraSetting",
     "ConfigurationError",

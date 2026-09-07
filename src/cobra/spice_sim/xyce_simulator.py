@@ -8,6 +8,7 @@ from typing import ClassVar
 import pandas as pd
 import skrf as rf
 
+from cobra.configuration.configuration import ConfigurationError
 from cobra.configuration.setting import CobraSetting
 from cobra.spice_sim.base_simulator import (
     BaseSimulator,
@@ -20,6 +21,9 @@ from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetada
 from cobra.spice_sim.vector_fit import vector_fit
 
 logger = logging.getLogger(__name__)
+
+#: Default MPI rank count for parallel Xyce runs: one per available core.
+DEFAULT_XYCE_PROCESSES: int = os.cpu_count() or 1
 
 _PRINT_FILE_RE = re.compile(r"\bfile=(\S+)", re.IGNORECASE)
 
@@ -111,9 +115,19 @@ class XyceSimulator(BaseSimulator):
             dtype=bool,
             default=False,
             description=(
-                "Run Xyce in parallel using MPI (mpirun -np 8).\n"
+                "Run Xyce in parallel using MPI (mpirun).\n"
                 "Requires an MPI-enabled Xyce build and mpirun on PATH.\n"
                 "WARNING: Usually a lot slower than single-core Xyce for small and medium-sized circuits."
+            ),
+        ),
+        CobraSetting(
+            name="parallel_xyce_processes",
+            dtype=int,
+            default=DEFAULT_XYCE_PROCESSES,
+            description=(
+                "Number of MPI ranks used when parallel_xyce is enabled (mpirun -np N).\n"
+                "Defaults to the number of cores available on this machine.\n"
+                "Requesting more ranks than the machine has slots makes mpirun fail."
             ),
         ),
         CobraSetting(
@@ -128,10 +142,23 @@ class XyceSimulator(BaseSimulator):
         ),
     ]
 
-    def __init__(self, xyce_command: str = "Xyce", parallel_xyce: bool = False, enforce_passivity: bool = False):
+    def __init__(
+        self,
+        xyce_command: str = "Xyce",
+        parallel_xyce: bool = False,
+        enforce_passivity: bool = False,
+        parallel_xyce_processes: int = DEFAULT_XYCE_PROCESSES,
+    ):
+        if isinstance(parallel_xyce_processes, bool) or not isinstance(parallel_xyce_processes, int):
+            raise ConfigurationError("parallel_xyce_processes must be an integer")
+        if parallel_xyce_processes < 1:
+            raise ConfigurationError(
+                f"parallel_xyce_processes must be at least 1, got {parallel_xyce_processes}"
+            )
         self.xyce_command = xyce_command
         self.parallel = parallel_xyce
         self.enforce_passivity = enforce_passivity
+        self.parallel_processes = parallel_xyce_processes
 
     def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
@@ -155,7 +182,9 @@ class XyceSimulator(BaseSimulator):
                     custom_print_files.append(os.path.join(results_dir, m.group(1)))
 
         # --- Run Xyce --------------------------------------------------------
-        parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
+        parallel_command = (
+            ["mpirun", "-np", str(self.parallel_processes)] if self.parallel else []
+        )
         command = [*parallel_command, self.xyce_command, netlist_base]
         # check=False: a non-zero return code is reported below, not raised.
         try:

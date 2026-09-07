@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 import tqdm
 
+from cobra.configuration.configuration import DEFAULT_PALACE_PROCESSES
 from cobra.configuration.setting import CobraSetting
 from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import (
@@ -85,6 +86,15 @@ class COBRA:
             ),
         ),
         CobraSetting(
+            name="palace_fine_tuning_processes",
+            dtype=int,
+            default=DEFAULT_PALACE_PROCESSES,
+            description=(
+                "Number of MPI ranks Palace uses per EM fine-tuning simulation.\n"
+                "Defaults to the number of cores available on this machine."
+            ),
+        ),
+        CobraSetting(
             name="palace_fine_tuning_command",
             dtype=str,
             default="palace",
@@ -102,6 +112,7 @@ class COBRA:
         optimizer: BaseOptimizer | None = None,
         circuit_simulator: BaseSimulator | None = None,
         palace_fine_tuning_command: str | None = None,
+        palace_fine_tuning_processes: int = DEFAULT_PALACE_PROCESSES,
         fine_tuning_iterations: int = 3,
         fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
     ):
@@ -137,7 +148,11 @@ class COBRA:
         self.circuit_simulation_stage = CircuitSimulationStage(
             circuit_simulator if circuit_simulator is not None else XyceSimulator()
         )
-        self.em_fine_tuning_stage = EMFineTuningStage(palace_fine_tuning_command) if palace_fine_tuning_command else None
+        self.em_fine_tuning_stage = (
+            EMFineTuningStage(palace_fine_tuning_command, palace_fine_tuning_processes)
+            if palace_fine_tuning_command
+            else None
+        )
         self.fine_tuning_iterations = fine_tuning_iterations
         self.fine_tuning_optimizer = fine_tuning_optimizer
 

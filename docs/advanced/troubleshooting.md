@@ -55,7 +55,9 @@ no choice of parameters can fix it:
 - Verify `Xyce` is installed and in `PATH` (`cobra doctor` reports this).
 - Or set the simulator's `xyce_command` setting to the absolute path of the
   executable.
-- With `parallel_xyce` enabled, `mpirun` must be on `PATH` too.
+- With `parallel_xyce` enabled, `mpirun` must be on `PATH` too. The rank count
+  comes from the `parallel_xyce_processes` setting (default: the machine's core
+  count); `mpirun` fails when it exceeds the available slots.
 
 ## Component Mapping Errors
 

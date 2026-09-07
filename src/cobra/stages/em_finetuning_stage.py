@@ -6,6 +6,10 @@ from typing import Any, cast
 
 import skrf as rf
 
+from cobra.configuration.configuration import (
+    DEFAULT_PALACE_PROCESSES,
+    ConfigurationError,
+)
 from cobra.stages.base_stage import COBRABaseStage
 
 
@@ -18,6 +22,7 @@ def _mesh_gds_and_run_palace(
     stackup_xml: str,
     simconfig_filename: str,
     palace_executable: str,
+    num_processes: int,
 ) -> None:
     """Run gmsh-dependent model creation and Palace simulation in a child process."""
     PDK = importlib.import_module("ihp").PDK
@@ -44,7 +49,7 @@ def _mesh_gds_and_run_palace(
         result_dir=os.path.join(base_dir),
         config_name=os.path.join(sim_path, "config.json"),
         palace_executable=palace_executable,
-        num_processes=16,
+        num_processes=num_processes,
         touchstone_type="all",
     )
 
@@ -54,8 +59,13 @@ class EMFineTuningStage(COBRABaseStage):
     This is to ensure that the surrogate model's predictions are accurate and to refine the design based on real EM results.
     """
 
-    def __init__(self, palace_executable):
+    def __init__(self, palace_executable, num_processes: int = DEFAULT_PALACE_PROCESSES):
+        if isinstance(num_processes, bool) or not isinstance(num_processes, int):
+            raise ConfigurationError("num_processes must be an integer")
+        if num_processes < 1:
+            raise ConfigurationError(f"num_processes must be at least 1, got {num_processes}")
         self.palace_executable = palace_executable
+        self.num_processes = num_processes
 
 
     def run(self, context: dict, orca_geometry=None, comp_name: str | None = None) -> dict:
@@ -106,6 +116,7 @@ class EMFineTuningStage(COBRABaseStage):
                 stackup_xml=geometry.stackup_xml,
                 simconfig_filename=geometry.simconfig_filename,
                 palace_executable=self.palace_executable,
+                num_processes=self.num_processes,
             )
             future.result()
 

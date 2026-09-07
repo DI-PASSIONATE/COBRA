@@ -194,6 +194,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         optimizer=optimizer_class(**configuration.optimizer.settings),
         circuit_simulator=simulator_class(**configuration.simulator.settings),
         palace_fine_tuning_command=fine_tuning.palace_command if fine_tuning.enabled else None,
+        palace_fine_tuning_processes=fine_tuning.palace_processes,
         fine_tuning_iterations=fine_tuning.iterations,
         fine_tuning_optimizer=fine_tuning.optimizer if fine_tuning.enabled else "reuse",
     )
