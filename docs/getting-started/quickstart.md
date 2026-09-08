@@ -49,14 +49,19 @@ Each run creates a timestamped folder under `results/`:
 
 ```text
 results/<timestamp>_<name>/
+└── trials/trial_<n>/
 ```
 
 Typical contents include:
 
 - `cobra_optimization_context.json`
-- `<component>_predicted.sNp`
 - `surrogate_s_params_<component>.sNp`
-- vector-fitted `.sp` files for simulation
+- the netlist carrying the best parameters found
+
+Each trial is evaluated in its own `trials/trial_<n>/` directory — its netlist,
+`<component>_predicted.sNp`, vector-fitted `.sp` files, and simulator output.
+Only the most recently finished trial is kept; the earlier directories are
+removed once their results have been recorded.
 
 !!! tip
     Keep the generated context JSON when comparing optimization runs. It contains trial history and best parameters.

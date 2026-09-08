@@ -362,10 +362,12 @@ Inputs:
 Results are saved to a timestamped folder `results/<timestamp>_<netlist_name>/` and include:
 
 - `cobra_optimization_context.json` — full optimization history and best parameters
-- `<component>_predicted.s<N>p` — surrogate-predicted Touchstone files per component
 - `surrogate_s_params_<component>.s<N>p` — best-trial surrogate S-parameters
-- `<netlist>.HB.FD.csv` / `.HB.FD.prn` — harmonic-balance frequency-domain results, when an HB analysis is run
-- vector-fitted SPICE subcircuits (`<component>.sp`) included by the final netlist
+- `trials/trial_<n>/` — the working directory of one trial: its netlist,
+  `<component>_predicted.s<N>p`, vector-fitted SPICE subcircuits
+  (`<component>.sp`) included by that netlist, and the simulator output
+  (`<netlist>.HB.FD.csv` / `.HB.FD.prn` for a harmonic-balance analysis). Only
+  the most recently finished trial is kept.
 
 ## EM Fine-Tuning Notes (Optional)
 

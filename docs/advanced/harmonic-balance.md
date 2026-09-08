@@ -186,8 +186,9 @@ HB runs add the frequency-domain table to the timestamped results folder:
 
 ```text
 results/<timestamp>_<name>/
-├── <netlist>.HB.FD.csv     # or .HB.FD.prn, depending on the .PRINT format
-└── …
+└── trials/trial_<n>/
+    ├── <netlist>.HB.FD.csv     # or .HB.FD.prn, depending on the .PRINT format
+    └── …
 ```
 
 Columns follow the Xyce convention `FREQ`, `Re(V(OUT))`, `Im(V(OUT))`, `Re(I(VOUT))`, `Im(I(VOUT))`, … and contain both the negative and positive halves of the two-sided spectrum. COBRA evaluates the non-negative half.
