@@ -72,5 +72,3 @@ context = cobra.run(
     max_iterations=200,
     results_name="main_mixed_sources_example",
 )
-
-print(context)

@@ -105,6 +105,10 @@ context = cobra.run(
 )
 ```
 
+`run()` returns an [`OptimizationContext`](../api/core.md#return-value-optimizationcontext),
+a dataclass whose fields are read as attributes. The same object is passed to
+`callback` on every iteration.
+
 ## Logging
 
 COBRA reports progress and problems through the standard `logging` module, on
