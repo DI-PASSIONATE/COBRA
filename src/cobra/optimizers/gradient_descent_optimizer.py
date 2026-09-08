@@ -1,10 +1,13 @@
 import re
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
 from cobra.configuration.setting import CobraSetting
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 class GradientDescentOptimizer(BaseOptimizer):
@@ -123,10 +126,10 @@ class GradientDescentOptimizer(BaseOptimizer):
 
         return masters
 
-    def _seed_from_context(self, context: dict[str, Any], masters: list[OptimizationProperty]) -> dict[str, float]:
+    def _seed_from_context(self, context: "OptimizationContext", masters: list[OptimizationProperty]) -> dict[str, float]:
         seed: dict[str, float] = {}
-        model_parameters = context.get("model_parameters", {}) or {}
-        netlist_parameters = context.get("netlist_parameters", {}) or {}
+        model_parameters = context.model_parameters
+        netlist_parameters = context.netlist_parameters
 
         for master in masters:
             if master.name in model_parameters:
@@ -190,7 +193,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._best_penalty = float("inf")
         self._pending_probe = None
 
-    def step(self, context: dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+    def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
 
@@ -223,10 +226,10 @@ class GradientDescentOptimizer(BaseOptimizer):
             return
 
         current_candidate = self._pending_probe["plus_candidate"] if self._pending_probe["side"] == "plus" else self._pending_probe["minus_candidate"]
-        context["model_parameters"] = self._format_values(current_candidate, model_input_ranges, with_unit=False)
-        context["netlist_parameters"] = self._format_values(current_candidate, netlist_property_ranges, with_unit=True)
+        context.model_parameters = self._format_values(current_candidate, model_input_ranges, with_unit=False)
+        context.netlist_parameters = self._format_values(current_candidate, netlist_property_ranges, with_unit=True)
 
-    def tell(self, context, penalty: list[float] | float):
+    def tell(self, context: "OptimizationContext", penalty: list[float] | float):
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
 
@@ -272,13 +275,13 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._current_point = updated_point
         self._pending_probe = None
 
-    def _extract_point(self, context: dict[str, Any]) -> dict[str, float] | None:
+    def _extract_point(self, context: "OptimizationContext") -> dict[str, float] | None:
         if not self._master_order:
             return None
 
         point: dict[str, float] = {}
-        model_parameters = context.get("model_parameters", {}) or {}
-        netlist_parameters = context.get("netlist_parameters", {}) or {}
+        model_parameters = context.model_parameters
+        netlist_parameters = context.netlist_parameters
 
         for name in self._master_order:
             if name in model_parameters:

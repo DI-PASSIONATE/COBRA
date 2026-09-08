@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from cobra.optimization_context import OptimizationContext
     from cobra.spice_sim.base_simulator import SimulationResult
     from cobra.spice_sim.simulation_type import SimulationType
 
@@ -183,17 +184,17 @@ class DesignGoalChecker:
             st = goal.required_simulation_type
             self.design_goals.setdefault(st, []).append(goal)
 
-    def check_goals(self, context: dict) -> dict:
+    def check_goals(self, context: OptimizationContext) -> OptimizationContext:
         """
         Evaluate all goals and update *context* with results.
 
-        Reads ``context["simulation_results"]`` (``dict[SimulationType, SimulationResult]``).
+        Reads ``context.simulation_results`` (``dict[SimulationType, SimulationResult]``).
         """
-        sim_results: dict = context.get("simulation_results") or {}
+        sim_results = context.simulation_results
         penalties = self.loss(sim_results)
 
-        context["goal_achieved"] = bool(penalties) and all(p <= 0.0 for p in penalties)
-        context["goals"] = [goal for goals in self.design_goals.values() for goal in goals]
+        context.goal_achieved = bool(penalties) and all(p <= 0.0 for p in penalties)
+        context.goals = [goal for goals in self.design_goals.values() for goal in goals]
 
         return context
 

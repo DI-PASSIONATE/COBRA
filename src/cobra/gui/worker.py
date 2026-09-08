@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class OptimizationWorker(QThread):
-    progress = Signal(dict)
+    progress = Signal(object)
     finished = Signal()
     error = Signal(str)
     ask_continue = Signal(int)
@@ -38,18 +38,18 @@ class OptimizationWorker(QThread):
                         return False
 
                 # Handle prev_network logic for plotting
-                context["prev_network"] = self.prev_network
+                context.prev_network = self.prev_network
 
                 # Emit progress
                 self.progress.emit(context)
 
                 # Check if we reached max iterations and ask to continue
-                if context["iteration"] >= context["max_iterations"] and not context["goal_achieved"]:
-                    self.ask_continue.emit(context["max_iterations"])
-                    context["max_iterations"] = self.max_iterations
+                if context.iteration >= context.max_iterations and not context.goal_achieved:
+                    self.ask_continue.emit(context.max_iterations)
+                    context.max_iterations = self.max_iterations
 
                 # Update prev_network for next iteration
-                sim_results = context.get("simulation_results") or {}
+                sim_results = context.simulation_results
                 self.prev_network = next((r.network for r in sim_results.values() if r.network is not None), None)
 
                 return True

@@ -1,10 +1,14 @@
 import os
+from typing import TYPE_CHECKING
 
 import numpy as np
 import skrf as rf
 from onnxruntime import InferenceSession
 
 from cobra.stages.base_stage import COBRABaseStage
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 class EMSurrogateStage(COBRABaseStage):
@@ -29,10 +33,10 @@ class EMSurrogateStage(COBRABaseStage):
 
         self.component_names = component_names or []
 
-    def run(self, context: dict) -> dict:
-        params = context["model_parameters"]
-        results_dir = context.get("results_dir", ".")
-        context["predicted_networks"] = []
+    def run(self, context: "OptimizationContext") -> "OptimizationContext":
+        params = context.model_parameters
+        results_dir = context.results_dir
+        context.predicted_networks = []
         for session, is_ts, comp_name in zip(self.session, self.is_touchstone, self.component_names, strict=True):
             if is_ts:
                 ntwk = rf.Network(str(session))
@@ -48,9 +52,9 @@ class EMSurrogateStage(COBRABaseStage):
                 ntwk = self.inference_snp(session, comp_params)
 
             ntwk.name = comp_name
-            context["predicted_networks"].append(ntwk)
+            context.predicted_networks.append(ntwk)
 
-        for ntwk in context["predicted_networks"]:
+        for ntwk in context.predicted_networks:
             # e.g., predictions could be named X1.s2p, X2.s4p, etc. depending on components and ports
             num_ports = ntwk.number_of_ports
             ntwk.write_touchstone(os.path.join(results_dir, f"{ntwk.name}_predicted.s{num_ports}p"))

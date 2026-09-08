@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from cobra.optimization_context import OptimizationContext
+
 OPTIMIZER_REGISTRY = {"OptunaOptimizer": OptunaOptimizer}
 SIMULATOR_REGISTRY = {"XyceSimulator": XyceSimulator}
 
@@ -115,7 +117,7 @@ class ConfiguredRun:
     orca_geometries: dict[str, Any]
     simulation_parameters: dict[SimulationType, dict[str, str]]
 
-    def run(self, callback: Callable[[dict], bool | None] | None = None) -> dict:
+    def run(self, callback: Callable[[OptimizationContext], bool | None] | None = None) -> OptimizationContext:
         return self.cobra.run(
             netlist=self.configuration.netlist,
             design_goals=self.design_goals,
@@ -210,6 +212,6 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
 
 
 def run_configuration_file(
-    path: str | Path, callback: Callable[[dict], bool | None] | None = None
-) -> dict:
+    path: str | Path, callback: Callable[[OptimizationContext], bool | None] | None = None
+) -> OptimizationContext:
     return build_configured_run(RunConfiguration.load(path)).run(callback)

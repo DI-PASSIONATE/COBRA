@@ -52,6 +52,7 @@ from cobra.configuration import (
     RunConfiguration,
 )
 from cobra.configuration.config_runner import build_configured_run, build_design_goals
+from cobra.optimization_context import OptimizationContext
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from cobra.optimizers.design_goal_collection import (
@@ -1987,18 +1988,18 @@ class MainWindow(QMainWindow):
             self.max_iter_spin.setValue(new_max)
             self._update_progress_display(self.progress_bar.value(), new_max)
 
-    @Slot(dict)
-    def on_progress(self, context: dict):
-        iteration = context.get("iteration", 0)
+    @Slot(object)
+    def on_progress(self, context: OptimizationContext):
+        iteration = context.iteration
         max_iterations = self.worker.max_iterations if self.worker else self.max_iter_spin.value()
-        if context.get("fine_tuning_active"):
+        if context.fine_tuning_active:
             self.fine_tuning_active = True
-            ft_iteration = context.get("fine_tuning_iteration", 0)
-            ft_total = context.get("fine_tuning_total", self.ft_iter_spin.value())
+            ft_iteration = context.fine_tuning_iteration
+            ft_total = context.fine_tuning_total or self.ft_iter_spin.value()
             self._update_finetuning_display(ft_iteration, ft_total)
 
             if not self.fine_tuning_notification_shown:
-                start_iter = context.get("fine_tuning_start_iteration")
+                start_iter = context.fine_tuning_start_iteration
                 if start_iter is not None:
                     self.statusBar().showMessage(
                         f"Goals have been reached after iteration {start_iter}. Starting finetuning...",
@@ -2009,8 +2010,8 @@ class MainWindow(QMainWindow):
             self._update_progress_display(iteration, max_iterations)
 
         # 1. Update Parameters Table (Current Values)
-        net_params = context.get("netlist_parameters", {})
-        model_params = context.get("model_parameters", {})
+        net_params = context.netlist_parameters
+        model_params = context.model_parameters
 
         # Combine maps for easier lookup
         current_values = {**net_params, **model_params}
@@ -2077,7 +2078,7 @@ class MainWindow(QMainWindow):
 
         # Update Goal Status Table
         # Metrics are now pre-calculated in COBRA.run and stored in context
-        current_goals = context.get("goals", [])  # Update goals with latest values
+        current_goals = context.goals  # Update goals with latest values
 
         self.goal_table.setRowCount(0)
 
@@ -2151,9 +2152,9 @@ class MainWindow(QMainWindow):
         try:
             self.s_param_plot.clear()
 
-            sim_results = context.get("simulation_results") or {}
+            sim_results = context.simulation_results
             ntwk_n = next((r.network for r in sim_results.values() if r.network is not None), None)
-            ntwk_prev = context.get("prev_network")
+            ntwk_prev = context.prev_network
             requested_sparams = self._goal_sparam_specs()
             color_map: dict[str, tuple[int, int, int]] = {
                 "S11": (220, 20, 60),

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -236,7 +237,7 @@ class BaseNetlistParser(ABC):
         """Parse _lines and populate _elements, _components, and _includes."""
 
     @abstractmethod
-    def update_parameters(self, parameters: dict[str, float]) -> None:
+    def update_parameters(self, parameters: Mapping[str, float | str]) -> None:
         """Apply a dict of {name: value} updates to the netlist held in memory."""
 
     # -------------------------------------------------------------------------
