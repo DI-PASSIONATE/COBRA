@@ -218,17 +218,32 @@ class XyceSimulator(BaseSimulator):
         # --- Collect output files --------------------------------------------
         found: list[str] = []
 
+        def outputs(*suffixes: str) -> list[str]:
+            """Files Xyce wrote for this netlist, matching any of *suffixes*.
+
+            Xyce names its output after the netlist, so those matches are tried
+            first: the surrogate stage writes its own Touchstone predictions into
+            the same directory, and a bare ``*.s[0-9]p`` would pick one of those
+            up instead of the simulation result. Only when nothing matches does
+            this fall back to any file in the directory.
+            """
+            for prefix in (glob.escape(netlist_base), "*"):
+                matches: list[str] = []
+                for suffix in suffixes:
+                    matches.extend(glob.glob(os.path.join(results_dir, prefix + suffix)))
+                if matches:
+                    return matches
+            return []
+
         if sim_type is SimulationType.AC:
             # AC sweep output is written to <netlist>.s*p (Touchstone)
             # To avoid .sp files we don't use * to match but rather use regex to match .s followed by a single digit and then p (e.g. .s1p, .s2p, etc.)
-            matched_files = glob.glob(os.path.join(results_dir, "*.s[0-9]p"))
-            found.extend(matched_files)
+            found.extend(outputs(".s[0-9]p"))
 
         elif sim_type is SimulationType.HB:
             # Xyce HB writes <netlist>.HB.FD.prn (freq-domain) and
             # <netlist>.HB.TD.prn (time-domain); ".PRINT hb format=csv" yields .csv instead.
-            found.extend(glob.glob(os.path.join(results_dir, "*.HB.FD.csv")))
-            found.extend(glob.glob(os.path.join(results_dir, "*.HB.FD.prn")))
+            found.extend(outputs(".HB.FD.csv", ".HB.FD.prn"))
 
         elif sim_type in (SimulationType.TRAN, SimulationType.DC):
             # Default PRN output for transient / DC sweeps
@@ -236,8 +251,7 @@ class XyceSimulator(BaseSimulator):
 
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
-            found.extend(glob.glob(os.path.join(results_dir, "*.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, "*.s[0-9]p")))
+            found.extend(outputs(".prn", ".s[0-9]p"))
 
         # Add any files explicitly named in .PRINT file= directives
         for path in custom_print_files:

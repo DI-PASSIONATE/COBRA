@@ -1,10 +1,14 @@
-import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
 from cobra.configuration.setting import CobraSetting
-from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+from cobra.optimizers.base_optimizer import (
+    BaseOptimizer,
+    OptimizationProperty,
+    parse_netlist_value,
+    resolve_linked_master,
+)
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
@@ -79,15 +83,6 @@ class GradientDescentOptimizer(BaseOptimizer):
         return name.replace("_", "").replace("-", "").lower()
 
     @staticmethod
-    def _coerce_numeric(value: Any) -> float:
-        if isinstance(value, (int, float, np.floating)):
-            return float(value)
-        match = re.match(r"^\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", str(value))
-        if not match:
-            raise ValueError(f"Cannot parse numeric value from '{value}'.")
-        return float(match.group(1))
-
-    @staticmethod
     def _round_to_step(value: float, prop: OptimizationProperty) -> float:
         if prop.step is None or prop.step <= 0:
             return value
@@ -97,20 +92,6 @@ class GradientDescentOptimizer(BaseOptimizer):
     def _clip(value: float, prop: OptimizationProperty) -> float:
         return float(min(max(value, prop.min_value), prop.max_value))
 
-    def _resolve_master(self, prop: OptimizationProperty, by_name: dict[str, OptimizationProperty]) -> OptimizationProperty:
-        current = prop
-        seen = {prop.name}
-        while current.linked_to:
-            target_name = current.linked_to
-            target = by_name.get(target_name)
-            if target is None:
-                raise ValueError(f"Parameter '{current.name}' links to unknown parameter '{target_name}'.")
-            if target.name in seen:
-                raise ValueError(f"Circular link detected for parameter '{prop.name}'.")
-            seen.add(target.name)
-            current = target
-        return current
-
     def _collect_masters(self, params: list[OptimizationProperty]) -> list[OptimizationProperty]:
         by_name = {param.name: param for param in params}
         masters: list[OptimizationProperty] = []
@@ -118,7 +99,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._alias_to_master = {}
 
         for param in params:
-            master = self._resolve_master(param, by_name)
+            master = resolve_linked_master(param, by_name)
             self._alias_to_master[param.name] = master.name
             if master.name not in seen:
                 masters.append(master)
@@ -137,7 +118,7 @@ class GradientDescentOptimizer(BaseOptimizer):
                 continue
 
             if master.name in netlist_parameters:
-                seed[master.name] = self._clip(self._coerce_numeric(netlist_parameters[master.name]), master)
+                seed[master.name] = self._clip(parse_netlist_value(netlist_parameters[master.name]), master)
                 continue
 
             seed[master.name] = self._clip((master.min_value + master.max_value) / 2.0, master)
@@ -151,8 +132,8 @@ class GradientDescentOptimizer(BaseOptimizer):
             master = self._master_properties[master_name]
             value = master_values[master_name]
             if with_unit:
-                unit = param.unit or (master.unit or "")
-                values[param.name] = f"{value}{unit}"
+                # A linked parameter inherits the master's unit; see netlist_unit.
+                values[param.name] = f"{value}{param.unit or master.unit or ''}"
             else:
                 values[param.name] = value
         return values
@@ -182,7 +163,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             candidate[name] = self._clip(candidate[name], prop)
         return candidate
 
-    def initialize(self, num_goals: int):  # noqa: ARG002 - part of the BaseOptimizer interface
+    def initialize(self, num_goals: int, parallel_trials: int = 1):  # noqa: ARG002 - part of the BaseOptimizer interface
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
         self._master_properties = {}
@@ -288,7 +269,7 @@ class GradientDescentOptimizer(BaseOptimizer):
                 point[name] = float(model_parameters[name])
                 continue
             if name in netlist_parameters:
-                point[name] = self._coerce_numeric(netlist_parameters[name])
+                point[name] = parse_netlist_value(netlist_parameters[name])
                 continue
             return None
 

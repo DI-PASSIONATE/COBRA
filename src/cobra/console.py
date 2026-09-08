@@ -151,6 +151,49 @@ def write_fields(rows: Sequence[tuple[str, str]], palette: Palette) -> None:
         write(line)
 
 
+def write_rule(palette: Palette, width: int = 60, stream: IO[str] | None = None) -> None:
+    """Write a horizontal rule, used to separate report sections."""
+    glyph = "─" if supports_unicode(stream) else "-"
+    write(palette.dim(glyph * width))
+
+
+#: Track glyphs for :func:`format_slider`: (left cap, fill, marker, right cap).
+_SLIDER_GLYPHS = ("├", "─", "┃", "┤")
+_SLIDER_GLYPHS_ASCII = ("[", "-", "|", "]")
+
+
+def format_slider(
+    minimum: float,
+    maximum: float,
+    value: float | None,
+    *,
+    width: int = 24,
+    palette: Palette | None = None,
+    stream: IO[str] | None = None,
+) -> str:
+    """Render *value* as a marker on a ``minimum``-to-``maximum`` track.
+
+    ``├────────┃───────────┤`` — the position of the marker within the track is
+    where the parameter currently sits in its allowed range. A *value* outside
+    the range is clamped to the nearest end rather than dropped, so a bad range
+    stays visible. Returns an empty track when *value* is ``None``.
+    """
+    left, fill, marker, right = (
+        _SLIDER_GLYPHS if supports_unicode(stream) else _SLIDER_GLYPHS_ASCII
+    )
+    width = max(width, 3)
+    track = [fill] * width
+
+    if value is not None:
+        span = maximum - minimum
+        # A degenerate range (a pinned parameter) has only one place to be.
+        fraction = 0.0 if span <= 0 else (value - minimum) / span
+        index = round(min(max(fraction, 0.0), 1.0) * (width - 1))
+        track[index] = marker if palette is None else palette.cyan(marker)
+
+    return f"{left}{''.join(track)}{right}"
+
+
 def format_duration(seconds: float) -> str:
     """Render *seconds* as ``12.3s``, ``4m 12s`` or ``1h 03m``."""
     if seconds < 60:
@@ -160,6 +203,51 @@ def format_duration(seconds: float) -> str:
         return f"{minutes}m {remainder:02d}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes:02d}m"
+
+
+@dataclass(frozen=True)
+class SliderSpec:
+    """One optimization parameter, as much of it as the terminal needs."""
+
+    name: str
+    minimum: float
+    maximum: float
+    unit: str | None = None
+    linked_to: str | None = None
+    """Master parameter this one follows, if any; a linked parameter has no
+    range of its own to place a marker in."""
+
+
+def format_parameter_line(
+    spec: SliderSpec,
+    value: float | None,
+    *,
+    palette: Palette | None = None,
+    width: int = 24,
+    label_width: int = 24,
+) -> str:
+    """One ``name  min ├──┃──┤ max  value`` line for a parameter."""
+    current = "—" if value is None else f"{value:g}{spec.unit or ''}"
+    label = spec.name[:label_width].ljust(label_width)
+    low = f"{spec.minimum:g}".rjust(8)
+    high = f"{spec.maximum:g}".ljust(8)
+
+    if spec.linked_to:
+        # Its value is dictated by the master, so its own range says nothing:
+        # showing a marker in it would invent a degree of freedom it lacks.
+        track = f"follows {spec.linked_to}".center(width + 2)
+        low = " " * 8
+        high = " " * 8
+    else:
+        track = format_slider(spec.minimum, spec.maximum, value, width=width, palette=palette)
+
+    if palette is not None:
+        label = palette.bold(label)
+        low, high = palette.dim(low), palette.dim(high)
+        current = palette.cyan(current)
+        if spec.linked_to:
+            track = palette.dim(track)
+    return f"{label} {low} {track} {high} {current}"
 
 
 # ---------------------------------------------------------------------------

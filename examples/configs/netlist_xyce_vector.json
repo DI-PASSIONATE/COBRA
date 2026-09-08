@@ -6,8 +6,8 @@
   "simulation_parameters": {
     ".AC": {
       "points": "500",
-      "start_freq": "100G",
-      "stop_freq": "170G"
+      "start_freq": "1G",
+      "stop_freq": "200G"
     }
   },
   "optimizer": {
@@ -23,10 +23,12 @@
     "settings": {
       "xyce_command": "Xyce",
       "parallel_xyce": false,
+      "parallel_xyce_processes": 16,
       "enforce_passivity": false
     }
   },
   "max_iterations": 500,
+  "parallel_trials": 8,
   "optimization_parameters": [
     {
       "name": "X1:bottom_winding_diameter",
@@ -119,8 +121,9 @@
     }
   ],
   "fine_tuning": {
-    "enabled": true,
-    "palace_command": "palace",
+    "enabled": false,
+    "palace_command": "apptainer exec ~/Documents/git/palace/palace.sif palace",
+    "palace_processes": 16,
     "iterations": 3,
     "optimizer": "reuse",
     "geometries": {

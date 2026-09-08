@@ -1,3 +1,4 @@
+import copy
 import logging
 import threading
 
@@ -24,7 +25,6 @@ class OptimizationWorker(QThread):
         self.paused = False
         self.resume_event = threading.Event()
         self.resume_event.set()
-        self.prev_network = None
 
     def run(self):
         try:
@@ -37,20 +37,17 @@ class OptimizationWorker(QThread):
                     if self.stop_requested:
                         return False
 
-                # Handle prev_network logic for plotting
-                context.prev_network = self.prev_network
-
-                # Emit progress
-                self.progress.emit(context)
+                # Emit progress. This signal crosses into the GUI thread, so the
+                # slot runs after this callback returns — by which time the
+                # optimization loop may have merged a later trial into the same
+                # context. Hand over a snapshot so the display cannot show a mix
+                # of two trials; the control flow below stays on the live object.
+                self.progress.emit(copy.copy(context))
 
                 # Check if we reached max iterations and ask to continue
                 if context.iteration >= context.max_iterations and not context.goal_achieved:
                     self.ask_continue.emit(context.max_iterations)
                     context.max_iterations = self.max_iterations
-
-                # Update prev_network for next iteration
-                sim_results = context.simulation_results
-                self.prev_network = next((r.network for r in sim_results.values() if r.network is not None), None)
 
                 return True
 

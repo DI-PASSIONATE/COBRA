@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import optuna
 
 from cobra.configuration.setting import CobraSetting
-from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+from cobra.optimizers.base_optimizer import (
+    BaseOptimizer,
+    OptimizationProperty,
+    netlist_unit,
+    resolve_linked_master,
+)
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
@@ -17,6 +22,9 @@ class OptunaOptimizer(BaseOptimizer):
     """
     OptunaOptimizer - An implementation of the BaseOptimizer using Optuna for optimization.
     """
+
+    # Optuna's ask-and-tell interface allows any number of outstanding trials.
+    supports_parallel_trials: ClassVar[bool] = True
 
     _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
@@ -74,6 +82,7 @@ class OptunaOptimizer(BaseOptimizer):
         self.sampler_kwargs = sampler_kwargs or {}
         self.pruner_kwargs = pruner_kwargs or {}
         self.study: optuna.study.Study | None = None
+        self.parallel_trials = 1
         self._param_to_trial_name: dict[str, str] = {}
 
     @staticmethod
@@ -116,7 +125,13 @@ class OptunaOptimizer(BaseOptimizer):
             raise TypeError("sampler must be a string, an Optuna sampler instance, or None.")
 
         if sampler_name in {"tpe", "tpesampler"}:
-            return optuna.samplers.TPESampler(**self.sampler_kwargs)
+            # With several trials in flight, TPE would keep suggesting the same
+            # point until the first result arrives; the constant liar penalises
+            # running trials so concurrent asks explore different regions.
+            kwargs = dict(self.sampler_kwargs)
+            if self.parallel_trials > 1:
+                kwargs.setdefault("constant_liar", True)
+            return optuna.samplers.TPESampler(**kwargs)
         if sampler_name in {"random", "randomsampler"}:
             return optuna.samplers.RandomSampler(**self.sampler_kwargs)
         if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
@@ -155,7 +170,8 @@ class OptunaOptimizer(BaseOptimizer):
             "Unsupported pruner. Choose one of: MedianPruner, SuccessiveHalvingPruner, HyperbandPruner."
         )
 
-    def initialize(self, num_goals: int):
+    def initialize(self, num_goals: int, parallel_trials: int = 1):
+        self.parallel_trials = parallel_trials
         # Optuna installs its own handler and announces every trial; COBRA already
         # reports progress, so let its chatter follow COBRA's own verbosity.
         optuna.logging.set_verbosity(
@@ -182,22 +198,8 @@ class OptunaOptimizer(BaseOptimizer):
             sampled: dict[str, Any] = {}
             values: dict[str, Any] = {}
 
-            def _resolve_master(param: OptimizationProperty) -> OptimizationProperty:
-                current = param
-                seen = {param.name}
-                while current.linked_to:
-                    target_name = current.linked_to
-                    target = by_name.get(target_name)
-                    if target is None:
-                        raise ValueError(f"Parameter '{current.name}' links to unknown parameter '{target_name}'.")
-                    if target.name in seen:
-                        raise ValueError(f"Circular link detected for parameter '{param.name}'.")
-                    seen.add(target.name)
-                    current = target
-                return current
-
             for param in params:
-                master = _resolve_master(param)
+                master = resolve_linked_master(param, by_name)
                 trial_name = master.name
 
                 if trial_name not in sampled:
@@ -211,8 +213,7 @@ class OptunaOptimizer(BaseOptimizer):
 
                 self._param_to_trial_name[param.name] = trial_name
                 if with_unit:
-                    unit = param.unit or (master.unit or "")
-                    values[param.name] = f"{value}{unit}"
+                    values[param.name] = f"{value}{netlist_unit(param, by_name)}"
                 else:
                     values[param.name] = value
             return values

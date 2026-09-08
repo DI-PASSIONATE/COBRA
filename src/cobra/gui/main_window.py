@@ -257,6 +257,12 @@ class MainWindow(QMainWindow):
         self.max_iter_spin.setToolTip(_cobra_tips.get("max_iterations", ""))
         self.config_form_layout.addRow("Max Iterations:", self.max_iter_spin)
 
+        self.parallel_trials_spin = QSpinBox()
+        self.parallel_trials_spin.setRange(1, 4096)
+        self.parallel_trials_spin.setValue(1)
+        self.parallel_trials_spin.setToolTip(_cobra_tips.get("parallel_trials", ""))
+        self.config_form_layout.addRow("Parallel Trials:", self.parallel_trials_spin)
+
         #### OPTIONAL - Fine-tuning with palace ####
         self.finetune_cb = QCheckBox("Perform finetuning")
         self.finetune_cb.setToolTip(tooltip("finetune_cb"))
@@ -400,8 +406,6 @@ class MainWindow(QMainWindow):
         self.show_goals_cb.setChecked(True)
         self.show_goals_cb.stateChanged.connect(self.refresh_overlays)
 
-        self.plot_prev_cb = QCheckBox("Plot Previous Result")
-
         self.zoom_btn = QPushButton("Zoom to Goal Frequency Range")
         self.zoom_btn.setToolTip(tooltip("zoom_btn"))
         self.zoom_btn.clicked.connect(self.zoom_to_range)
@@ -411,7 +415,6 @@ class MainWindow(QMainWindow):
         plot_controls.addWidget(self.hb_quantity_combo)
         plot_controls.addWidget(self.hb_input_port_combo)
         plot_controls.addWidget(self.show_goals_cb)
-        plot_controls.addWidget(self.plot_prev_cb)
         plot_controls.addWidget(self.zoom_btn)
         plot_controls.addStretch()
 
@@ -679,7 +682,7 @@ class MainWindow(QMainWindow):
         self.hb_input_port_combo.setEnabled(
             hb_active and self.hb_quantity_combo.currentData() == "gain"
         )
-        for widget in (self.show_goals_cb, self.plot_prev_cb, self.zoom_btn):
+        for widget in (self.show_goals_cb, self.zoom_btn):
             widget.setEnabled(not hb_active)
 
     def on_hb_quantity_changed(self) -> None:
@@ -1218,6 +1221,7 @@ class MainWindow(QMainWindow):
                 {name: self._widget_value(widget) for name, widget in self.simulator_widgets.items()},
             ),
             max_iterations=self.max_iter_spin.value(),
+            parallel_trials=self.parallel_trials_spin.value(),
             optimization_parameters=[
                 OptimizationParameterConfig(
                     name=parameter.name,
@@ -1323,6 +1327,7 @@ class MainWindow(QMainWindow):
                 edit.setText(value)
 
         self.max_iter_spin.setValue(config.max_iterations)
+        self.parallel_trials_spin.setValue(config.parallel_trials)
         fine_tuning = config.fine_tuning
         self.finetune_cb.setChecked(fine_tuning.enabled)
         self.palace_edit.setText(fine_tuning.palace_command)
@@ -2154,7 +2159,6 @@ class MainWindow(QMainWindow):
 
             sim_results = context.simulation_results
             ntwk_n = next((r.network for r in sim_results.values() if r.network is not None), None)
-            ntwk_prev = context.prev_network
             requested_sparams = self._goal_sparam_specs()
             color_map: dict[str, tuple[int, int, int]] = {
                 "S11": (220, 20, 60),
@@ -2162,24 +2166,6 @@ class MainWindow(QMainWindow):
                 "S12": (46, 139, 87),
                 "S22": (255, 140, 0),
             }
-
-            if ntwk_prev is not None and self.plot_prev_cb.isChecked():
-                freq_prev = ntwk_prev.f
-                for label, i, j in requested_sparams:
-                    if i < ntwk_prev.nports and j < ntwk_prev.nports:
-                        fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
-                        fallback_color: tuple[int, int, int] = (
-                            fallback_qcolor.red(),
-                            fallback_qcolor.green(),
-                            fallback_qcolor.blue(),
-                        )
-                        base_color = color_map.get(label, fallback_color)
-                        prev_pen = pg.mkPen(
-                            (base_color[0], base_color[1], base_color[2], 120),
-                            width=2,
-                            style=Qt.PenStyle.DashLine,
-                        )
-                        self.s_param_plot.plot(freq_prev, ntwk_prev.s_db[:, i, j], pen=prev_pen, name=f"{label} (n-1)")
 
             if ntwk_n is not None:
                 freq = ntwk_n.f
@@ -2193,7 +2179,7 @@ class MainWindow(QMainWindow):
                         )
                         base_color = color_map.get(label, fallback_color)
                         curr_pen = pg.mkPen(base_color, width=3)
-                        self.s_param_plot.plot(freq, ntwk_n.s_db[:, i, j], pen=curr_pen, name=f"{label} (n)")
+                        self.s_param_plot.plot(freq, ntwk_n.s_db[:, i, j], pen=curr_pen, name=label)
 
             # Redraw overlays on top
             self.overlay_items = []  # plot.clear() removed prior overlay items

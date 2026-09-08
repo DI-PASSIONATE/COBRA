@@ -3,7 +3,11 @@
 Output contract: stdout carries only what was asked for -- the ``parse``
 report, the ``run`` summary, the ``doctor`` table -- so ``cobra parse --json``
 stays pipeable.  Progress and diagnostics go to stderr through
-:mod:`cobra.console`, which also owns the stdout formatting used here.
+:mod:`cobra.console`, which owns the formatting primitives.
+
+Each command's reporting lives beside its data -- :mod:`cobra.run_report`,
+:mod:`cobra.configuration.inspection`, :mod:`cobra.diagnostics` -- leaving this
+module to argument parsing and the mapping from failures to exit codes.
 
 Exit codes are part of the interface and are pinned by the test suite:
 ``0`` success, ``1`` a run that started and failed, ``2`` invalid input or a
@@ -15,22 +19,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from pathlib import Path
-from typing import TYPE_CHECKING
 
-from cobra.console import (
-    Palette,
-    configure_logging,
-    format_duration,
-    write,
-    write_fields,
-    write_heading,
-)
+from cobra.console import Palette, configure_logging, write
 from cobra.diagnostics import cobra_version
-
-if TYPE_CHECKING:
-    from cobra.configuration.config_runner import ConfiguredRun
-    from cobra.optimization_context import OptimizationContext
 
 logger = logging.getLogger(__name__)
 
@@ -169,60 +160,16 @@ def _parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
-def _run_header(configured: ConfiguredRun, palette: Palette) -> None:
-    configuration = configured.configuration
-    fine_tuning = configuration.fine_tuning
-    write_heading(f"COBRA {cobra_version()}", palette)
-    write_fields(
-        [
-            ("netlist", Path(configuration.netlist).name),
-            ("analysis", configured.parser.simulation_type.value),
-            ("optimizer", configuration.optimizer.name),
-            ("simulator", configuration.simulator.name),
-            ("parameters", str(len(configured.optimization_parameters))),
-            ("goals", str(len(configured.design_goals))),
-            ("iterations", f"up to {configuration.max_iterations}"),
-            (
-                "fine-tuning",
-                f"{fine_tuning.palace_command} ({fine_tuning.iterations} iterations)"
-                if fine_tuning.enabled
-                else "",
-            ),
-        ],
-        palette,
-    )
-    write()
-
-
-def _run_summary(context: OptimizationContext, palette: Palette) -> None:
-    iteration = context.iteration
-    if context.goal_achieved:
-        status = palette.green(f"design goals achieved at iteration {iteration}")
-    else:
-        status = palette.yellow(f"design goals not achieved after {iteration} iterations")
-
-    total = context.times.get("total_time") or 0.0
-    write()
-    write_heading("Summary", palette)
-    write_fields(
-        [
-            ("status", status),
-            ("wall time", format_duration(total) if total else ""),
-            ("results", context.results_dir),
-        ],
-        palette,
-    )
-
-
 def _run_config(path: str) -> int:
     """Execute a saved configuration; return the process exit code."""
     from cobra.configuration import ConfigurationError, RunConfiguration
     from cobra.configuration.config_runner import build_configured_run
+    from cobra.run_report import write_run_header, write_run_report
 
     palette = Palette.for_stream(sys.stdout)
     try:
         configured = build_configured_run(RunConfiguration.load(path))
-        _run_header(configured, palette)
+        write_run_header(configured, palette)
         context = configured.run()
     except (ConfigurationError, FileNotFoundError, OSError) as exc:
         # A bad path or configuration is user input, not a COBRA crash: report it as
@@ -239,7 +186,7 @@ def _run_config(path: str) -> int:
         logger.info("Re-run with -v for the traceback, or `cobra doctor` to check the environment")
         return EXIT_FAILED
 
-    _run_summary(context, palette)
+    write_run_report(context, palette)
     return EXIT_OK
 
 
