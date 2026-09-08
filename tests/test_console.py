@@ -251,3 +251,46 @@ def test_write_goes_to_stdout(capsys):
 
     out = capsys.readouterr().out
     assert out == "a line\nSummary\n"
+
+
+# ---------------------------------------------------------------------------
+# parameter sliders
+# ---------------------------------------------------------------------------
+
+
+def _marker_index(bar: str) -> int:
+    """Position of the marker within the track, ignoring the end caps."""
+    return bar[1:-1].index("┃")
+
+
+def test_the_slider_marks_where_the_value_sits_in_its_range():
+    width = 21
+    low = console.format_slider(0.0, 100.0, 0.0, width=width)
+    middle = console.format_slider(0.0, 100.0, 50.0, width=width)
+    high = console.format_slider(0.0, 100.0, 100.0, width=width)
+
+    assert _marker_index(low) == 0
+    assert _marker_index(middle) == width // 2
+    assert _marker_index(high) == width - 1
+
+
+def test_a_value_outside_the_range_is_clamped_rather_than_dropped():
+    assert _marker_index(console.format_slider(0.0, 10.0, -5.0, width=11)) == 0
+    assert _marker_index(console.format_slider(0.0, 10.0, 99.0, width=11)) == 10
+
+
+def test_a_pinned_parameter_does_not_divide_by_zero():
+    assert _marker_index(console.format_slider(5.0, 5.0, 5.0, width=11)) == 0
+
+
+def test_a_missing_value_leaves_the_track_empty():
+    assert "┃" not in console.format_slider(0.0, 10.0, None, width=11)
+
+
+def test_a_linked_parameter_shows_its_master_instead_of_a_track():
+    spec = console.SliderSpec(name="C4", minimum=0.0, maximum=0.0, linked_to="C3")
+    line = console.format_parameter_line(spec, 19.0, width=20, label_width=4)
+
+    assert "follows C3" in line
+    assert "┃" not in line
+    assert "19" in line
