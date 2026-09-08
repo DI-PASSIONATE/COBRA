@@ -90,10 +90,9 @@ class OptunaOptimizer(BaseOptimizer):
                 "optunahub is required to use the requested sampler. Install it with `pip install optunahub`."
             ) from exc
 
-        module = optunahub.load_module(package_name)
-        sampler_cls = getattr(module, class_name)
-
         try:
+            module = optunahub.load_module(package_name)
+            sampler_cls = getattr(module, class_name)
             return sampler_cls(**self.sampler_kwargs)
         except Exception as exc:
             if class_name == "AutoSampler":
@@ -119,6 +118,8 @@ class OptunaOptimizer(BaseOptimizer):
             return optuna.samplers.RandomSampler(**self.sampler_kwargs)
         if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
             return self._load_optunahub_sampler("samplers/simulated_annealing", "SimulatedAnnealingSampler")
+        if sampler_name in {"auto", "autosampler"}:
+            return self._load_optunahub_sampler("samplers/auto_sampler", "AutoSampler")
 
         raise ValueError(
             "Unsupported sampler. Choose one of: AutoSampler, RandomSampler, TPESampler, SimulatedAnnealingSampler."

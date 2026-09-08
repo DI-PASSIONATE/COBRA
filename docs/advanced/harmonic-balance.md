@@ -57,7 +57,7 @@ This produces the pair `V(Out)` and `I(VOut)`. COBRA reads the `.PRINT hb` line 
 ```python
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
-parser = XyceNetlistParser().from_file("examples/Mixer/mixer_hb.cir")
+parser = XyceNetlistParser().from_file("examples/netlists/Mixer/mixer_hb.cir")
 parser.hb_probe_nodes
 # ['IF_neg', 'IF_pos', 'LO_CM', 'LO_in', 'LO_neg', 'LO_pos', 'Out',
 #  'RF_CM', 'RF_M_n', 'RF_M_p', 'RF_in', 'RF_neg', 'RF_pos']

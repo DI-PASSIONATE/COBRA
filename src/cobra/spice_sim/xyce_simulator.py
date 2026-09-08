@@ -92,7 +92,7 @@ _XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
 }
 
 class XyceSimulator(BaseSimulator):
-    netlist_parser: BaseNetlistParser = XyceNetlistParser()
+    netlist_parser: BaseNetlistParser
 
     @classmethod
     def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
@@ -155,6 +155,8 @@ class XyceSimulator(BaseSimulator):
             raise ConfigurationError(
                 f"parallel_xyce_processes must be at least 1, got {parallel_xyce_processes}"
             )
+        # A parser holds the state of one netlist, so every simulator gets its own.
+        self.netlist_parser = XyceNetlistParser()
         self.xyce_command = xyce_command
         self.parallel = parallel_xyce
         self.enforce_passivity = enforce_passivity
@@ -235,7 +237,7 @@ class XyceSimulator(BaseSimulator):
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
             found.extend(glob.glob(os.path.join(results_dir, "*.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, ".s[0-9]p")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.s[0-9]p")))
 
         # Add any files explicitly named in .PRINT file= directives
         for path in custom_print_files:

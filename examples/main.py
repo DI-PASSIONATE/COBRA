@@ -19,7 +19,7 @@ from cobra.optimizers.design_goal_collection import find_parameter
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-NETLIST_PATH = os.path.join(BASE_DIR, "Trafo", "netlist_multiple_SPFiles.cir")
+NETLIST_PATH = os.path.join(BASE_DIR, "netlists", "Trafo", "netlist_multiple_SPFiles.cir")
 ONNX_MODEL_PATH = os.path.join(BASE_DIR, "tf_octa_c_ports.onnx")
 FIXED_TOUCHSTONE_PATH = os.path.join(BASE_DIR, "XYLIN_Trafo_output_predicted.s6p")
 
