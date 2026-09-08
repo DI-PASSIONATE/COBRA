@@ -14,6 +14,7 @@ from cobra.optimizers.design_goal import (
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
+from tests.conftest import make_context
 
 # ---------------------------------------------------------------------------
 # Frequency range parsing
@@ -209,10 +210,12 @@ def test_checker_groups_goals_by_simulation_type():
 
 def test_check_goals_marks_success_when_every_penalty_is_non_positive():
     checker = DesignGoalChecker([_goal(5.0, max_value=10.0, sim_type=SimulationType.AC)])
-    context = checker.check_goals({"simulation_results": {SimulationType.AC: SimulationResult()}})
+    context = checker.check_goals(
+        make_context(simulation_results={SimulationType.AC: SimulationResult()})
+    )
 
-    assert context["goal_achieved"] is True
-    assert len(context["goals"]) == 1
+    assert context.goal_achieved is True
+    assert len(context.goals) == 1
 
 
 def test_check_goals_marks_failure_when_any_penalty_is_positive():
@@ -222,9 +225,11 @@ def test_check_goals_marks_failure_when_any_penalty_is_positive():
             _goal(50.0, max_value=10.0, sim_type=SimulationType.AC),
         ]
     )
-    context = checker.check_goals({"simulation_results": {SimulationType.AC: SimulationResult()}})
+    context = checker.check_goals(
+        make_context(simulation_results={SimulationType.AC: SimulationResult()})
+    )
 
-    assert context["goal_achieved"] is False
+    assert context.goal_achieved is False
 
 
 def test_goals_without_matching_results_are_penalised():

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -31,7 +32,10 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.circuit_sim_stage import CircuitSimulationStage
-from tests.conftest import netlist_path
+from tests.conftest import make_context, netlist_path
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 def _goal(value: float, *, max_value: float, sim_type: SimulationType) -> DesignGoal:
@@ -56,29 +60,29 @@ def test_missing_result_penalises_the_goal_instead_of_skipping_it():
 
 def test_check_goals_with_no_results_is_a_failure():
     checker = DesignGoalChecker([_goal(50.0, max_value=10.0, sim_type=SimulationType.AC)])
-    context = checker.check_goals({"simulation_results": {}})
+    context = checker.check_goals(make_context())
 
-    assert context["goal_achieved"] is False
-    assert context["goals"][0].current_penalty == FAILED_SIMULATION_PENALTY
+    assert context.goal_achieved is False
+    assert context.goals[0].current_penalty == FAILED_SIMULATION_PENALTY
 
 
 def test_failure_penalty_ignores_the_goal_weight():
     """A zero-weighted goal must not turn a failed simulation into a success."""
     goal = _goal(50.0, max_value=10.0, sim_type=SimulationType.AC)
     goal.weight = 0.0
-    context = DesignGoalChecker([goal]).check_goals({"simulation_results": {}})
+    context = DesignGoalChecker([goal]).check_goals(make_context())
 
-    assert context["goal_achieved"] is False
+    assert context.goal_achieved is False
 
 
 def test_failed_goal_drops_the_value_from_the_previous_iteration():
     goal = _goal(5.0, max_value=10.0, sim_type=SimulationType.AC)
     checker = DesignGoalChecker([goal])
 
-    checker.check_goals({"simulation_results": {SimulationType.AC: SimulationResult()}})
+    checker.check_goals(make_context(simulation_results={SimulationType.AC: SimulationResult()}))
     assert goal.current_value is not None
 
-    checker.check_goals({"simulation_results": {}})
+    checker.check_goals(make_context())
     assert goal.current_value is None
 
 
@@ -88,22 +92,22 @@ def test_a_partial_failure_only_penalises_the_missing_type():
     checker = DesignGoalChecker([ac_goal, hb_goal])
 
     context = checker.check_goals(
-        {"simulation_results": {SimulationType.AC: SimulationResult()}}
+        make_context(simulation_results={SimulationType.AC: SimulationResult()})
     )
 
     assert ac_goal.current_penalty is not None
     assert ac_goal.current_penalty < 0.0
     assert hb_goal.current_penalty == FAILED_SIMULATION_PENALTY
-    assert context["goal_achieved"] is False
+    assert context.goal_achieved is False
 
 
 def test_all_goals_met_still_reports_success():
     checker = DesignGoalChecker([_goal(5.0, max_value=10.0, sim_type=SimulationType.AC)])
     context = checker.check_goals(
-        {"simulation_results": {SimulationType.AC: SimulationResult()}}
+        make_context(simulation_results={SimulationType.AC: SimulationResult()})
     )
 
-    assert context["goal_achieved"] is True
+    assert context.goal_achieved is True
 
 
 # ---------------------------------------------------------------------------
@@ -126,30 +130,29 @@ class _StubSimulator(BaseSimulator):
         return self.results.pop(0)
 
 
-def _stage_context(tmp_path: Path) -> dict:
+def _stage_context(tmp_path: Path) -> OptimizationContext:
     netlist = tmp_path / "circuit.cir"
     netlist.write_text(netlist_path("minimal_ac").read_text(encoding="utf-8"), encoding="utf-8")
-    return {
-        "netlist": str(netlist),
-        "results_dir": str(tmp_path),
-        "native_sim_type": SimulationType.AC,
-        "predicted_networks": [],
-        "design_goal_checker": DesignGoalChecker(
+    return make_context(
+        netlist=str(netlist),
+        results_dir=str(tmp_path),
+        native_sim_type=SimulationType.AC,
+        design_goal_checker=DesignGoalChecker(
             [_goal(5.0, max_value=10.0, sim_type=SimulationType.AC)]
         ),
-    }
+    )
 
 
 def test_failed_run_clears_the_previous_iterations_result(tmp_path, caplog):
     stale = SimulationResult(output_files=["from_the_previous_iteration.s2p"])
     context = _stage_context(tmp_path)
-    context["simulation_results"] = {SimulationType.AC: stale}
+    context.simulation_results = {SimulationType.AC: stale}
     stage = CircuitSimulationStage(_StubSimulator([None]))
 
     with caplog.at_level(logging.WARNING):
         context = stage.run(context)
 
-    assert context["simulation_results"] == {}
+    assert context.simulation_results == {}
     assert "AC" in caplog.text
 
 
@@ -159,7 +162,7 @@ def test_successful_run_stores_the_result(tmp_path):
 
     context = stage.run(_stage_context(tmp_path))
 
-    assert context["simulation_results"] == {SimulationType.AC: result}
+    assert context.simulation_results == {SimulationType.AC: result}
 
 
 # ---------------------------------------------------------------------------

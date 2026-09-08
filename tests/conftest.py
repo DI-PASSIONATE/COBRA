@@ -17,6 +17,8 @@ from typing import Any
 import pytest
 
 from cobra.console import LOGGER_NAME
+from cobra.optimization_context import OptimizationContext
+from cobra.optimizers.design_goal import DesignGoalChecker
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -62,6 +64,18 @@ def _isolate_cobra_logging():
 def netlist_path(name: str) -> Path:
     """Absolute path of a fixture netlist, e.g. ``netlist_path("minimal_ac")``."""
     return NETLIST_DIR / f"{name}.cir"
+
+
+def make_context(**overrides) -> OptimizationContext:
+    """An :class:`OptimizationContext` with the run-level fields filled in.
+
+    ``netlist`` and ``design_goal_checker`` have no defaults because the
+    pipeline genuinely cannot run without them; a test exercising one stage
+    should not have to care about either.
+    """
+    fields: dict = {"netlist": "circuit.cir", "design_goal_checker": DesignGoalChecker([])}
+    fields.update(overrides)
+    return OptimizationContext(**fields)
 
 
 @pytest.fixture
