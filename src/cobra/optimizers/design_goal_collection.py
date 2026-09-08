@@ -416,8 +416,6 @@ _ALL_PARAMETERS: list[DesignParameter] = [
 # Use get_available_parameters() to obtain the subset valid for a given netlist.
 # ---------------------------------------------------------------------------
 
-MAX_PORTS: int = 8
-
 ALL_PARAMETERS: dict[str, DesignParameter] = {p.name: p for p in _ALL_PARAMETERS}
 
 def get_available_parameters(

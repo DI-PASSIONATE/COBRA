@@ -22,7 +22,7 @@ from cobra import __main__ as cli
 from cobra import diagnostics
 from cobra.configuration.configuration import ConfigurationError, RunConfiguration
 from cobra.spice_sim.simulation_type import SimulationType
-from tests.conftest import make_config_data, netlist_path
+from tests.conftest import make_config_data, make_context, netlist_path
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -183,7 +183,7 @@ def test_run_maps_failures_to_exit_codes(stubbed_run, exception, expected):
 
 def test_run_reports_the_configuration_before_starting(stubbed_run, capsys):
     """The header tells the user what is about to run, before any simulation."""
-    stubbed_run(lambda: {"results_dir": "results/demo"})
+    stubbed_run(lambda: make_context(results_dir="results/demo"))
 
     assert cli._run_config("anything.json") == EXIT_OK
 
@@ -195,12 +195,12 @@ def test_run_reports_the_configuration_before_starting(stubbed_run, capsys):
 
 def test_run_returns_zero_and_prints_the_results_directory(stubbed_run, capsys):
     stubbed_run(
-        lambda: {
-            "results_dir": "results/2026-01-01_demo",
-            "goal_achieved": True,
-            "iteration": 12,
-            "times": {"total_time": 90.0},
-        }
+        lambda: make_context(
+            results_dir="results/2026-01-01_demo",
+            goal_achieved=True,
+            iteration=12,
+            times={"total_time": 90.0},
+        )
     )
 
     assert cli._run_config("anything.json") == EXIT_OK
@@ -212,8 +212,8 @@ def test_run_returns_zero_and_prints_the_results_directory(stubbed_run, capsys):
 
 
 def test_run_summary_tolerates_a_context_without_timings(stubbed_run, capsys):
-    """A run stopped early may never fill in ``times``; the summary still prints."""
-    stubbed_run(lambda: {"results_dir": "results/partial"})
+    """A run stopped early leaves ``times`` at zero; the summary still prints."""
+    stubbed_run(lambda: make_context(results_dir="results/partial"))
 
     assert cli._run_config("anything.json") == EXIT_OK
     assert "results/partial" in capsys.readouterr().out

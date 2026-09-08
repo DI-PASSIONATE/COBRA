@@ -2,11 +2,18 @@ import importlib
 import multiprocessing as mp
 import os
 from concurrent.futures import ProcessPoolExecutor
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import skrf as rf
 
+from cobra.configuration.configuration import (
+    DEFAULT_PALACE_PROCESSES,
+    ConfigurationError,
+)
 from cobra.stages.base_stage import COBRABaseStage
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 def _mesh_gds_and_run_palace(
@@ -18,6 +25,7 @@ def _mesh_gds_and_run_palace(
     stackup_xml: str,
     simconfig_filename: str,
     palace_executable: str,
+    num_processes: int,
 ) -> None:
     """Run gmsh-dependent model creation and Palace simulation in a child process."""
     PDK = importlib.import_module("ihp").PDK
@@ -44,7 +52,7 @@ def _mesh_gds_and_run_palace(
         result_dir=os.path.join(base_dir),
         config_name=os.path.join(sim_path, "config.json"),
         palace_executable=palace_executable,
-        num_processes=16,
+        num_processes=num_processes,
         touchstone_type="all",
     )
 
@@ -54,11 +62,16 @@ class EMFineTuningStage(COBRABaseStage):
     This is to ensure that the surrogate model's predictions are accurate and to refine the design based on real EM results.
     """
 
-    def __init__(self, palace_executable):
+    def __init__(self, palace_executable, num_processes: int = DEFAULT_PALACE_PROCESSES):
+        if isinstance(num_processes, bool) or not isinstance(num_processes, int):
+            raise ConfigurationError("num_processes must be an integer")
+        if num_processes < 1:
+            raise ConfigurationError(f"num_processes must be at least 1, got {num_processes}")
         self.palace_executable = palace_executable
+        self.num_processes = num_processes
 
 
-    def run(self, context: dict, orca_geometry=None, comp_name: str | None = None) -> dict:
+    def run(self, context: "OptimizationContext", orca_geometry=None, comp_name: str | None = None) -> "OptimizationContext":
         """
         Creates a GDS file based on the current parameters, meshes it.
         If comp_name is provided, only parameters for that component are forwarded.
@@ -71,14 +84,14 @@ class EMFineTuningStage(COBRABaseStage):
             raise TypeError("orca_geometry must be an instance of BaseGeometry")
         geometry = cast("Any", orca_geometry)
 
-        base_dir = os.path.abspath(context.get("results_dir", os.path.join(os.getcwd(), "results")))
-        fine_tuning_run = context.get("fine_tuning_iteration", 0)
+        base_dir = os.path.abspath(context.results_dir)
+        fine_tuning_run = context.fine_tuning_iteration
         name_suffix = f"_{comp_name}" if comp_name else ""
-        name = f"cobra_result_ft_{fine_tuning_run}_{context['iteration']}{name_suffix}"
+        name = f"cobra_result_ft_{fine_tuning_run}_{context.iteration}{name_suffix}"
         gds_output_path = os.path.join(base_dir, f"{name}.gds")
 
         # Filter parameters for this specific component if comp_name is given
-        all_parameters = context["model_parameters"]
+        all_parameters = context.model_parameters
         if comp_name:
             prefix = f"{comp_name}:"
             parameters: dict[str, Any] = {}
@@ -106,11 +119,12 @@ class EMFineTuningStage(COBRABaseStage):
                 stackup_xml=geometry.stackup_xml,
                 simconfig_filename=geometry.simconfig_filename,
                 palace_executable=self.palace_executable,
+                num_processes=self.num_processes,
             )
             future.result()
 
         ntwk = rf.Network(os.path.join(base_dir, f"{name}_dc_deembedded.s6p"))
         if comp_name:
             ntwk.name = comp_name
-        context["predicted_networks"] = [ntwk]
+        context.predicted_networks = [ntwk]
         return context

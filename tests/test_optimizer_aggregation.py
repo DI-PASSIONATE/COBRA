@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty, OptimizationType
+from tests.conftest import make_context
 
 
 class RecordingOptimizer(BaseOptimizer):
@@ -43,42 +44,42 @@ def optimizer() -> RecordingOptimizer:
 
 
 def test_all_positive_losses_are_summed(optimizer):
-    assert optimizer._tell({}, [1.0, 2.0, 3.0]) == pytest.approx(6.0)
+    assert optimizer._tell(make_context(), [1.0, 2.0, 3.0]) == pytest.approx(6.0)
 
 
 def test_all_negative_losses_are_summed(optimizer):
     """With every goal satisfied, total margin is the score to keep improving."""
-    assert optimizer._tell({}, [-1.0, -2.0]) == pytest.approx(-3.0)
+    assert optimizer._tell(make_context(), [-1.0, -2.0]) == pytest.approx(-3.0)
 
 
 def test_mixed_signs_discard_the_negative_margin(optimizer):
     """Once any goal is violated, satisfied-goal margin stops counting."""
-    assert optimizer._tell({}, [-5.0, 2.0, -1.0, 3.0]) == pytest.approx(5.0)
+    assert optimizer._tell(make_context(), [-5.0, 2.0, -1.0, 3.0]) == pytest.approx(5.0)
 
 
 def test_zero_counts_as_non_negative(optimizer):
     """A list of zeros and positives takes the all-non-negative branch."""
-    assert optimizer._tell({}, [0.0, 4.0]) == pytest.approx(4.0)
+    assert optimizer._tell(make_context(), [0.0, 4.0]) == pytest.approx(4.0)
 
 
 def test_zeros_and_negatives_are_summed(optimizer):
-    assert optimizer._tell({}, [0.0, -4.0]) == pytest.approx(-4.0)
+    assert optimizer._tell(make_context(), [0.0, -4.0]) == pytest.approx(-4.0)
 
 
 def test_empty_loss_list_sums_to_zero(optimizer):
-    assert optimizer._tell({}, []) == pytest.approx(0.0)
+    assert optimizer._tell(make_context(), []) == pytest.approx(0.0)
 
 
 def test_multi_objective_forwards_the_raw_list():
     optimizer = RecordingOptimizer(multi_objective=True)
     losses = [-5.0, 2.0]
 
-    assert optimizer._tell({}, losses) == losses
+    assert optimizer._tell(make_context(), losses) == losses
     assert optimizer.told == [losses]
 
 
 def test_single_objective_forwards_a_scalar(optimizer):
-    optimizer._tell({}, [-5.0, 2.0])
+    optimizer._tell(make_context(), [-5.0, 2.0])
     assert optimizer.told == [pytest.approx(2.0)]
 
 

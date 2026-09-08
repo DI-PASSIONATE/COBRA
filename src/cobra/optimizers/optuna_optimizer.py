@@ -1,11 +1,14 @@
 import importlib
 import logging
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import optuna
 
 from cobra.configuration.setting import CobraSetting
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationProperty
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +93,9 @@ class OptunaOptimizer(BaseOptimizer):
                 "optunahub is required to use the requested sampler. Install it with `pip install optunahub`."
             ) from exc
 
-        module = optunahub.load_module(package_name)
-        sampler_cls = getattr(module, class_name)
-
         try:
+            module = optunahub.load_module(package_name)
+            sampler_cls = getattr(module, class_name)
             return sampler_cls(**self.sampler_kwargs)
         except Exception as exc:
             if class_name == "AutoSampler":
@@ -119,6 +121,8 @@ class OptunaOptimizer(BaseOptimizer):
             return optuna.samplers.RandomSampler(**self.sampler_kwargs)
         if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
             return self._load_optunahub_sampler("samplers/simulated_annealing", "SimulatedAnnealingSampler")
+        if sampler_name in {"auto", "autosampler"}:
+            return self._load_optunahub_sampler("samplers/auto_sampler", "AutoSampler")
 
         raise ValueError(
             "Unsupported sampler. Choose one of: AutoSampler, RandomSampler, TPESampler, SimulatedAnnealingSampler."
@@ -164,13 +168,13 @@ class OptunaOptimizer(BaseOptimizer):
             pruner=self._create_pruner(),
         )
 
-    def tell(self, context, penalty: list[float] | float):
-        trial = context["trial"]
+    def tell(self, context: "OptimizationContext", penalty: list[float] | float):
+        trial = context.trial
         self._get_study().tell(trial, penalty)
 
-    def step(self, context: dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+    def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         trial = self._get_study().ask()
-        context["trial"] = trial
+        context.trial = trial
         self._param_to_trial_name = {}
 
         def _suggest(params: list[OptimizationProperty], with_unit: bool) -> dict[str, Any]:
@@ -218,8 +222,8 @@ class OptunaOptimizer(BaseOptimizer):
         netlist_parameters = _suggest(netlist_property_ranges, with_unit=True)
 
         # Update context
-        context["model_parameters"] = model_parameters
-        context["netlist_parameters"] = netlist_parameters
+        context.model_parameters = model_parameters
+        context.netlist_parameters = netlist_parameters
 
     def get_best_parameters(self) -> dict[str, Any]:
         if self.multi_objective:

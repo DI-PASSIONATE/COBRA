@@ -8,14 +8,22 @@ from typing import ClassVar
 import pandas as pd
 import skrf as rf
 
+from cobra.configuration.configuration import ConfigurationError
 from cobra.configuration.setting import CobraSetting
-from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
+from cobra.spice_sim.base_simulator import (
+    BaseSimulator,
+    SimulationResult,
+    SimulatorError,
+)
 from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 from cobra.spice_sim.vector_fit import vector_fit
 
 logger = logging.getLogger(__name__)
+
+#: Default MPI rank count for parallel Xyce runs: one per available core.
+DEFAULT_XYCE_PROCESSES: int = os.cpu_count() or 1
 
 _PRINT_FILE_RE = re.compile(r"\bfile=(\S+)", re.IGNORECASE)
 
@@ -84,7 +92,7 @@ _XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
 }
 
 class XyceSimulator(BaseSimulator):
-    netlist_parser: BaseNetlistParser = XyceNetlistParser()
+    netlist_parser: BaseNetlistParser
 
     @classmethod
     def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
@@ -107,9 +115,19 @@ class XyceSimulator(BaseSimulator):
             dtype=bool,
             default=False,
             description=(
-                "Run Xyce in parallel using MPI (mpirun -np 8).\n"
+                "Run Xyce in parallel using MPI (mpirun).\n"
                 "Requires an MPI-enabled Xyce build and mpirun on PATH.\n"
                 "WARNING: Usually a lot slower than single-core Xyce for small and medium-sized circuits."
+            ),
+        ),
+        CobraSetting(
+            name="parallel_xyce_processes",
+            dtype=int,
+            default=DEFAULT_XYCE_PROCESSES,
+            description=(
+                "Number of MPI ranks used when parallel_xyce is enabled (mpirun -np N).\n"
+                "Defaults to the number of cores available on this machine.\n"
+                "Requesting more ranks than the machine has slots makes mpirun fail."
             ),
         ),
         CobraSetting(
@@ -124,10 +142,25 @@ class XyceSimulator(BaseSimulator):
         ),
     ]
 
-    def __init__(self, xyce_command: str = "Xyce", parallel_xyce: bool = False, enforce_passivity: bool = False):
+    def __init__(
+        self,
+        xyce_command: str = "Xyce",
+        parallel_xyce: bool = False,
+        enforce_passivity: bool = False,
+        parallel_xyce_processes: int = DEFAULT_XYCE_PROCESSES,
+    ):
+        if isinstance(parallel_xyce_processes, bool) or not isinstance(parallel_xyce_processes, int):
+            raise ConfigurationError("parallel_xyce_processes must be an integer")
+        if parallel_xyce_processes < 1:
+            raise ConfigurationError(
+                f"parallel_xyce_processes must be at least 1, got {parallel_xyce_processes}"
+            )
+        # A parser holds the state of one netlist, so every simulator gets its own.
+        self.netlist_parser = XyceNetlistParser()
         self.xyce_command = xyce_command
         self.parallel = parallel_xyce
         self.enforce_passivity = enforce_passivity
+        self.parallel_processes = parallel_xyce_processes
 
     def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
@@ -151,22 +184,35 @@ class XyceSimulator(BaseSimulator):
                     custom_print_files.append(os.path.join(results_dir, m.group(1)))
 
         # --- Run Xyce --------------------------------------------------------
-        parallel_command = ["mpirun", "-np", "8"] if self.parallel else []
+        parallel_command = (
+            ["mpirun", "-np", str(self.parallel_processes)] if self.parallel else []
+        )
         command = [*parallel_command, self.xyce_command, netlist_base]
         # check=False: a non-zero return code is reported below, not raised.
-        proc = subprocess.run(
-            command, capture_output=True, text=True, cwd=results_dir, check=False
-        )
+        try:
+            proc = subprocess.run(
+                command, capture_output=True, text=True, cwd=results_dir, check=False
+            )
+        except OSError as exc:
+            # The executable is missing or cannot be started: no choice of design
+            # parameters can fix this, so abort instead of penalising the trial.
+            raise SimulatorError(
+                f"Could not run '{' '.join(command)}': {exc}. "
+                "Check that Xyce is installed and on PATH (or set the xyce_command "
+                "setting to its absolute path); run `cobra doctor` to inspect the environment."
+            ) from exc
 
         if proc.returncode != 0:
-            logger.error(
+            # A convergence failure is a property of the parameters, not of the setup:
+            # report it and let the caller penalise this trial.
+            logger.warning(
                 "Xyce failed for %s (return code %s) in %s",
                 sim_type,
                 proc.returncode,
                 results_dir,
             )
             if proc.stderr:
-                logger.error("Xyce stderr:\n%s", proc.stderr.strip())
+                logger.warning("Xyce stderr:\n%s", proc.stderr.strip())
             return None
 
         # --- Collect output files --------------------------------------------
@@ -191,7 +237,7 @@ class XyceSimulator(BaseSimulator):
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
             found.extend(glob.glob(os.path.join(results_dir, "*.prn")))
-            found.extend(glob.glob(os.path.join(results_dir, ".s[0-9]p")))
+            found.extend(glob.glob(os.path.join(results_dir, "*.s[0-9]p")))
 
         # Add any files explicitly named in .PRINT file= directives
         for path in custom_print_files:
@@ -199,7 +245,7 @@ class XyceSimulator(BaseSimulator):
                 found.append(path)
 
         if not found:
-            logger.error(
+            logger.warning(
                 "Xyce completed but produced no output files for %s in %s",
                 sim_type,
                 results_dir,

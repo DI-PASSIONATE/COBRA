@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import re
+from collections.abc import Mapping
 
 from cobra.spice_sim.netlist_parsers.netlist_parser import (
     BaseNetlistParser,
@@ -177,7 +178,7 @@ class XyceNetlistParser(BaseNetlistParser):
         self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
         self.parse_netlist()
 
-    def update_parameters(self, parameters: dict[str, float]) -> None:
+    def update_parameters(self, parameters: Mapping[str, float | str]) -> None:
         """
         Bulk-update multiple parameters by name.
 

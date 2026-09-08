@@ -14,6 +14,13 @@ if TYPE_CHECKING:
     from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
 
 
+class SimulatorError(RuntimeError):
+    """Raised when the simulator itself could not be run.
+    This is a technical failure (missing or unusable executable, unreadable
+    netlist file)
+    """
+
+
 @dataclass
 class SimulationResult:
     """Unified result returned by :meth:`BaseSimulator.run_simulation`.
@@ -57,6 +64,9 @@ class BaseSimulator(ABC):
 
         Returns ``None`` if the simulation failed (non-zero exit code or no
         output files found).
+
+        Raises:
+            SimulatorError: The simulator could not be run/found at all.
         """
 
     @abstractmethod

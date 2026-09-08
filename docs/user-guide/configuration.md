@@ -163,6 +163,7 @@ apply to a run may use empty objects or arrays.
   "fine_tuning": {
     "enabled": false,
     "palace_command": "palace",
+    "palace_processes": 16,
     "iterations": 3,
     "optimizer": "reuse",
     "geometries": {}
@@ -174,6 +175,13 @@ Optimization parameter types are `model_input` and `netlist_variable`. Dynamic H
 goals use `power_dbm` or `gain_db` as their `kind`; gain goals additionally store
 the input port, source amplitude, and impedance required to reconstruct their
 power reference.
+
+`fine_tuning.palace_processes` is the number of MPI ranks Palace uses per EM
+simulation; the Xyce simulator takes the equivalent `parallel_xyce_processes`
+setting, used when `parallel_xyce` is enabled. Both must be at least 1 and both
+default to the number of cores available on the machine writing the
+configuration, so set them explicitly when a configuration is shared between
+machines.
 
 Fine-tuning presets store their Python module and class name. Custom geometries
 store a JSON-relative Python file and class name. ORCA is imported only when an

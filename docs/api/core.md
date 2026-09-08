@@ -47,6 +47,33 @@ cobra.run(
 - track timings and iteration history,
 - save context JSON and generated artifacts.
 
+### Return value: `OptimizationContext`
+
+`run(...)` returns an `OptimizationContext` — the dataclass that carries state
+through every stage. It is also what `callback` receives on each iteration, and
+what is written to `cobra_optimization_context.json`.
+
+```python
+context = cobra.run(...)
+context.goal_achieved      # bool: were all goals met?
+context.iteration          # iterations actually run
+context.netlist_parameters # {name: "2.5n"} applied to the netlist
+context.model_parameters   # {name: value} fed to the surrogate
+context.goals              # DesignGoal objects, carrying current_value / current_penalty
+context.simulation_results # {SimulationType: SimulationResult} — a type that failed is absent
+context.times              # seconds per stage, plus "total_time"
+context.iterations         # one record per optimizer step
+context.results_dir        # where everything was written
+```
+
+A field a stage does not own should be treated as read-only. `max_iterations`
+is the exception: raising it mid-run is how the GUI continues past the original
+budget.
+
+!!! note
+    Fields are accessed as attributes, not as dict keys. `context["goal_achieved"]`
+    raises `TypeError`; use `context.goal_achieved`.
+
 ## Practical Notes
 
 !!! warning

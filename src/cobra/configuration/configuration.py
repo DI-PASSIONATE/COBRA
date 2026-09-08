@@ -15,6 +15,10 @@ class ConfigurationError(ValueError):
     """Raised when a COBRA run configuration is invalid."""
 
 
+#: Default MPI rank count for Palace fine-tuning runs: one per available core.
+DEFAULT_PALACE_PROCESSES: int = os.cpu_count() or 1
+
+
 def _require_keys(data: dict[str, Any], allowed: set[str], context: str) -> None:
     unknown = set(data) - allowed
     if unknown:
@@ -197,6 +201,7 @@ class GeometryConfig:
 class FineTuningConfig:
     enabled: bool = False
     palace_command: str = "palace"
+    palace_processes: int = DEFAULT_PALACE_PROCESSES
     iterations: int = 3
     optimizer: str = "reuse"
     geometries: dict[str, GeometryConfig] = field(default_factory=dict)
@@ -204,7 +209,9 @@ class FineTuningConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FineTuningConfig:
         data = _mapping(data, "fine_tuning")
-        allowed = {"enabled", "palace_command", "iterations", "optimizer", "geometries"}
+        allowed = {
+            "enabled", "palace_command", "palace_processes", "iterations", "optimizer", "geometries",
+        }
         _require_keys(data, allowed, "fine_tuning")
         geometries_data = _mapping(data.get("geometries", {}), "fine_tuning.geometries")
         geometries = {
@@ -222,6 +229,10 @@ class FineTuningConfig:
             raise ConfigurationError("fine_tuning.enabled must be a boolean")
         if not isinstance(self.palace_command, str) or not self.palace_command.strip():
             raise ConfigurationError("fine_tuning.palace_command must be a non-empty string")
+        if not isinstance(self.palace_processes, int) or isinstance(self.palace_processes, bool):
+            raise ConfigurationError("fine_tuning.palace_processes must be an integer")
+        if self.palace_processes < 1:
+            raise ConfigurationError("fine_tuning.palace_processes must be at least 1")
         if not isinstance(self.iterations, int) or isinstance(self.iterations, bool):
             raise ConfigurationError("fine_tuning.iterations must be an integer")
         if self.iterations < 1:

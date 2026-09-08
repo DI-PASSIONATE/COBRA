@@ -9,8 +9,14 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from cobra.optimization_context import OptimizationContext
     from cobra.spice_sim.base_simulator import SimulationResult
     from cobra.spice_sim.simulation_type import SimulationType
+
+
+FAILED_SIMULATION_PENALTY = 1e6
+"""Penalty for a goal whose simulation produced no result.
+"""
 
 
 @dataclass
@@ -178,23 +184,27 @@ class DesignGoalChecker:
             st = goal.required_simulation_type
             self.design_goals.setdefault(st, []).append(goal)
 
-    def check_goals(self, context: dict) -> dict:
+    def check_goals(self, context: OptimizationContext) -> OptimizationContext:
         """
         Evaluate all goals and update *context* with results.
 
-        Reads ``context["simulation_results"]`` (``dict[SimulationType, SimulationResult]``).
+        Reads ``context.simulation_results`` (``dict[SimulationType, SimulationResult]``).
         """
-        sim_results: dict = context.get("simulation_results") or {}
+        sim_results = context.simulation_results
         penalties = self.loss(sim_results)
 
-        context["goal_achieved"] = all(p <= 0.0 for p in penalties)
-        context["goals"] = [goal for goals in self.design_goals.values() for goal in goals]
+        context.goal_achieved = bool(penalties) and all(p <= 0.0 for p in penalties)
+        context.goals = [goal for goals in self.design_goals.values() for goal in goals]
 
         return context
 
     def loss(self, sim_results: dict[SimulationType, SimulationResult]) -> list[float]:
         """
         Compute penalties for each goal using the appropriate network.
+
+        A goal whose simulation type is missing from *sim_results* — the
+        simulation failed — receives :data:`FAILED_SIMULATION_PENALTY` instead of
+        being skipped, so the optimizer learns to avoid those parameters.
 
         Parameters
         ----------
@@ -203,11 +213,16 @@ class DesignGoalChecker:
         """
         penalties = []
 
-        # Iterate over all results and check all goals that require that simulation type
-        for sim_type, sim_result in sim_results.items():
-            goals_for_type = self.design_goals.get(sim_type, [])
-            if not goals_for_type:
-                continue  # No goals for this simulation type
+        # Iterate over all goals and evaluate them against the result of the
+        # simulation type they require.
+        for sim_type, goals_for_type in self.design_goals.items():
+            sim_result = sim_results.get(sim_type)
+            if sim_result is None:
+                for goal in goals_for_type:
+                    goal.current_value = None
+                    goal.current_penalty = FAILED_SIMULATION_PENALTY
+                    penalties.append(FAILED_SIMULATION_PENALTY)
+                continue
 
             penalties.extend(goal.penalty(sim_result) for goal in goals_for_type)
 

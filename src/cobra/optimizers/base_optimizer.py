@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 class OptimizationType(Enum):
@@ -42,7 +45,7 @@ class BaseOptimizer(ABC):
         """
 
     @abstractmethod
-    def step(self, context: dict[str, Any], model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+    def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         """
         Optimize the parameters based on the given input parameter range and constraints.
 
@@ -53,7 +56,7 @@ class BaseOptimizer(ABC):
         """
 
     @abstractmethod
-    def tell(self, context, penalty: list[float] | float):
+    def tell(self, context: "OptimizationContext", penalty: list[float] | float):
         """
         Provide feedback to the optimizer about the performance of the given parameters.
 
@@ -81,7 +84,7 @@ class BaseOptimizer(ABC):
             A dictionary containing the best parameters found by the optimizer, where the keys are parameter names and the values are the optimized parameter values.
         """
 
-    def _tell(self, context, loss: list[float]):
+    def _tell(self, context: "OptimizationContext", loss: list[float]):
         """
         Internal method that converts the list of loss values into a single penalty value if multi_objective is False, and then calls the tell method with the appropriate penalty.
 

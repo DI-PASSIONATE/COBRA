@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from cobra.optimization_context import OptimizationContext
+
 OPTIMIZER_REGISTRY = {"OptunaOptimizer": OptunaOptimizer}
 SIMULATOR_REGISTRY = {"XyceSimulator": XyceSimulator}
 
@@ -115,7 +117,7 @@ class ConfiguredRun:
     orca_geometries: dict[str, Any]
     simulation_parameters: dict[SimulationType, dict[str, str]]
 
-    def run(self, callback: Callable[[dict], bool | None] | None = None) -> dict:
+    def run(self, callback: Callable[[OptimizationContext], bool | None] | None = None) -> OptimizationContext:
         return self.cobra.run(
             netlist=self.configuration.netlist,
             design_goals=self.design_goals,
@@ -194,6 +196,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         optimizer=optimizer_class(**configuration.optimizer.settings),
         circuit_simulator=simulator_class(**configuration.simulator.settings),
         palace_fine_tuning_command=fine_tuning.palace_command if fine_tuning.enabled else None,
+        palace_fine_tuning_processes=fine_tuning.palace_processes,
         fine_tuning_iterations=fine_tuning.iterations,
         fine_tuning_optimizer=fine_tuning.optimizer if fine_tuning.enabled else "reuse",
     )
@@ -209,6 +212,6 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
 
 
 def run_configuration_file(
-    path: str | Path, callback: Callable[[dict], bool | None] | None = None
-) -> dict:
+    path: str | Path, callback: Callable[[OptimizationContext], bool | None] | None = None
+) -> OptimizationContext:
     return build_configured_run(RunConfiguration.load(path)).run(callback)

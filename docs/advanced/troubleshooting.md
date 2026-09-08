@@ -28,9 +28,36 @@ pip install -e .
 
 ## Xyce Execution Fails
 
-- Verify `Xyce` is installed and in `PATH` (`cobra doctor` reports this).
+COBRA treats the two kinds of Xyce failure differently.
+
+**A simulation that fails** — Xyce exits non-zero (for example because the
+sampled parameters describe a circuit that will not converge) or writes no
+output — is a property of the parameters. COBRA logs a warning, assigns a very
+high loss to every design goal that needed that analysis, and continues, so the
+optimizer steers away from those parameters:
+
+```
+WARNING  Xyce failed for SimulationType.AC (return code 1) in results/...
+WARNING  No AC result for these parameters; the design goals that need it are penalised so the optimizer avoids them
+```
+
+Occasional warnings of this kind are normal. If *every* iteration produces them,
+the netlist itself is at fault:
+
 - Check your netlist compatibility.
 - Confirm generated include/subcircuit files exist in the run output folder.
+- Narrow the parameter ranges so the optimizer cannot reach unphysical values.
+
+**A simulator that cannot be run at all** — Xyce is not installed, not on
+`PATH`, or not executable — raises `SimulatorError` and stops the run, because
+no choice of parameters can fix it:
+
+- Verify `Xyce` is installed and in `PATH` (`cobra doctor` reports this).
+- Or set the simulator's `xyce_command` setting to the absolute path of the
+  executable.
+- With `parallel_xyce` enabled, `mpirun` must be on `PATH` too. The rank count
+  comes from the `parallel_xyce_processes` setting (default: the machine's core
+  count); `mpirun` fails when it exceeds the available slots.
 
 ## Component Mapping Errors
 

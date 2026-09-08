@@ -1,4 +1,8 @@
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 class COBRABaseStage(ABC):
@@ -9,13 +13,13 @@ class COBRABaseStage(ABC):
     """
 
     @abstractmethod
-    def run(self, context) -> dict:
+    def run(self, context: "OptimizationContext") -> "OptimizationContext":
         """
         Process the given design state and return an updated state.
 
         Parameters:
-            context (dict): A dictionary representing the current state of the design.
+            context: The current state of the design.
 
         Returns:
-            dict: An updated state of the design after processing.
+            The same context, updated with the fields this stage owns.
         """

@@ -30,6 +30,7 @@ from cobra.diagnostics import cobra_version
 
 if TYPE_CHECKING:
     from cobra.configuration.config_runner import ConfiguredRun
+    from cobra.optimization_context import OptimizationContext
 
 logger = logging.getLogger(__name__)
 
@@ -193,24 +194,21 @@ def _run_header(configured: ConfiguredRun, palette: Palette) -> None:
     write()
 
 
-def _run_summary(context: dict, palette: Palette) -> None:
-    achieved = context.get("goal_achieved")
-    iteration = context.get("iteration")
-    if achieved:
+def _run_summary(context: OptimizationContext, palette: Palette) -> None:
+    iteration = context.iteration
+    if context.goal_achieved:
         status = palette.green(f"design goals achieved at iteration {iteration}")
-    elif achieved is None:
-        status = ""
     else:
         status = palette.yellow(f"design goals not achieved after {iteration} iterations")
 
-    total = (context.get("times") or {}).get("total_time") or 0.0
+    total = context.times.get("total_time") or 0.0
     write()
     write_heading("Summary", palette)
     write_fields(
         [
             ("status", status),
             ("wall time", format_duration(total) if total else ""),
-            ("results", str(context.get("results_dir", "unknown"))),
+            ("results", context.results_dir),
         ],
         palette,
     )

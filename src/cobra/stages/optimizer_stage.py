@@ -1,7 +1,12 @@
 
 
+from typing import TYPE_CHECKING
+
 from cobra.optimizers.base_optimizer import BaseOptimizer, OptimizationType
 from cobra.stages.base_stage import COBRABaseStage
+
+if TYPE_CHECKING:
+    from cobra.optimization_context import OptimizationContext
 
 
 class OptimizerStage(COBRABaseStage):
@@ -13,23 +18,23 @@ class OptimizerStage(COBRABaseStage):
     def __init__(self, optimizer: BaseOptimizer):
         self.optimizer = optimizer
 
-    def run(self, context: dict) -> dict:
-        optimization_parameters = context["optimization_parameters"]
+    def run(self, context: "OptimizationContext") -> "OptimizationContext":
+        optimization_parameters = context.optimization_parameters
         model_input_parameters = [p for p in optimization_parameters if p.type == OptimizationType.MODEL_INPUT]
         netlist_variable_parameters = [p for p in optimization_parameters if p.type == OptimizationType.NETLIST_VARIABLE]
 
         self.optimizer.step(context, model_input_parameters, netlist_variable_parameters)
         return context
 
-    def tell(self, context):
-        goals = context.get("goals", [])
+    def tell(self, context: "OptimizationContext"):
+        goals = context.goals
         loss_values = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in goals]
-        status = "finetuning" if context.get("fine_tuning_active") else "optimization"
-        context["iterations"].append({
-            "iteration": context.get("iteration"),
+        status = "finetuning" if context.fine_tuning_active else "optimization"
+        context.iterations.append({
+            "iteration": context.iteration,
             "status": status,
-            "model_parameters": context["model_parameters"],
-            "netlist_parameters": context["netlist_parameters"],
+            "model_parameters": context.model_parameters,
+            "netlist_parameters": context.netlist_parameters,
             "losses": loss_values
         })
         # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False
