@@ -21,8 +21,9 @@ class RecordingOptimizer(BaseOptimizer):
         super().__init__(multi_objective)
         self.told: list[Any] = []
 
-    def initialize(self, num_goals: int):
+    def initialize(self, num_goals: int, parallel_trials: int = 1):
         self.num_goals = num_goals
+        self.parallel_trials = parallel_trials
 
     def step(self, context, model_input_ranges, netlist_property_ranges):  # pragma: no cover
         raise NotImplementedError
