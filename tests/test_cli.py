@@ -21,6 +21,7 @@ import pytest
 from cobra import __main__ as cli
 from cobra import diagnostics
 from cobra.configuration.configuration import ConfigurationError, RunConfiguration
+from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
 from cobra.spice_sim.simulation_type import SimulationType
 from tests.conftest import make_config_data, make_context, netlist_path
 
@@ -38,11 +39,19 @@ def stub_configured_run(run):
             optimizer=SimpleNamespace(name="OptunaOptimizer"),
             simulator=SimpleNamespace(name="XyceSimulator"),
             max_iterations=250,
+            parallel_trials=1,
             fine_tuning=SimpleNamespace(enabled=False, palace_command="palace", iterations=3),
         ),
         parser=SimpleNamespace(simulation_type=SimulationType.AC),
         design_goals=[object(), object()],
-        optimization_parameters=[object()],
+        optimization_parameters=[
+            OptimizationProperty(
+                name="R1",
+                type=OptimizationType.NETLIST_VARIABLE,
+                min_value=10.0,
+                max_value=100.0,
+            )
+        ],
         run=run,
     )
 
@@ -199,7 +208,10 @@ def test_run_returns_zero_and_prints_the_results_directory(stubbed_run, capsys):
             results_dir="results/2026-01-01_demo",
             goal_achieved=True,
             iteration=12,
-            times={"total_time": 90.0},
+            wall_time=90.0,
+            # Concurrent trials make the stage times add up to more than the run
+            # took; the summary must report the elapsed time, not this.
+            times={"total_time": 300.0},
         )
     )
 
@@ -209,6 +221,7 @@ def test_run_returns_zero_and_prints_the_results_directory(stubbed_run, capsys):
     assert "results/2026-01-01_demo" in out
     assert "achieved at iteration 12" in out
     assert "1m 30s" in out
+    assert "5m" not in out
 
 
 def test_run_summary_tolerates_a_context_without_timings(stubbed_run, capsys):

@@ -253,6 +253,7 @@ class RunConfiguration:
     optimizer: BackendConfig = field(default_factory=lambda: BackendConfig("OptunaOptimizer"))
     simulator: BackendConfig = field(default_factory=lambda: BackendConfig("XyceSimulator"))
     max_iterations: int = 500
+    parallel_trials: int = 1
     optimization_parameters: list[OptimizationParameterConfig] = field(default_factory=list)
     design_goals: list[DesignGoalConfig] = field(default_factory=list)
     fine_tuning: FineTuningConfig = field(default_factory=FineTuningConfig)
@@ -264,8 +265,8 @@ class RunConfiguration:
     ) -> RunConfiguration:
         allowed = {
             "schema_version", "netlist", "component_models", "simulation_parameters",
-            "optimizer", "simulator", "max_iterations", "optimization_parameters",
-            "design_goals", "fine_tuning",
+            "optimizer", "simulator", "max_iterations", "parallel_trials",
+            "optimization_parameters", "design_goals", "fine_tuning",
         }
         _require_keys(data, allowed, "configuration")
         version = data.get("schema_version")
@@ -299,6 +300,7 @@ class RunConfiguration:
             optimizer=BackendConfig.from_dict(data.get("optimizer", {"name": "OptunaOptimizer"}), "optimizer"),
             simulator=BackendConfig.from_dict(data.get("simulator", {"name": "XyceSimulator"}), "simulator"),
             max_iterations=data.get("max_iterations", 500),
+            parallel_trials=data.get("parallel_trials", 1),
             optimization_parameters=[
                 OptimizationParameterConfig.from_dict(item)
                 for item in data.get("optimization_parameters", [])
@@ -329,6 +331,12 @@ class RunConfiguration:
             )
         if not isinstance(self.max_iterations, int) or self.max_iterations < 1:
             raise ConfigurationError("max_iterations must be a positive integer")
+        if isinstance(self.parallel_trials, bool) or not isinstance(self.parallel_trials, int):
+            raise ConfigurationError("parallel_trials must be an integer")
+        if self.parallel_trials < 1:
+            raise ConfigurationError(
+                f"parallel_trials must be at least 1, got {self.parallel_trials}"
+            )
         if check_paths and not Path(self.netlist).is_file():
             raise ConfigurationError(f"Netlist file not found: {self.netlist}")
         for component, model in self.component_models.items():

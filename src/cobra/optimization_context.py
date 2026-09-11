@@ -10,8 +10,10 @@ group below: everything a stage does not own it should treat as read-only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cobra.spice_sim.simulation_type import SimulationType
@@ -113,11 +115,64 @@ class OptimizationContext:
     iterations: list[dict[str, Any]] = field(default_factory=list)
     """One record per optimizer step, appended by :meth:`OptimizerStage.tell`."""
     times: dict[str, float] = field(default_factory=_zeroed_stage_times)
+    """Seconds spent per stage, summed over every trial.
 
-    # --- Supplied by the GUI ------------------------------------------------
-    prev_network: rf.Network | None = None
-    """Previous iteration's network, for the GUI's comparison plot."""
+    With trials running concurrently these add up to more than the run took:
+    they measure work done, not time elapsed. For elapsed time use
+    :attr:`wall_time`.
+    """
+    wall_time: float = 0.0
+    """Seconds of real elapsed time for the whole run, set by :meth:`COBRA.run`."""
 
     def to_json_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view of this context."""
         return sanitize_for_json(vars(self))
+
+    # --- Parallel trial evaluation ------------------------------------------
+
+    def for_trial(self, trial_dir: Path) -> OptimizationContext:
+        """Return a context for one trial, evaluated inside *trial_dir*.
+
+        Trials may run concurrently, so everything a trial writes has to be its
+        own: its working directory, its netlist copy, and its design goals —
+        :meth:`~cobra.optimizers.design_goal.DesignGoal.penalty` stores the
+        value and penalty on the goal object itself.  The run-wide fields are
+        shared by reference and must be treated as read-only by the trial.
+        """
+        return replace(
+            self,
+            results_dir=str(trial_dir),
+            netlist=str(trial_dir / Path(self.netlist).name),
+            design_goal_checker=deepcopy(self.design_goal_checker),
+            model_parameters={},
+            netlist_parameters={},
+            trial=None,
+            predicted_networks=[],
+            simulation_results={},
+            goals=[],
+            goal_achieved=False,
+            iterations=[],
+            times=_zeroed_stage_times(),
+            wall_time=0.0,
+        )
+
+    def absorb_trial(self, trial: OptimizationContext, include_times: bool = True) -> None:
+        """Merge a finished trial's results into this run-wide context.
+
+        The stage times are summed rather than replaced, so with more than one
+        trial in flight they add up to more than the run's wall-clock time.
+        Pass ``include_times=False`` to re-apply a trial whose time was already
+        counted, which happens when a successful trial has to be reinstated
+        after the trials that were still in flight alongside it.
+        """
+        self.iteration = trial.iteration
+        self.trial = trial.trial
+        self.model_parameters = trial.model_parameters
+        self.netlist_parameters = trial.netlist_parameters
+        self.predicted_networks = trial.predicted_networks
+        self.simulation_results = trial.simulation_results
+        self.goals = trial.goals
+        self.goal_achieved = trial.goal_achieved
+        if include_times:
+            for key, seconds in trial.times.items():
+                self.times[key] = self.times.get(key, 0.0) + seconds

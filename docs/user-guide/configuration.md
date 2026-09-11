@@ -123,6 +123,7 @@ apply to a run may use empty objects or arrays.
     "settings": {}
   },
   "max_iterations": 500,
+  "parallel_trials": 1,
   "optimization_parameters": [
     {
       "name": "X1:width",
@@ -182,6 +183,25 @@ setting, used when `parallel_xyce` is enabled. Both must be at least 1 and both
 default to the number of cores available on the machine writing the
 configuration, so set them explicitly when a configuration is shared between
 machines.
+
+`parallel_trials` is how many optimization trials are evaluated at the same
+time, each with its own single-threaded simulation in its own directory. It
+defaults to 1. For small and medium-sized circuits this is the setting that
+actually shortens a run: Xyce is often slower with several MPI ranks than with
+one, so N concurrent trials beat one N-rank simulation. Do not combine it with
+`parallel_xyce` unless the machine has cores for both — `parallel_trials` times
+`parallel_xyce_processes` is the peak load, and COBRA warns when both are set.
+It requires an optimizer that can suggest a trial before the previous one
+reported back: Optuna can, gradient descent cannot and rejects any value above
+1. One consequence to be aware of: once the design goals are met, the trials
+already running are still finished, so up to `parallel_trials - 1` extra
+evaluations may be performed.
+
+The summary's `wall time` is always the run's elapsed time. The per-stage
+percentages beside it are shares of the summed stage times, which measure work
+done rather than time elapsed and therefore add up to more than `wall time` when
+trials ran concurrently — the log line names both numbers so they cannot be
+confused.
 
 Fine-tuning presets store their Python module and class name. Custom geometries
 store a JSON-relative Python file and class name. ORCA is imported only when an

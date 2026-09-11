@@ -525,6 +525,7 @@ class ConfigurationReport:
     optimizer: dict[str, Any] = field(default_factory=dict)
     simulator: dict[str, Any] = field(default_factory=dict)
     max_iterations: int | None = None
+    parallel_trials: int | None = None
     component_models: list[ComponentModelReport] = field(default_factory=list)
     optimization_parameters: list[OptimizationParameterReport] = field(default_factory=list)
     design_goals: list[DesignGoalReport] = field(default_factory=list)
@@ -563,6 +564,7 @@ def inspect_configuration(path: str | Path, *, check_models: bool = True) -> Con
     report.valid = True
     report.netlist_path = configuration.netlist
     report.max_iterations = configuration.max_iterations
+    report.parallel_trials = configuration.parallel_trials
     report.optimizer = {"name": configuration.optimizer.name, "settings": configuration.optimizer.settings}
     report.simulator = {"name": configuration.simulator.name, "settings": configuration.simulator.settings}
     report.simulation_parameters = configuration.simulation_parameters
@@ -1371,6 +1373,7 @@ def render_configuration_report(report: ConfigurationReport, *, full: bool = Fal
     if report.valid:
         _field(lines, "netlist", report.netlist_path)
         _field(lines, "max iterations", report.max_iterations)
+        _field(lines, "parallel trials", report.parallel_trials)
         _field(
             lines,
             "optimizer",

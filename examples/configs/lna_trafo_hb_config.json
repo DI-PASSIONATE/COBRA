@@ -25,10 +25,12 @@
     "settings": {
       "xyce_command": "Xyce",
       "parallel_xyce": false,
+      "parallel_xyce_processes": 16,
       "enforce_passivity": false
     }
   },
   "max_iterations": 500,
+  "parallel_trials": 8,
   "optimization_parameters": [
     {
       "name": "Xnpn13G1:Nx",

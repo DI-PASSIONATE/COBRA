@@ -123,6 +123,7 @@ class ConfiguredRun:
             design_goals=self.design_goals,
             optimization_parameters=self.optimization_parameters,
             max_iterations=self.configuration.max_iterations,
+            parallel_trials=self.configuration.parallel_trials,
             orca_geometries=self.orca_geometries,
             callback=callback,
             sim_params_by_type=self.simulation_parameters,
