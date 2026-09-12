@@ -13,15 +13,13 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 
 [Paper (Coming Soon)](#cite-this-work) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
 
-> [!NOTE]
-> COBRA is still under active development, and the paper is yet to be released. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DI-PASSIONATE/COBRA/issues) or reach out.
-
-**COBRA** is an optimization framework for RFIC workflows.
-It combines:
+**COBRA** is an optimization framework for RFIC workflows. It combines:
 
 - surrogate-model S-parameter prediction (from [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
 - circuit-level SPICE simulation via Xyce,
-- and goal-driven optimization (Optuna-based).
+- goal-driven optimization (Optuna-based).
+- optional EM fine-tuning (Palace) to ensure accurate results
+- and real-time visualization of optimization progress
 
 You can easily define goals and configurations in the GUI:
 
@@ -40,6 +38,9 @@ COBRA is the optimization/runtime side of the flow.
 - Optional fine-tuning in COBRA can call full-wave EM simulations (Palace) and uses [ORCA](https://github.com/DI-PASSIONATE/ORCA) geometry classes (preset or custom).
 
 In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA uses it to optimize circuits quickly and can verify/refine with EM fine-tuning.
+
+> [!NOTE]
+> COBRA is still under active development, and the paper is not available online yet. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DI-PASSIONATE/COBRA/issues) or reach out.
 
 ## Installation
 ### Requirements
