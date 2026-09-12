@@ -1,0 +1,14 @@
+:root {
+  --cobra-card-border: 1px solid rgba(127, 127, 127, 0.3);
+}
+
+.md-typeset hr {
+  margin-top: 1.8rem;
+  margin-bottom: 1.8rem;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border: var(--cobra-card-border);
+  border-radius: 0.5rem;
+}
