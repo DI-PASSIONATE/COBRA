@@ -10,10 +10,12 @@ from cobra.spice_sim.hb_spectrum import (
     QUANTITY_META,
     available_power_dbm,
     classify_bins,
+    covers_frequency,
     find_dataframe,
     has_probe,
     is_fundamental,
     parse_fundamentals,
+    parse_harmonic_orders,
     probe_nodes,
     spectrum,
     spice_float,
@@ -84,6 +86,60 @@ def test_parse_fundamentals(text, expected):
 
 def test_parse_fundamentals_skips_unparsable_tokens():
     assert parse_fundamentals("95E9 junk 10E9") == pytest.approx([95e9, 10e9])
+
+
+# ---------------------------------------------------------------------------
+# Harmonic orders and the mixing grid
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("4,40", [4, 40]),
+        ("5", [5]),
+        ("3 7", [3, 7]),
+        ("4, junk, 40", [4, 40]),
+        ("0,4", [4]),
+        ("", []),
+        (None, []),
+    ],
+)
+def test_parse_harmonic_orders(text, expected):
+    assert parse_harmonic_orders(text) == expected
+
+
+@pytest.mark.parametrize("frequency", [95e9, 10e9, 35e9, 130e9, 225e9])
+def test_covers_frequency_accepts_multi_tone_mixing_products(frequency):
+    # The mixer testbench: .HB 95E9 10E9 with numfreq=4,40 resolves the 130 GHz RF
+    # drive and the 35 GHz IF even though neither is a fundamental.
+    assert covers_frequency([95e9, 10e9], [4, 40], frequency, frequency)
+
+
+def test_covers_frequency_rejects_a_line_off_the_grid():
+    assert not covers_frequency([95e9, 10e9], [4, 40], 37e9, 37e9)
+
+
+def test_covers_frequency_spreads_a_single_order_over_every_tone():
+    # numfreq=5 bounds both tones, so f1-6f2 = 35 GHz is out of reach but
+    # f1-f2 = 85 GHz is not.
+    assert not covers_frequency([95e9, 10e9], [5], 35e9, 35e9)
+    assert covers_frequency([95e9, 10e9], [5], 85e9, 85e9)
+
+
+def test_covers_frequency_accepts_a_range_holding_a_line():
+    assert covers_frequency([95e9, 10e9], [4, 40], 30e9, 40e9)
+    assert not covers_frequency([95e9, 10e9], [4, 40], 36e9, 39e9)
+
+
+def test_covers_frequency_ignores_negative_lines():
+    # 6f2-f1 is -35 GHz; only the non-negative half of the grid is solved for.
+    assert not covers_frequency([95e9, 10e9], [4, 40], -35e9, -35e9)
+
+
+@pytest.mark.parametrize(("tones", "orders"), [([], [4, 40]), ([95e9, 10e9], [])])
+def test_covers_frequency_is_permissive_when_the_grid_is_unknown(tones, orders):
+    assert covers_frequency(tones, orders, 37e9, 37e9)
 
 
 # ---------------------------------------------------------------------------

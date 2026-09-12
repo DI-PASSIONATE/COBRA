@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -181,3 +182,106 @@ def test_inspect_path_honours_an_explicit_kind(written_config):
 def test_inspect_path_rejects_an_unknown_kind():
     with pytest.raises(ConfigurationError, match="Unsupported parse kind"):
         inspect_path(netlist_path("minimal_ac"), kind="sideways")
+
+
+# ---------------------------------------------------------------------------
+# Harmonic-balance goal frequencies
+# ---------------------------------------------------------------------------
+
+
+def _hb_config(config_dir: Path, frequency_range: str, **overrides) -> Path:
+    """A configuration whose only goal sits at *frequency_range* on the two-tone netlist."""
+    shutil.copy(netlist_path("hb_two_tone"), config_dir / "mixer.cir")
+    data = make_config_data(
+        netlist="mixer.cir",
+        simulation_parameters={},
+        design_goals=[
+            {
+                "parameter": "Power_dBm[OUT]",
+                "frequency_range": frequency_range,
+                "min_value": None,
+                "max_value": -30.0,
+                "weight": 1.0,
+                "kind": "power_dbm",
+                "node": "OUT",
+            },
+        ],
+    )
+    data.update(overrides)
+    path = config_dir / "hb.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _frequency_issues(path: Path) -> list[str]:
+    return [
+        issue.message
+        for issue in all_issues(inspect_path(path, check_models=False))
+        if "Goal frequency" in issue.message
+    ]
+
+
+def test_hb_goal_on_a_mixing_product_is_not_flagged(config_dir: Path):
+    # f1-f2 = 85 GHz is a real line of .HB 95E9 10E9 without being a fundamental.
+    assert _frequency_issues(_hb_config(config_dir, "85GHz")) == []
+
+
+def test_hb_goal_off_the_mixing_grid_is_flagged(config_dir: Path):
+    messages = _frequency_issues(_hb_config(config_dir, "37GHz"))
+
+    assert len(messages) == 1
+    assert "not on the .HB grid" in messages[0]
+
+
+def test_configured_numfreq_widens_the_hb_grid(config_dir: Path):
+    # The netlist numfreq=5 cannot reach f1-6f2 = 35 GHz; the numfreq=4,40 that
+    # the run actually writes can, so the goal must be judged against the latter.
+    assert _frequency_issues(_hb_config(config_dir, "35GHz"))
+    assert (
+        _frequency_issues(
+            _hb_config(
+                config_dir,
+                "35GHz",
+                simulation_parameters={".OPTIONS:hbint": {"numfreq": "4,40"}},
+            )
+        )
+        == []
+    )
+
+
+def _isolation_config(config_dir: Path, frequency_range: str | None) -> Path:
+    shutil.copy(netlist_path("hb_two_tone"), config_dir / "mixer.cir")
+    data = make_config_data(
+        netlist="mixer.cir",
+        simulation_parameters={},
+        design_goals=[
+            {
+                "parameter": "Isolation_dB[OUT]",
+                "frequency_range": frequency_range,
+                "min_value": 30.0,
+                "max_value": None,
+                "weight": 1.0,
+                "kind": "isolation_db",
+                "node": "OUT",
+            },
+        ],
+    )
+    path = config_dir / "isolation.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_isolation_goal_resolves_against_the_netlist(config_dir: Path):
+    # f1-f2 = 85 GHz is on the grid of .HB 95E9 10E9 with numfreq=5.
+    report = inspect_path(_isolation_config(config_dir, "85GHz"), check_models=False)
+
+    assert isinstance(report, ConfigurationReport)
+    assert not has_errors(report)
+    assert [goal.valid for goal in report.design_goals] == [True]
+
+
+def test_isolation_goal_without_a_target_frequency_is_an_error(config_dir: Path):
+    report = inspect_path(_isolation_config(config_dir, None), check_models=False)
+
+    assert has_errors(report)
+    assert any("frequency_range" in issue.message for issue in all_issues(report))
