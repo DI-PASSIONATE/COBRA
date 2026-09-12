@@ -9,7 +9,7 @@ flowchart LR
     A[Netlist with .HB] --> B[Xyce Harmonic Balance]
     B --> C[.HB.FD.csv / .prn phasors]
     C --> D[Spectrum at analysis point]
-    D --> E[Power / Gain goals]
+    D --> E[Power / Gain / Isolation goals]
     D --> F[Live spectrum plot]
 ```
 
@@ -86,12 +86,13 @@ For the port line `P2 _net28 0 port=1 z0=100 AC 0.089442719 SIN 0 0.089442719 13
 
 ## Design Goals
 
-Loading a netlist with an HB analysis adds two families of design parameters, named after the nodes and ports actually present in the circuit:
+Loading a netlist with an HB analysis adds three families of design parameters, named after the nodes and ports actually present in the circuit:
 
 | Parameter | Description |
 |-----------|-------------|
 | `Power_dBm[<node>]` | Output power in dBm at the analysis point |
 | `Gain_dB[<port>@<node>]` | Transducer gain in dB at `<node>`, referred to the drive level of input port `<port>` |
+| `Isolation_dB[<node>]` | Margin in dB between the target line at `<node>` and the strongest other line ([see below](#isolation)) |
 
 A goal targets one spectral line by giving a single frequency, or a band by giving a range:
 
@@ -111,14 +112,37 @@ A goal targets one spectral line by giving a single frequency, or a band by givi
 
     Every HB line inside the band contributes to the penalty — useful for suppressing unwanted mixing products.
 
+## Isolation
+
+Suppressing spurs with absolute `Power_dBm` caps means re-tuning every cap whenever the wanted signal moves. `Isolation_dB[<node>]` states the requirement the way a datasheet does — as a margin:
+
+```text
+Isolation_dB[Out] > 30 dB  @ 35ghz
+```
+
+The goal's frequency range names the **wanted** line; every other line in the spectrum is a spur. The value is
+
+$$\mathrm{Isolation[dB]} = P_\mathrm{target} - \max_{f \neq f_\mathrm{target}} P(f)$$
+
+so one goal replaces a cap per spur and keeps holding as the design changes: raising conversion gain by 3 dB does not suddenly satisfy it.
+
+!!! note
+    DC is excluded from the spur search. The 0 Hz bin carries the operating point, not a mixing product, and would otherwise dominate every comparison.
+
+A frequency range is required — without a target line there is nothing to measure against, and the goal is rejected before the run starts. Where the range spans several bins, the weakest of them is taken as the target, so the margin is the worst case.
+
 ### Scripting Example
 
 ```python
 from cobra.optimizers.design_goal import DesignGoal
-from cobra.optimizers.design_goal_collection import make_power_dbm, make_gain_db
+from cobra.optimizers.design_goal_collection import (
+    make_gain_db,
+    make_isolation_db,
+    make_power_dbm,
+)
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
-parser = XyceNetlistParser().from_file("examples/Mixer/mixer_hb.cir")
+parser = XyceNetlistParser().from_file("examples/netlists/Mixer/mixer_hb.cir")
 node = "Out"
 port = parser.port_sources["P1"]          # {'z0': 100.0, 'sin_amplitude': 0.28284271, ...}
 
@@ -134,6 +158,12 @@ goals = [
         parameter=make_gain_db("P1", port["sin_amplitude"], port["z0"], node),
         frequency_range="35ghz",
         min_value=6.0,
+    ),
+    # Every other line at least 30 dB below the 35 GHz IF
+    DesignGoal(
+        parameter=make_isolation_db(node),
+        frequency_range="35ghz",
+        min_value=30.0,
     ),
 ]
 ```
@@ -161,14 +191,14 @@ During optimization the visualization panel plots the spectrum at the selected a
 | Current | `I(Vnode)` | dBmA |
 
 - **Fundamentals** are drawn in a distinct color from the remaining lines.
-- **Clicking a line** places a marker labelled with its frequency, value, and harmonic index — `H2` for single-tone, or the mixing-product decomposition such as `2f1-f2` for multi-tone.
+- **Clicking a line** toggles a marker on it, labelled with its frequency, value, and harmonic index — `H2` for single-tone, or the mixing-product decomposition such as `2f1-f2` for multi-tone. Clicking a marked line again removes its marker, and the click snaps to the nearest line, so it need not land exactly on one.
 - When both an `.AC` and an `.HB` analysis run, a selector switches the left plot between S-parameters and the HB spectrum. When only one of them is active, that plot is shown and the selector is disabled.
 
 The mixing-product labels are the practical tool for isolation work: they identify which unwanted product a given line belongs to while the optimizer is running.
 
 ## Worked Example: Mixer
 
-`examples/Mixer/mixer_hb.cir` is a downconverting mixer:
+`examples/netlists/Mixer/mixer_hb.cir` is a downconverting mixer:
 
 | Signal | Frequency |
 |--------|-----------|
