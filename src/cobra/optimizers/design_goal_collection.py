@@ -169,6 +169,69 @@ def make_gain_db(
     )
 
 
+def _isolation(
+    sim_result: SimulationResult,
+    frequency_range: str | None = None,
+    node: str = "OUT",
+) -> float:
+    """How far the strongest unwanted line sits below the target line, in dB.
+
+    DC is not a mixing product, and the operating point would otherwise dominate
+    the spur search, so the 0 Hz bin is excluded.
+    """
+    df = hb_spectrum.find_dataframe(sim_result.dataframes, node, "power")
+    if df is None:
+        raise KeyError(
+            f"No HB result containing V({node}) and I(V{node}) was found. "
+            f"Add both to the netlist's '.PRINT hb' line."
+        )
+    if frequency_range is None:
+        raise ValueError(
+            f"Isolation at '{node}' needs a target frequency, e.g. '35GHz'; "
+            "every other line in the spectrum is measured against it."
+        )
+    freqs, p_dbm = hb_spectrum.spectrum(df, node, "power")
+    # Reuse the snapping of `spectrum` so a single target frequency picks the same
+    # bin a power goal at that frequency would.
+    target_freqs, target_dbm = hb_spectrum.spectrum(
+        df, node, "power", DesignGoal.str_to_frequency_range(frequency_range)
+    )
+    spurs = ~np.isin(freqs, target_freqs) & (freqs > 0.0)
+    if not spurs.any():
+        raise ValueError(
+            f"The HB spectrum at '{node}' holds no line outside {frequency_range}, "
+            "so isolation is undefined. Raise 'numfreq' to resolve more products."
+        )
+    return float(np.min(target_dbm) - np.max(p_dbm[spurs]))
+
+
+def make_isolation_db(node: str) -> "DesignParameter":
+    """Return an ``Isolation_dB[<node>]`` DesignParameter for HB simulations.
+
+    The goal's frequency range names the wanted line; every other non-DC line in
+    the spectrum is a spur. The value is ``P_target - max(P_spur)`` in dB, so a
+    goal of ``min_value=30`` keeps all mixing products 30 dB below the target
+    however the target level itself moves.
+    """
+
+    def _isolation_formula(
+        sim_result: SimulationResult, frequency_range: str | None = None
+    ) -> float:
+        return _isolation(sim_result, frequency_range, node)
+
+    return DesignParameter(
+        name=f"Isolation_dB[{node}]",
+        simulation_type=SimulationType.HB,
+        formula=_isolation_formula,
+        loss=calculate_array_penalty,
+        description=(
+            f"Margin in dB between the target line at node '{node}' and the "
+            "strongest other line in the HB spectrum (DC excluded)."
+        ),
+        min_ports=1,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Two-port stability figures (small-signal, AC)
 # ---------------------------------------------------------------------------

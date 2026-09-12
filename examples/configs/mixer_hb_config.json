@@ -1,0 +1,231 @@
+{
+  "netlist": "../netlists/Mixer/mixer_hb.cir",
+  "component_models": {},
+  "simulation_parameters": {
+    ".HB": {
+      "frequencies": "95E9 10E9"
+    },
+    ".OPTIONS:hbint": {
+      "numfreq": "4,40",
+      "STARTUPPERIODS": "2"
+    }
+  },
+  "optimizer": {
+    "name": "OptunaOptimizer",
+    "settings": {
+      "multi_objective": false,
+      "sampler": "tpe",
+      "pruner": null
+    }
+  },
+  "simulator": {
+    "name": "XyceSimulator",
+    "settings": {
+      "xyce_command": "Xyce",
+      "parallel_xyce": false,
+      "parallel_xyce_processes": 16,
+      "enforce_passivity": false
+    }
+  },
+  "max_iterations": 300,
+  "parallel_trials": 8,
+  "optimization_parameters": [
+    {
+      "name": "Ls_pos1",
+      "type": "netlist_variable",
+      "min_value": 400.0,
+      "max_value": 1500.0,
+      "step": 10.0,
+      "unit": "p",
+      "linked_to": null
+    },
+    {
+      "name": "Ls_neg1",
+      "type": "netlist_variable",
+      "min_value": 400.0,
+      "max_value": 1500.0,
+      "step": 10.0,
+      "unit": null,
+      "linked_to": "Ls_pos1"
+    },
+    {
+      "name": "Lp_pos1",
+      "type": "netlist_variable",
+      "min_value": 100.0,
+      "max_value": 500.0,
+      "step": 10.0,
+      "unit": "p",
+      "linked_to": null
+    },
+    {
+      "name": "Lp_neg1",
+      "type": "netlist_variable",
+      "min_value": 100.0,
+      "max_value": 500.0,
+      "step": 10.0,
+      "unit": null,
+      "linked_to": "Lp_pos1"
+    },
+    {
+      "name": "LM_pos1",
+      "type": "netlist_variable",
+      "min_value": 50.0,
+      "max_value": 400.0,
+      "step": 5.0,
+      "unit": "p",
+      "linked_to": null
+    },
+    {
+      "name": "LM_neg1",
+      "type": "netlist_variable",
+      "min_value": 50.0,
+      "max_value": 400.0,
+      "step": 5.0,
+      "unit": null,
+      "linked_to": "LM_pos1"
+    },
+    {
+      "name": "Cshunt_pos1",
+      "type": "netlist_variable",
+      "min_value": 5.0,
+      "max_value": 60.0,
+      "step": 1.0,
+      "unit": "f",
+      "linked_to": null
+    },
+    {
+      "name": "Cshunt_neg1",
+      "type": "netlist_variable",
+      "min_value": 5.0,
+      "max_value": 60.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "Cshunt_pos1"
+    },
+    {
+      "name": "V6",
+      "type": "netlist_variable",
+      "min_value": 1.15,
+      "max_value": 1.4,
+      "step": 0.05,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "Xnpn13G1:Nx",
+      "type": "netlist_variable",
+      "min_value": 2.0,
+      "max_value": 8.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "Xnpn13G2:Nx",
+      "type": "netlist_variable",
+      "min_value": 2.0,
+      "max_value": 8.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "Xnpn13G1:Nx"
+    },
+    {
+      "name": "Xnpn13G3:Nx",
+      "type": "netlist_variable",
+      "min_value": 2.0,
+      "max_value": 6.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "Xnpn13G4:Nx",
+      "type": "netlist_variable",
+      "min_value": 2.0,
+      "max_value": 6.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "Xnpn13G3:Nx"
+    },
+    {
+      "name": "Xnpn13G5:Nx",
+      "type": "netlist_variable",
+      "min_value": 2.0,
+      "max_value": 6.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "Xnpn13G3:Nx"
+    },
+    {
+      "name": "Xnpn13G6:Nx",
+      "type": "netlist_variable",
+      "min_value": 2.0,
+      "max_value": 6.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "Xnpn13G3:Nx"
+    },
+    {
+      "name": "R1",
+      "type": "netlist_variable",
+      "min_value": 5.0,
+      "max_value": 40.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "R2",
+      "type": "netlist_variable",
+      "min_value": 50.0,
+      "max_value": 300.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "R3",
+      "type": "netlist_variable",
+      "min_value": 50.0,
+      "max_value": 300.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": "R2"
+    }
+  ],
+  "design_goals": [
+    {
+      "parameter": "Gain_dB[P2@Out]",
+      "frequency_range": "35GHz",
+      "min_value": 6.0,
+      "max_value": null,
+      "weight": 1.0,
+      "kind": "gain_db",
+      "node": "Out",
+      "port": "P2",
+      "source_amplitude": 0.089442719,
+      "impedance": 100.0
+    },
+    {
+      "parameter": "Isolation_dB[Out]",
+      "frequency_range": "35GHz",
+      "min_value": 30.0,
+      "max_value": null,
+      "weight": 1.0,
+      "kind": "isolation_db",
+      "node": "Out",
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    }
+  ],
+  "fine_tuning": {
+    "enabled": false,
+    "palace_command": "palace",
+    "palace_processes": 16,
+    "iterations": 3,
+    "optimizer": "reuse",
+    "geometries": {}
+  },
+  "schema_version": 1
+}

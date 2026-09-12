@@ -173,9 +173,12 @@ apply to a run may use empty objects or arrays.
 ```
 
 Optimization parameter types are `model_input` and `netlist_variable`. Dynamic HB
-goals use `power_dbm` or `gain_db` as their `kind`; gain goals additionally store
-the input port, source amplitude, and impedance required to reconstruct their
-power reference.
+goals use `power_dbm`, `gain_db` or `isolation_db` as their `kind`; gain goals
+additionally store the input port, source amplitude, and impedance required to
+reconstruct their power reference. An `isolation_db` goal needs a
+`frequency_range` naming the wanted line — its value is the margin in dB down to
+the strongest other line in the spectrum, DC excluded — and is rejected without
+one.
 
 `fine_tuning.palace_processes` is the number of MPI ranks Palace uses per EM
 simulation; the Xyce simulator takes the equivalent `parallel_xyce_processes`

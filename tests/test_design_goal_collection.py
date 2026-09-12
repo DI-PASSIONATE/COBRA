@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
+from cobra.optimizers.design_goal import DesignGoal
 from cobra.optimizers.design_goal_collection import (
     ALL_PARAMETERS,
     MAX_PORTS,
     find_parameter,
     get_available_parameters,
     make_gain_db,
+    make_isolation_db,
     make_power_dbm,
     make_s_param_db,
     make_s_param_linear,
 )
+from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
 
 # ---------------------------------------------------------------------------
@@ -128,3 +133,101 @@ def test_factories_produce_parameters_usable_as_dict_keys():
     assert make_power_dbm("OUT") == make_power_dbm("OUT")
     assert len({make_power_dbm("OUT"), make_power_dbm("OUT")}) == 1
     assert len({make_power_dbm("OUT"), make_power_dbm("IN")}) == 2
+
+
+# ---------------------------------------------------------------------------
+# Isolation
+# ---------------------------------------------------------------------------
+
+# Every bin carries I = 1 A, so P_w = 2*V and the isolation between two bins
+# reduces to 10*log10(V_target / V_spur). DC is deliberately the strongest line.
+_ISO_FREQS = [0.0, 10e9, 35e9, 95e9, 130e9]
+_ISO_VOLTS = [100.0, 0.01, 1.0, 0.001, 0.0001]
+
+
+def _hb_result(freqs=None, volts=None) -> SimulationResult:
+    """An HB result with a ``V(OUT)``/``I(VOUT)`` probe pair."""
+    freqs = _ISO_FREQS if freqs is None else freqs
+    volts = _ISO_VOLTS if volts is None else volts
+    frame = pd.DataFrame(
+        {
+            "FREQ": freqs,
+            "Re(V(OUT))": volts,
+            "Im(V(OUT))": np.zeros(len(freqs)),
+            "Re(I(VOUT))": np.ones(len(freqs)),
+            "Im(I(VOUT))": np.zeros(len(freqs)),
+        }
+    )
+    return SimulationResult(dataframes={"run.HB.FD.csv": frame})
+
+
+def test_isolation_db_name_format():
+    """``config_runner._build_goal`` and the GUI both parse this exact shape."""
+    parameter = make_isolation_db("OUT")
+
+    assert parameter.name == "Isolation_dB[OUT]"
+    assert parameter.simulation_type is SimulationType.HB
+
+
+def test_isolation_is_the_margin_to_the_strongest_spur():
+    # Target 1.0 V against the strongest spur 0.01 V at 10 GHz -> 20 dB.
+    value = make_isolation_db("OUT").formula(_hb_result(), "35GHz")
+
+    assert value == pytest.approx(20.0)
+
+
+def test_isolation_is_negative_when_a_spur_dominates():
+    # Aiming at the 0.01 V line makes the 1.0 V line at 35 GHz the spur.
+    value = make_isolation_db("OUT").formula(_hb_result(), "10GHz")
+
+    assert value == pytest.approx(-20.0)
+
+
+def test_isolation_excludes_dc():
+    """The 100 V DC line would swamp every spur search and is not a mixing product."""
+    value = make_isolation_db("OUT").formula(_hb_result(), "35GHz")
+
+    # Including DC would give 10*log10(1.0/100) = -20 dB instead.
+    assert value == pytest.approx(20.0)
+
+
+def test_isolation_tracks_the_target_level():
+    """The margin is relative: lifting target and spurs together leaves it unchanged."""
+    lifted = [volt * 10.0 for volt in _ISO_VOLTS]
+
+    assert make_isolation_db("OUT").formula(_hb_result(volts=lifted), "35GHz") == pytest.approx(
+        make_isolation_db("OUT").formula(_hb_result(), "35GHz")
+    )
+
+
+def test_isolation_without_a_target_frequency_is_rejected():
+    with pytest.raises(ValueError, match="needs a target frequency"):
+        make_isolation_db("OUT").formula(_hb_result(), None)
+
+
+def test_isolation_without_a_probe_pair_is_rejected():
+    empty = SimulationResult(dataframes={"run.HB.FD.csv": pd.DataFrame({"FREQ": _ISO_FREQS})})
+
+    with pytest.raises(KeyError, match=r"I\(VOUT\)"):
+        make_isolation_db("OUT").formula(empty, "35GHz")
+
+
+def test_isolation_needs_a_line_outside_the_target():
+    single = _hb_result(freqs=[0.0, 35e9], volts=[100.0, 1.0])
+
+    with pytest.raises(ValueError, match="no line outside"):
+        make_isolation_db("OUT").formula(single, "35GHz")
+
+
+@pytest.mark.parametrize(
+    ("required", "satisfied"),
+    [(15.0, True), (20.0, True), (30.0, False)],
+)
+def test_isolation_goal_penalty_sign(required, satisfied):
+    """A satisfied goal reports a negative penalty, a violated one a positive."""
+    goal = DesignGoal(make_isolation_db("OUT"), frequency_range="35GHz", min_value=required)
+
+    penalty = goal.penalty(_hb_result())
+
+    assert (penalty <= 0.0) is satisfied
+

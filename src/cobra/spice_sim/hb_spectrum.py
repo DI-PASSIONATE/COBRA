@@ -68,6 +68,51 @@ def parse_fundamentals(text: str | None) -> list[float]:
     return fundamentals
 
 
+def parse_harmonic_orders(text: str | None) -> list[int]:
+    """Parse the ``.options hbint numfreq`` tokens (e.g. ``"4,40"``) into per-tone orders."""
+    if not text:
+        return []
+    orders = []
+    for token in str(text).replace(",", " ").split():
+        try:
+            order = int(float(token))
+        except ValueError:
+            continue
+        if order > 0:
+            orders.append(order)
+    return orders
+
+
+def covers_frequency(
+    fundamentals: Sequence[float],
+    max_orders: Sequence[int],
+    low: float,
+    high: float,
+    rtol: float = 1e-3,
+) -> bool:
+    """Whether the HB grid holds a spectral line inside ``[low, high]``.
+
+    The grid is every ``sum(m_i * f_i)`` with ``|m_i| <= max_orders[i]``, so a
+    two-tone analysis resolves far more than its fundamentals: ``.HB 95E9 10E9``
+    with ``numfreq=4,40`` puts lines on 35 GHz (``f1-6f2``) and 130 GHz. A tone
+    without its own order reuses the last one, matching a single ``numfreq``
+    applied to every fundamental.
+
+    Returns ``True`` when the grid is unknown (no tones or no orders), so callers
+    that only warn stay quiet instead of guessing.
+    """
+    tones = [f for f in fundamentals if f > 0]
+    if not tones or not max_orders:
+        return True
+    orders = [max_orders[min(index, len(max_orders) - 1)] for index in range(len(tones))]
+    tolerance = max(tones) * rtol
+    for combo in product(*(range(-order, order + 1) for order in orders)):
+        line = sum(m * f for m, f in zip(combo, tones, strict=True))
+        if line >= 0.0 and low - tolerance <= line <= high + tolerance:
+            return True
+    return False
+
+
 def available_power_dbm(sin_amplitude: float, z0: float = 50.0) -> float:
     """Available power of a port source in dBm: ``P = A² / (8·z0)`` for a SIN peak amplitude."""
     p_avail_w = sin_amplitude ** 2 / (8.0 * z0)

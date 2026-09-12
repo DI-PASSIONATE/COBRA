@@ -312,6 +312,17 @@ def test_valid_gain_goal_passes():
     ).validate()
 
 
+def test_isolation_goal_requires_a_node():
+    with pytest.raises(ConfigurationError, match="requires an output node"):
+        DesignGoalConfig.from_dict(_goal(kind="isolation_db")).validate()
+
+
+def test_valid_isolation_goal_passes():
+    DesignGoalConfig.from_dict(
+        _goal(kind="isolation_db", node="OUT", frequency_range="35GHz")
+    ).validate()
+
+
 # ---------------------------------------------------------------------------
 # Fine tuning and geometries
 # ---------------------------------------------------------------------------
