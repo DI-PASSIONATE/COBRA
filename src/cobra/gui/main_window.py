@@ -58,6 +58,7 @@ from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from cobra.optimizers.design_goal_collection import (
     get_available_parameters,
     make_gain_db,
+    make_isolation_db,
     make_power_dbm,
 )
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
@@ -501,7 +502,7 @@ class MainWindow(QMainWindow):
         self._required_sim_types: set[SimulationType] = set()
         self._hb_dataframes: dict[str, pd.DataFrame] = {}
         self._hb_spectrum_data: tuple | None = None
-        self._hb_markers: list = []
+        self._hb_markers: dict = {}  # bin index → (number, marker, label) items
         self._num_ports: int = 0
         self._netlist_sim_type: SimulationType | None = None
         self._simulator_cls = self.simulator_combo.currentData() or XyceSimulator
@@ -716,7 +717,7 @@ class MainWindow(QMainWindow):
             self._hb_dataframes = dict(sim_result.dataframes)
 
         self.hb_spectrum_plot.clear()
-        self._hb_markers = []
+        self._hb_markers = {}
         self._hb_spectrum_data = None
 
         quantity = self.hb_quantity_combo.currentData() or "power"
@@ -776,7 +777,12 @@ class MainWindow(QMainWindow):
         )
 
     def on_hb_spectrum_clicked(self, event) -> None:
-        """Place a numbered marker on the nearest spectral line."""
+        """Toggle a numbered marker on the spectral line nearest the click.
+
+        Clicking a line that already carries a marker removes it, so the same
+        gesture both places and clears one. Numbers are not reused while a marker
+        holds them, and a cleared number is handed to the next marker placed.
+        """
         if self._hb_spectrum_data is None or event.button() != Qt.MouseButton.LeftButton:
             return
         if not self.hb_spectrum_plot.sceneBoundingRect().contains(event.scenePos()):
@@ -785,13 +791,25 @@ class MainWindow(QMainWindow):
         freqs, values, labels, unit = self._hb_spectrum_data
         x = self.hb_spectrum_plot.getPlotItem().vb.mapSceneToView(event.scenePos()).x()
         idx = int(np.argmin(np.abs(freqs - x)))
-        freq, value, label = freqs[idx], values[idx], labels[idx]
 
+        marked = self._hb_markers.pop(idx, None)
+        if marked is not None:
+            _, marker, text = marked
+            self.hb_spectrum_plot.removeItem(marker)
+            self.hb_spectrum_plot.removeItem(text)
+            return
+
+        used = {number for number, _, _ in self._hb_markers.values()}
+        number = 1
+        while number in used:
+            number += 1
+
+        freq, value, label = freqs[idx], values[idx], labels[idx]
         marker = pg.ScatterPlotItem(
             [freq], [value], symbol="o", size=10, pen=pg.mkPen("k"), brush=None
         )
         text = pg.TextItem(
-            f"M{len(self._hb_markers) // 2 + 1}: {freq/1e9:.3f} GHz  {value:.2f} {unit}"
+            f"M{number}: {freq/1e9:.3f} GHz  {value:.2f} {unit}"
             + (f"  [{label}]" if label else ""),
             color="k",
             anchor=(0, 1),
@@ -799,7 +817,7 @@ class MainWindow(QMainWindow):
         text.setPos(freq, value)
         for item in (marker, text):
             self.hb_spectrum_plot.addItem(item)
-            self._hb_markers.append(item)
+        self._hb_markers[idx] = (number, marker, text)
 
     def refresh_overlays(self, _state):
         self.draw_overlays()
@@ -1165,6 +1183,9 @@ class MainWindow(QMainWindow):
         power_match = re.fullmatch(r"Power_dBm\[(.+)]", name)
         if power_match:
             return make(kind="power_dbm", node=power_match.group(1))
+        isolation_match = re.fullmatch(r"Isolation_dB\[(.+)]", name)
+        if isolation_match:
+            return make(kind="isolation_db", node=isolation_match.group(1))
         gain_match = re.fullmatch(r"Gain_dB\[([^@]+)@(.+)]", name)
         if gain_match:
             port, node = gain_match.groups()
@@ -1464,6 +1485,7 @@ class MainWindow(QMainWindow):
         if not node:
             return
         self._available_parameters.append(make_power_dbm(node))
+        self._available_parameters.append(make_isolation_db(node))
         # Gain needs the input drive level, so only ports with a SIN/AC source qualify.
         for port_name, source_info in sorted(self._port_sources.items()):
             sin_amp = source_info.get("sin_amplitude") or source_info.get("ac_amplitude")
