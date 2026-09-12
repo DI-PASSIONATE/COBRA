@@ -145,7 +145,7 @@ class DesignGoalConfig:
     def validate(self) -> None:
         if not self.parameter:
             raise ConfigurationError("Design goal parameter cannot be empty")
-        if self.kind not in {"catalogue", "power_dbm", "gain_db"}:
+        if self.kind not in {"catalogue", "power_dbm", "gain_db", "isolation_db"}:
             raise ConfigurationError(f"Unsupported design goal kind '{self.kind}'")
         if self.min_value is None and self.max_value is None:
             raise ConfigurationError(f"Design goal '{self.parameter}' needs a minimum or maximum")
@@ -154,7 +154,7 @@ class DesignGoalConfig:
         _number(self.max_value, f"Design goal '{self.parameter}' max_value", allow_none=True)
         if self.weight <= 0:
             raise ConfigurationError(f"Design goal '{self.parameter}' weight must be positive")
-        if self.kind in {"power_dbm", "gain_db"} and not self.node:
+        if self.kind in {"power_dbm", "gain_db", "isolation_db"} and not self.node:
             raise ConfigurationError(f"Design goal '{self.parameter}' requires an output node")
         if self.kind == "gain_db":
             if not self.port or self.source_amplitude is None:

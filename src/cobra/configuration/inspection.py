@@ -343,6 +343,7 @@ def _hb_goal_parameters(parser: XyceNetlistParser) -> list[str]:
         for port in sorted(parser.port_sources)
         for node in parser.hb_probe_nodes
     )
+    names.extend(f"Isolation_dB[{node}]" for node in parser.hb_probe_nodes)
     return names
 
 
@@ -975,7 +976,7 @@ def _check_design_goals(
         location = f"design_goals.{goal.parameter}"
         simulation_type = (
             SimulationType.HB
-            if goal.kind in {"power_dbm", "gain_db"}
+            if goal.kind in {"power_dbm", "gain_db", "isolation_db"}
             else SimulationType.for_parameter(goal.parameter)
         )
         entry.simulation_type = simulation_type.value
@@ -992,7 +993,9 @@ def _check_design_goals(
         except ValueError as exc:
             report.issues.append(Issue(Severity.ERROR, location, str(exc)))
         else:
-            _check_goal_frequency(goal.frequency_range, simulation_type, parser, location, report)
+            _check_goal_frequency(
+                goal.frequency_range, simulation_type, configuration, parser, location, report
+            )
         if (
             parser is not None
             and not entry.directive_in_netlist
@@ -1014,15 +1017,61 @@ def _check_design_goals(
         )
 
 
+def _hb_grid(
+    configuration: RunConfiguration,
+    parser: XyceNetlistParser,
+    positional: list[str],
+) -> tuple[list[float], list[int]]:
+    """The fundamentals and per-tone harmonic orders the run will actually use.
+
+    ``simulation_parameters`` overrides what the netlist declares, so a goal is
+    validated against the grid COBRA writes rather than the one Qucs-S exported.
+    """
+    # Imported here: hb_spectrum pulls in numpy and pandas.
+    from cobra.spice_sim import hb_spectrum
+
+    def configured(key: str, name: str) -> str | None:
+        for candidate, values in configuration.simulation_parameters.items():
+            normalised = candidate if candidate.startswith(".") else f".{candidate}"
+            if normalised.upper() != key.upper():
+                continue
+            return next((str(v) for k, v in values.items() if k.lower() == name.lower()), None)
+        return None
+
+    netlist_numfreq = next(
+        (
+            value
+            for key, value in parser.options_directives.get("hbint", {}).items()
+            if key.lower() == "numfreq"
+        ),
+        None,
+    )
+    tones = hb_spectrum.parse_fundamentals(
+        configured(".HB", "frequencies") or " ".join(positional)
+    )
+    orders = hb_spectrum.parse_harmonic_orders(
+        configured(".OPTIONS:hbint", "numfreq") or netlist_numfreq
+    )
+    return tones, orders
+
+
 def _check_goal_frequency(
     frequency_range: str | None,
     simulation_type: SimulationType,
+    configuration: RunConfiguration,
     parser: XyceNetlistParser | None,
     location: str,
     report: ConfigurationReport,
 ) -> None:
-    """Warn when a goal frequency falls outside the analysis the netlist requests."""
+    """Warn when a goal frequency falls outside the analysis the netlist requests.
+
+    ``.HB`` reaches a mixing grid rather than a range: ``.HB 95E9 10E9`` with
+    ``numfreq=4,40`` legitimately resolves 35 GHz and 130 GHz even though neither
+    is a fundamental.  Comparing against the first fundamental alone would reject
+    every multi-tone goal, so HB is checked against the grid instead.
+    """
     from cobra.optimizers.design_goal import DesignGoal
+    from cobra.spice_sim import hb_spectrum
 
     if parser is None or frequency_range is None:
         return
@@ -1032,6 +1081,19 @@ def _check_goal_frequency(
     for directive in parser.simulation_directives:
         if SimulationType.from_directive(directive.directive) is not simulation_type:
             continue
+        if simulation_type is SimulationType.HB:
+            tones, orders = _hb_grid(configuration, parser, directive.positional)
+            if not hb_spectrum.covers_frequency(tones, orders, low, high):
+                report.issues.append(
+                    Issue(
+                        Severity.WARNING,
+                        location,
+                        f"Goal frequency {frequency_range} is not on the .HB grid of "
+                        f"{', '.join(f'{tone:g}' for tone in tones)} Hz with "
+                        f"numfreq={','.join(str(order) for order in orders)}.",
+                    )
+                )
+            return
         values = [_spice_number(token) for token in directive.positional]
         known = [value for value in values if value is not None and value > 0.0]
         if not known:

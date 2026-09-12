@@ -15,6 +15,7 @@ from cobra.optimizers.design_goal import DesignGoal
 from cobra.optimizers.design_goal_collection import (
     find_parameter,
     make_gain_db,
+    make_isolation_db,
     make_power_dbm,
 )
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
@@ -42,12 +43,21 @@ def _build_goal(config: DesignGoalConfig, parser: XyceNetlistParser) -> DesignGo
                 f"Design parameter '{config.parameter}' requires at least "
                 f"{parameter.min_ports} ports; netlist has {parser.num_ports}"
             )
-    elif config.kind == "power_dbm":
+    elif config.kind in {"power_dbm", "isolation_db"}:
         if config.node not in parser.hb_probe_nodes:
             raise ConfigurationError(
                 f"HB goal node '{config.node}' is not available in the netlist"
             )
-        parameter = make_power_dbm(config.node or "")
+        if config.kind == "isolation_db" and not config.frequency_range:
+            raise ConfigurationError(
+                f"Isolation goal at '{config.node}' needs a frequency_range naming the "
+                "target line, e.g. '35GHz'"
+            )
+        parameter = (
+            make_power_dbm(config.node or "")
+            if config.kind == "power_dbm"
+            else make_isolation_db(config.node or "")
+        )
     else:
         source = parser.port_sources.get(config.port or "")
         if config.node not in parser.hb_probe_nodes:
