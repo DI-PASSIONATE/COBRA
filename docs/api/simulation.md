@@ -29,11 +29,11 @@ Capabilities include:
 - identify component instances to map,
 - patch netlist variables during optimization,
 - read simulation, `.options` and `.PRINT` directives,
-- expose `hb_probe_nodes`, the nodes carrying both `V(node)` and `I(Vnode)` in an HB run,
+- expose `probe_nodes`, the nodes carrying both `V(node)` and `I(Vnode)` in an HB or transient run,
 - expose `port_sources`, the SIN/AC drive level and impedance per port,
 - save updated netlist for simulation stage.
 
-When a goal requires an analysis the netlist does not declare, the stage writes a copy with the missing directive injected — `.LIN` for S-parameter output, or `.HB` together with a matching `.PRINT HB format=csv` line.
+When a goal requires an analysis the netlist does not declare, the stage writes a copy with the missing directive injected — `.LIN` for S-parameter output, or `.HB` / `.TRAN` together with a matching `.PRINT <analysis> format=csv` line.
 
 ## Harmonic Balance Spectra
 
@@ -43,6 +43,13 @@ When a goal requires an analysis the netlist does not declare, the stage writes 
 - `spectrum(df, node, quantity, frequency_range, pin_dbm)` returns `(frequencies, values)` as power (dBm), gain (dB), voltage (dBV) or current (dBmA).
 - `classify_bins(freqs, fundamentals, max_order)` labels each line as `DC`, a harmonic (`H2`), or a mixing product (`2f1-f2`).
 - `available_power_dbm(amplitude, z0)` converts a port's SIN amplitude to available input power.
+
+## Transient Spectra
+
+`tran_spectrum` turns a `.PRINT tran` time series into the same table layout, so everything above applies to a transient result too.
+
+- `to_frequency_domain(df)` resamples the waveform onto a uniform grid and returns the one-sided FFT, normalised so each bin holds amplitude/2 like an HB phasor. `XyceSimulator` calls it for every transient result and writes the table as `<netlist>.TRAN.FD.csv`.
+- `on_fft_grid(window, low, high)` tells whether a `.TRAN` window of the given length puts a bin inside a goal's frequency range.
 
 See **Advanced -> Harmonic Balance** for the underlying conventions.
 

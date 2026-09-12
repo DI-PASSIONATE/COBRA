@@ -6,9 +6,12 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from cobra.optimizers.base_optimizer import OptimizationType
+
+if TYPE_CHECKING:
+    from cobra.spice_sim.simulation_type import SimulationType
 
 
 class ConfigurationError(ValueError):
@@ -128,13 +131,18 @@ class DesignGoalConfig:
     port: str | None = None
     source_amplitude: float | None = None
     impedance: float | None = None
+    analysis: str = "HB"
+    """Large-signal analysis a power/gain/isolation goal reads: ``"HB"`` or ``"TRAN"``."""
+
+    #: Analyses that yield a spectrum for the large-signal goal kinds.
+    LARGE_SIGNAL_ANALYSES: ClassVar[frozenset[str]] = frozenset({"HB", "TRAN"})
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DesignGoalConfig:
         data = _mapping(data, "design goal")
         allowed = {
             "parameter", "frequency_range", "min_value", "max_value", "weight",
-            "kind", "node", "port", "source_amplitude", "impedance",
+            "kind", "node", "port", "source_amplitude", "impedance", "analysis",
         }
         _require_keys(data, allowed, "design goal")
         try:
@@ -147,6 +155,11 @@ class DesignGoalConfig:
             raise ConfigurationError("Design goal parameter cannot be empty")
         if self.kind not in {"catalogue", "power_dbm", "gain_db", "isolation_db"}:
             raise ConfigurationError(f"Unsupported design goal kind '{self.kind}'")
+        if not isinstance(self.analysis, str) or self.analysis.upper() not in self.LARGE_SIGNAL_ANALYSES:
+            raise ConfigurationError(
+                f"Design goal '{self.parameter}' analysis must be one of "
+                f"{sorted(self.LARGE_SIGNAL_ANALYSES)}, got {self.analysis!r}"
+            )
         if self.min_value is None and self.max_value is None:
             raise ConfigurationError(f"Design goal '{self.parameter}' needs a minimum or maximum")
         _number(self.weight, f"Design goal '{self.parameter}' weight")
@@ -168,6 +181,13 @@ class DesignGoalConfig:
             _number(self.impedance, f"Gain goal '{self.parameter}' impedance", allow_none=True)
             if self.impedance is None or self.impedance <= 0:
                 raise ConfigurationError(f"Gain goal '{self.parameter}' requires positive impedance")
+
+    def analysis_type(self) -> SimulationType:
+        """The simulation type a power/gain/isolation goal is evaluated from."""
+        # Imported here: the simulator package imports this module.
+        from cobra.spice_sim.simulation_type import SimulationType
+
+        return SimulationType.from_directive(f".{self.analysis}")
 
 
 @dataclass(slots=True)

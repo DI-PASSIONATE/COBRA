@@ -80,6 +80,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Plot-selector entries for the analyses that yield a spectrum: key → (analysis, title).
+_SPECTRUM_VIEWS: dict[str, tuple[SimulationType, str]] = {
+    "hb": (SimulationType.HB, "HB Spectrum"),
+    "tran": (SimulationType.TRAN, "Transient Spectrum"),
+}
+_LARGE_SIGNAL_TYPES: frozenset[SimulationType] = frozenset(
+    sim_type for sim_type, _ in _SPECTRUM_VIEWS.values()
+)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -203,14 +212,15 @@ class MainWindow(QMainWindow):
         self.sim_type_label.setVisible(False)
         self.sim_type_value_label.setVisible(False)
 
-        # HB analysis point — the node whose spectrum is plotted and used by HB goals.
-        self.hb_point_label = QLabel("HB Analysis Point:")
-        self.hb_point_combo = QComboBox()
-        self.hb_point_combo.setToolTip(tooltip("hb_point_combo"))
-        self.hb_point_combo.currentIndexChanged.connect(self.on_hb_point_changed)
-        self.config_form_layout.addRow(self.hb_point_label, self.hb_point_combo)
-        self.hb_point_label.setVisible(False)
-        self.hb_point_combo.setVisible(False)
+        # Analysis point — the node whose HB / transient spectrum is plotted and used by
+        # the power, gain and isolation goals.
+        self.analysis_point_label = QLabel("Analysis Point:")
+        self.analysis_point_combo = QComboBox()
+        self.analysis_point_combo.setToolTip(tooltip("analysis_point_combo"))
+        self.analysis_point_combo.currentIndexChanged.connect(self.on_analysis_point_changed)
+        self.config_form_layout.addRow(self.analysis_point_label, self.analysis_point_combo)
+        self.analysis_point_label.setVisible(False)
+        self.analysis_point_combo.setVisible(False)
 
         # Simulation Parameters — populated dynamically when a netlist is loaded.
         # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
@@ -386,22 +396,21 @@ class MainWindow(QMainWindow):
         plot_controls = QHBoxLayout()
         self.plot_view_combo = QComboBox()
         self.plot_view_combo.addItem("S-Parameters", "sparam")
-        self.plot_view_combo.addItem("HB Spectrum", "hb")
         self.plot_view_combo.setToolTip(tooltip("plot_view_combo"))
         self.plot_view_combo.currentIndexChanged.connect(self.on_plot_view_changed)
 
-        self.hb_quantity_combo = QComboBox()
-        self.hb_quantity_combo.addItem("Power (dBm)", "power")
-        self.hb_quantity_combo.addItem("Gain (dB)", "gain")
-        self.hb_quantity_combo.addItem("Voltage (dBV)", "voltage")
-        self.hb_quantity_combo.addItem("Current (dBmA)", "current")
-        self.hb_quantity_combo.setToolTip(tooltip("hb_quantity_combo"))
-        self.hb_quantity_combo.currentIndexChanged.connect(self.on_hb_quantity_changed)
+        self.spectrum_quantity_combo = QComboBox()
+        self.spectrum_quantity_combo.addItem("Power (dBm)", "power")
+        self.spectrum_quantity_combo.addItem("Gain (dB)", "gain")
+        self.spectrum_quantity_combo.addItem("Voltage (dBV)", "voltage")
+        self.spectrum_quantity_combo.addItem("Current (dBmA)", "current")
+        self.spectrum_quantity_combo.setToolTip(tooltip("spectrum_quantity_combo"))
+        self.spectrum_quantity_combo.currentIndexChanged.connect(self.on_spectrum_quantity_changed)
 
-        self.hb_input_port_combo = QComboBox()
-        self.hb_input_port_combo.setToolTip(tooltip("hb_input_port_combo"))
-        # The lambda drops the index Qt emits; it must not land in `sim_result`.
-        self.hb_input_port_combo.currentIndexChanged.connect(lambda: self.update_hb_spectrum_plot())  # noqa: PLW0108
+        self.spectrum_input_port_combo = QComboBox()
+        self.spectrum_input_port_combo.setToolTip(tooltip("spectrum_input_port_combo"))
+        # The lambda drops the index Qt emits; the slot takes no arguments.
+        self.spectrum_input_port_combo.currentIndexChanged.connect(lambda: self.update_spectrum_plot())  # noqa: PLW0108
 
         self.show_goals_cb = QCheckBox("Show Goals")
         self.show_goals_cb.setChecked(True)
@@ -413,8 +422,8 @@ class MainWindow(QMainWindow):
 
         plot_controls.addWidget(QLabel("Plot:"))
         plot_controls.addWidget(self.plot_view_combo)
-        plot_controls.addWidget(self.hb_quantity_combo)
-        plot_controls.addWidget(self.hb_input_port_combo)
+        plot_controls.addWidget(self.spectrum_quantity_combo)
+        plot_controls.addWidget(self.spectrum_input_port_combo)
         plot_controls.addWidget(self.show_goals_cb)
         plot_controls.addWidget(self.zoom_btn)
         plot_controls.addStretch()
@@ -430,20 +439,20 @@ class MainWindow(QMainWindow):
         self.s_param_plot.setLabel("bottom", "Frequency", units="Hz")
         self.s_param_plot.setBackground("w")
 
-        # HB Spectrum Plot — shares the left slot with the S-parameter plot
-        self.hb_spectrum_plot = pg.PlotWidget(title="HB Spectrum")
-        self.hb_spectrum_plot.addLegend()
-        self.hb_spectrum_plot.setLabel("left", "Power", units="dBm")
-        self.hb_spectrum_plot.setLabel("bottom", "Frequency", units="Hz")
-        self.hb_spectrum_plot.setBackground("w")
+        # Spectrum Plot (HB or transient) — shares the left slot with the S-parameter plot
+        self.spectrum_plot = pg.PlotWidget(title="Spectrum")
+        self.spectrum_plot.addLegend()
+        self.spectrum_plot.setLabel("left", "Power", units="dBm")
+        self.spectrum_plot.setLabel("bottom", "Frequency", units="Hz")
+        self.spectrum_plot.setBackground("w")
         # PlotWidget.scene() is declared as QGraphicsScene by Qt, but pyqtgraph
         # returns its own GraphicsScene, which provides the mouse-click signal.
-        hb_scene = cast("GraphicsScene", self.hb_spectrum_plot.scene())
-        hb_scene.sigMouseClicked.connect(self.on_hb_spectrum_clicked)
+        spectrum_scene = cast("GraphicsScene", self.spectrum_plot.scene())
+        spectrum_scene.sigMouseClicked.connect(self.on_spectrum_clicked)
 
         self.left_plot_stack = QStackedWidget()
         self.left_plot_stack.addWidget(self.s_param_plot)
-        self.left_plot_stack.addWidget(self.hb_spectrum_plot)
+        self.left_plot_stack.addWidget(self.spectrum_plot)
         plots_layout.addWidget(self.left_plot_stack)
 
         # Loss Plot
@@ -454,7 +463,7 @@ class MainWindow(QMainWindow):
         plots_layout.addWidget(self.loss_plot)
 
         self._style_plot_for_light_background(self.s_param_plot)
-        self._style_plot_for_light_background(self.hb_spectrum_plot)
+        self._style_plot_for_light_background(self.spectrum_plot)
         self._style_plot_for_light_background(self.loss_plot)
 
         viz_layout.addLayout(plots_layout, stretch=2)
@@ -498,11 +507,12 @@ class MainWindow(QMainWindow):
         self._parsed_directives: list = []  # last directives from netlist parse
         self._parsed_options: dict[str, dict[str, str]] = {}  # category → {param: value}
         self._port_sources: dict[str, dict] = {}  # P-element name → SIN/AC source info
-        self._hb_probe_nodes: list[str] = []  # nodes with both a V() and an I(V) HB probe
+        self._probe_nodes: list[str] = []  # nodes with both a V() and an I(V) probe
         self._required_sim_types: set[SimulationType] = set()
-        self._hb_dataframes: dict[str, pd.DataFrame] = {}
-        self._hb_spectrum_data: tuple | None = None
-        self._hb_markers: dict = {}  # bin index → (number, marker, label) items
+        # Result tables of the last iteration, per large-signal analysis.
+        self._spectrum_dataframes: dict[SimulationType, dict[str, pd.DataFrame]] = {}
+        self._spectrum_data: tuple | None = None
+        self._spectrum_markers: dict = {}  # bin index → (number, marker, label) items
         self._num_ports: int = 0
         self._netlist_sim_type: SimulationType | None = None
         self._simulator_cls = self.simulator_combo.currentData() or XyceSimulator
@@ -660,39 +670,54 @@ class MainWindow(QMainWindow):
         return specs
 
     # ------------------------------------------------------------------
-    # HB spectrum plot
+    # Spectrum plot (HB or transient)
     # ------------------------------------------------------------------
 
     def _update_plot_view_availability(self) -> None:
-        """Enable the plot switch only when both an S-parameter and an HB result are expected."""
-        hb_possible = SimulationType.HB in self._required_sim_types and bool(self._hb_probe_nodes)
-        sparam_possible = SimulationType.AC in self._required_sim_types
-        both = hb_possible and sparam_possible
+        """Offer one plot view per analysis the run produces; enable the switch when there are several."""
+        views: list[tuple[str, str]] = []
+        if SimulationType.AC in self._required_sim_types:
+            views.append(("S-Parameters", "sparam"))
+        for key, (sim_type, title) in _SPECTRUM_VIEWS.items():
+            if sim_type in self._required_sim_types and self._probe_nodes:
+                views.append((title, key))
+        if not views:
+            views.append(("S-Parameters", "sparam"))
 
-        self.plot_view_combo.setEnabled(both)
-        if not both:
-            self.plot_view_combo.blockSignals(True)
-            self.plot_view_combo.setCurrentIndex(1 if hb_possible else 0)
-            self.plot_view_combo.blockSignals(False)
+        previous = self.plot_view_combo.currentData()
+        self.plot_view_combo.blockSignals(True)
+        self.plot_view_combo.clear()
+        for title, key in views:
+            self.plot_view_combo.addItem(title, key)
+        self.plot_view_combo.setCurrentIndex(max(self.plot_view_combo.findData(previous), 0))
+        self.plot_view_combo.blockSignals(False)
+        self.plot_view_combo.setEnabled(len(views) > 1)
         self.on_plot_view_changed()
 
+    def _spectrum_view_type(self) -> SimulationType | None:
+        """The analysis whose spectrum the plot selector currently shows, if any."""
+        view = _SPECTRUM_VIEWS.get(self.plot_view_combo.currentData())
+        return view[0] if view else None
+
     def on_plot_view_changed(self) -> None:
-        hb_active = self.plot_view_combo.currentData() == "hb"
-        self.left_plot_stack.setCurrentIndex(1 if hb_active else 0)
-        self.hb_quantity_combo.setEnabled(hb_active)
-        self.hb_input_port_combo.setEnabled(
-            hb_active and self.hb_quantity_combo.currentData() == "gain"
+        spectrum_active = self._spectrum_view_type() is not None
+        self.left_plot_stack.setCurrentIndex(1 if spectrum_active else 0)
+        self.spectrum_quantity_combo.setEnabled(spectrum_active)
+        self.spectrum_input_port_combo.setEnabled(
+            spectrum_active and self.spectrum_quantity_combo.currentData() == "gain"
         )
         for widget in (self.show_goals_cb, self.zoom_btn):
-            widget.setEnabled(not hb_active)
+            widget.setEnabled(not spectrum_active)
+        if spectrum_active:
+            self.update_spectrum_plot()
 
-    def on_hb_quantity_changed(self) -> None:
-        self.hb_input_port_combo.setEnabled(self.hb_quantity_combo.currentData() == "gain")
-        self.update_hb_spectrum_plot()
+    def on_spectrum_quantity_changed(self) -> None:
+        self.spectrum_input_port_combo.setEnabled(self.spectrum_quantity_combo.currentData() == "gain")
+        self.update_spectrum_plot()
 
-    def _hb_pin_dbm(self) -> float | None:
+    def _spectrum_pin_dbm(self) -> float | None:
         """Available input power in dBm of the port selected as gain reference."""
-        info = self._port_sources.get(self.hb_input_port_combo.currentData())
+        info = self._port_sources.get(self.spectrum_input_port_combo.currentData())
         if not info:
             return None
         amplitude = info.get("sin_amplitude") or info.get("ac_amplitude")
@@ -700,50 +725,65 @@ class MainWindow(QMainWindow):
             return None
         return hb_spectrum.available_power_dbm(amplitude, info.get("z0", 50.0))
 
-    def _hb_fundamentals(self) -> list[float]:
-        """Fundamental tone(s) of the HB analysis, taken from the .HB directive field."""
-        edit = self._sim_param_edits.get(f"{SimulationType.HB.value.upper()}:frequencies")
-        return hb_spectrum.parse_fundamentals(edit.text() if edit else None)
+    def _fundamentals(self, sim_type: SimulationType) -> list[float]:
+        """Fundamental tone(s) of the spectrum: the .HB directive field, or the SIN sources
+        driving the ports for a transient analysis (highest first, so a difference
+        product reads ``f1-f2``).
+        """
+        if sim_type is SimulationType.HB:
+            edit = self._sim_param_edits.get(f"{SimulationType.HB.value.upper()}:frequencies")
+            return hb_spectrum.parse_fundamentals(edit.text() if edit else None)
+        tones = {info.get("sin_frequency", 0.0) for info in self._port_sources.values()}
+        return sorted((tone for tone in tones if tone > 0.0), reverse=True)
 
-    def _hb_max_order(self) -> int:
-        """Highest harmonic order to consider when labelling bins (from .options hbint numfreq)."""
+    def _max_order(self, sim_type: SimulationType) -> int:
+        """Highest harmonic order to consider when labelling bins (from .options hbint numfreq).
+
+        A transient FFT has a bin at every multiple of the resolution, so a high
+        order would label noise-floor bins as far-fetched mixing products.
+        """
+        if sim_type is not SimulationType.HB:
+            return 5
         numfreq = self._parsed_options.get("hbint", {}).get("numfreq", "")
         orders = [int(tok) for tok in re.findall(r"\d+", str(numfreq))]
         return max(orders) if orders else 10
 
-    def update_hb_spectrum_plot(self, sim_result=None) -> None:
-        """Redraw the HB spectrum for the selected analysis point and quantity."""
-        if sim_result is not None:
-            self._hb_dataframes = dict(sim_result.dataframes)
+    def update_spectrum_plot(self) -> None:
+        """Redraw the spectrum of the selected view for the analysis point and quantity."""
+        self.spectrum_plot.clear()
+        self._spectrum_markers = {}
+        self._spectrum_data = None
 
-        self.hb_spectrum_plot.clear()
-        self._hb_markers = {}
-        self._hb_spectrum_data = None
+        sim_type = self._spectrum_view_type()
+        if sim_type is None:
+            return
+        title = _SPECTRUM_VIEWS[self.plot_view_combo.currentData()][1]
 
-        quantity = self.hb_quantity_combo.currentData() or "power"
+        quantity = self.spectrum_quantity_combo.currentData() or "power"
         meta = hb_spectrum.QUANTITY_META[quantity]
-        self.hb_spectrum_plot.setLabel("left", meta["label"], units=meta["unit"])
+        self.spectrum_plot.setLabel("left", meta["label"], units=meta["unit"])
 
         pin_dbm = 0.0
         if quantity == "gain":
-            pin = self._hb_pin_dbm()
+            pin = self._spectrum_pin_dbm()
             if pin is None:
-                self.hb_spectrum_plot.setTitle(
-                    "HB Spectrum — no input port with a SIN/AC source to reference the gain to"
+                self.spectrum_plot.setTitle(
+                    f"{title} — no input port with a SIN/AC source to reference the gain to"
                 )
                 return
             pin_dbm = pin
 
-        node = self.hb_analysis_point
-        df = hb_spectrum.find_dataframe(self._hb_dataframes, node, quantity) if node else None
+        node = self.analysis_point
+        dataframes = self._spectrum_dataframes.get(sim_type, {})
+        df = hb_spectrum.find_dataframe(dataframes, node, quantity) if node else None
         if node is None or df is None:
-            self.hb_spectrum_plot.setTitle("HB Spectrum — no data")
+            self.spectrum_plot.setTitle(f"{title} — no data")
             return
 
         freqs, values = hb_spectrum.spectrum(df, node, quantity, pin_dbm=pin_dbm)
-        fundamentals = self._hb_fundamentals()
-        labels = hb_spectrum.classify_bins(freqs, fundamentals, self._hb_max_order())
-        self._hb_spectrum_data = (freqs, values, labels, meta["unit"])
+        fundamentals = self._fundamentals(sim_type)
+        labels = hb_spectrum.classify_bins(freqs, fundamentals, self._max_order(sim_type))
+        self._spectrum_data = (freqs, values, labels, meta["unit"])
 
         v_max = float(np.max(values))
         # Numerically-zero bins sit at the -300 dB floor and would squash the plot.
@@ -761,45 +801,45 @@ class MainWindow(QMainWindow):
             y = np.empty(x.size)
             y[0::2] = baseline
             y[1::2] = np.maximum(values[mask], baseline)
-            self.hb_spectrum_plot.plot(
+            self.spectrum_plot.plot(
                 x, y, connect="pairs", pen=pg.mkPen(color, width=2), name=name
             )
 
-        self.hb_spectrum_plot.setYRange(baseline, v_max + 0.1 * span)
+        self.spectrum_plot.setYRange(baseline, v_max + 0.1 * span)
         tone_text = (
             ", ".join(f"{f/1e9:g} GHz" for f in fundamentals) if fundamentals else "unknown tones"
         )
         reference = (
-            f" ref {self.hb_input_port_combo.currentData()}" if quantity == "gain" else ""
+            f" ref {self.spectrum_input_port_combo.currentData()}" if quantity == "gain" else ""
         )
-        self.hb_spectrum_plot.setTitle(
-            f"HB Spectrum — {meta['label']} at {node}{reference}  [f0 = {tone_text}]"
+        self.spectrum_plot.setTitle(
+            f"{title} — {meta['label']} at {node}{reference}  [f0 = {tone_text}]"
         )
 
-    def on_hb_spectrum_clicked(self, event) -> None:
+    def on_spectrum_clicked(self, event) -> None:
         """Toggle a numbered marker on the spectral line nearest the click.
 
         Clicking a line that already carries a marker removes it, so the same
         gesture both places and clears one. Numbers are not reused while a marker
         holds them, and a cleared number is handed to the next marker placed.
         """
-        if self._hb_spectrum_data is None or event.button() != Qt.MouseButton.LeftButton:
+        if self._spectrum_data is None or event.button() != Qt.MouseButton.LeftButton:
             return
-        if not self.hb_spectrum_plot.sceneBoundingRect().contains(event.scenePos()):
+        if not self.spectrum_plot.sceneBoundingRect().contains(event.scenePos()):
             return
 
-        freqs, values, labels, unit = self._hb_spectrum_data
-        x = self.hb_spectrum_plot.getPlotItem().vb.mapSceneToView(event.scenePos()).x()
+        freqs, values, labels, unit = self._spectrum_data
+        x = self.spectrum_plot.getPlotItem().vb.mapSceneToView(event.scenePos()).x()
         idx = int(np.argmin(np.abs(freqs - x)))
 
-        marked = self._hb_markers.pop(idx, None)
+        marked = self._spectrum_markers.pop(idx, None)
         if marked is not None:
             _, marker, text = marked
-            self.hb_spectrum_plot.removeItem(marker)
-            self.hb_spectrum_plot.removeItem(text)
+            self.spectrum_plot.removeItem(marker)
+            self.spectrum_plot.removeItem(text)
             return
 
-        used = {number for number, _, _ in self._hb_markers.values()}
+        used = {number for number, _, _ in self._spectrum_markers.values()}
         number = 1
         while number in used:
             number += 1
@@ -816,8 +856,8 @@ class MainWindow(QMainWindow):
         )
         text.setPos(freq, value)
         for item in (marker, text):
-            self.hb_spectrum_plot.addItem(item)
-        self._hb_markers[idx] = (number, marker, text)
+            self.spectrum_plot.addItem(item)
+        self._spectrum_markers[idx] = (number, marker, text)
 
     def refresh_overlays(self, _state):
         self.draw_overlays()
@@ -1180,13 +1220,17 @@ class MainWindow(QMainWindow):
                 **extra,
             )
 
-        power_match = re.fullmatch(r"Power_dBm\[(.+)]", name)
+        # Spectrum goals carry their analysis as a name prefix ("TRAN:"); HB is unprefixed.
+        prefix_match = re.fullmatch(r"(?:(TRAN):)?(.+)", name)
+        analysis = (prefix_match.group(1) if prefix_match else None) or "HB"
+        base = prefix_match.group(2) if prefix_match else name
+        power_match = re.fullmatch(r"Power_dBm\[(.+)]", base)
         if power_match:
-            return make(kind="power_dbm", node=power_match.group(1))
-        isolation_match = re.fullmatch(r"Isolation_dB\[(.+)]", name)
+            return make(kind="power_dbm", node=power_match.group(1), analysis=analysis)
+        isolation_match = re.fullmatch(r"Isolation_dB\[(.+)]", base)
         if isolation_match:
-            return make(kind="isolation_db", node=isolation_match.group(1))
-        gain_match = re.fullmatch(r"Gain_dB\[([^@]+)@(.+)]", name)
+            return make(kind="isolation_db", node=isolation_match.group(1), analysis=analysis)
+        gain_match = re.fullmatch(r"Gain_dB\[([^@]+)@(.+)]", base)
         if gain_match:
             port, node = gain_match.groups()
             source = self._port_sources.get(port)
@@ -1199,6 +1243,7 @@ class MainWindow(QMainWindow):
                 port=port,
                 source_amplitude=amplitude,
                 impedance=source.get("z0", 50.0),
+                analysis=analysis,
             )
         return make()
 
@@ -1278,16 +1323,16 @@ class MainWindow(QMainWindow):
         self.netlist_edit.setText(config.netlist)
         self.parse_and_update_components(config.netlist)
 
-        hb_node = next(
+        analysis_node = next(
             (goal.node for goal in config.design_goals if goal.kind != "catalogue" and goal.node),
             None,
         )
-        if hb_node:
-            index = self.hb_point_combo.findText(hb_node, Qt.MatchFlag.MatchFixedString)
+        if analysis_node:
+            index = self.analysis_point_combo.findText(analysis_node, Qt.MatchFlag.MatchFixedString)
             if index < 0:
-                raise ConfigurationError(f"HB analysis point '{hb_node}' is not available")
-            self.hb_point_combo.setCurrentIndex(index)
-            self.on_hb_point_changed()
+                raise ConfigurationError(f"Analysis point '{analysis_node}' is not available")
+            self.analysis_point_combo.setCurrentIndex(index)
+            self.on_analysis_point_changed()
 
         for component, path in config.component_models.items():
             edit = self.component_onnx_edits.get(component)
@@ -1412,12 +1457,12 @@ class MainWindow(QMainWindow):
             self._parsed_directives = list(parser.simulation_directives)
             self._parsed_options = dict(parser.options_directives)
             self._port_sources = dict(parser.port_sources)
-            self._hb_probe_nodes = list(parser.hb_probe_nodes)
-            self._populate_hb_point_combo()
-            self._populate_hb_input_port_combo()
+            self._probe_nodes = list(parser.probe_nodes)
+            self._netlist_sim_type = sim_type
+            self._populate_analysis_point_combo()
+            self._populate_spectrum_input_port_combo()
             self._rebuild_design_parameters()
 
-            self._netlist_sim_type = sim_type
             self.sim_type_value_label.setText(sim_type.display_name)
             self.sim_type_label.setVisible(True)
             self.sim_type_value_label.setVisible(True)
@@ -1442,61 +1487,66 @@ class MainWindow(QMainWindow):
             self._populate_sim_param_widgets(set())
 
     @property
-    def hb_analysis_point(self) -> str | None:
-        """The node whose HB spectrum is plotted and used by HB design goals."""
-        return self.hb_point_combo.currentText() or None
+    def analysis_point(self) -> str | None:
+        """The node whose spectrum is plotted and used by the power, gain and isolation goals."""
+        return self.analysis_point_combo.currentText() or None
 
-    def _populate_hb_point_combo(self) -> None:
-        """Fill the analysis-point combo from the netlist's HB voltage/current probes."""
-        previous = self.hb_point_combo.currentText()
-        self.hb_point_combo.blockSignals(True)
-        self.hb_point_combo.clear()
-        self.hb_point_combo.addItems(self._hb_probe_nodes)
+    def _populate_analysis_point_combo(self) -> None:
+        """Fill the analysis-point combo from the netlist's voltage/current probes."""
+        previous = self.analysis_point_combo.currentText()
+        self.analysis_point_combo.blockSignals(True)
+        self.analysis_point_combo.clear()
+        self.analysis_point_combo.addItems(self._probe_nodes)
         preferred = next(
-            (n for n in (previous, "Out") if n and n.upper() in {p.upper() for p in self._hb_probe_nodes}),
+            (n for n in (previous, "Out") if n and n.upper() in {p.upper() for p in self._probe_nodes}),
             None,
         )
         if preferred:
-            self.hb_point_combo.setCurrentIndex(
-                next(i for i, n in enumerate(self._hb_probe_nodes) if n.upper() == preferred.upper())
+            self.analysis_point_combo.setCurrentIndex(
+                next(i for i, n in enumerate(self._probe_nodes) if n.upper() == preferred.upper())
             )
-        self.hb_point_combo.blockSignals(False)
+        self.analysis_point_combo.blockSignals(False)
 
-    def _populate_hb_input_port_combo(self) -> None:
+    def _populate_spectrum_input_port_combo(self) -> None:
         """Fill the gain reference combo with the ports that actually drive the circuit."""
-        previous = self.hb_input_port_combo.currentData()
-        self.hb_input_port_combo.blockSignals(True)
-        self.hb_input_port_combo.clear()
+        previous = self.spectrum_input_port_combo.currentData()
+        self.spectrum_input_port_combo.blockSignals(True)
+        self.spectrum_input_port_combo.clear()
         for port_name, info in sorted(self._port_sources.items()):
             amplitude = info.get("sin_amplitude") or info.get("ac_amplitude")
             if amplitude is None:
                 continue
             pin_dbm = hb_spectrum.available_power_dbm(amplitude, info.get("z0", 50.0))
-            self.hb_input_port_combo.addItem(f"{port_name} — Pin {pin_dbm:.2f} dBm", port_name)
-        index = self.hb_input_port_combo.findData(previous)
+            self.spectrum_input_port_combo.addItem(f"{port_name} — Pin {pin_dbm:.2f} dBm", port_name)
+        index = self.spectrum_input_port_combo.findData(previous)
         if index >= 0:
-            self.hb_input_port_combo.setCurrentIndex(index)
-        self.hb_input_port_combo.blockSignals(False)
+            self.spectrum_input_port_combo.setCurrentIndex(index)
+        self.spectrum_input_port_combo.blockSignals(False)
 
     def _rebuild_design_parameters(self) -> None:
         """Rebuild the available design parameters for the current netlist and analysis point."""
         self._available_parameters = get_available_parameters(self._num_ports)
-        node = self.hb_analysis_point
+        node = self.analysis_point
         if not node:
             return
-        self._available_parameters.append(make_power_dbm(node))
-        self._available_parameters.append(make_isolation_db(node))
-        # Gain needs the input drive level, so only ports with a SIN/AC source qualify.
-        for port_name, source_info in sorted(self._port_sources.items()):
-            sin_amp = source_info.get("sin_amplitude") or source_info.get("ac_amplitude")
-            if sin_amp is not None:
-                self._available_parameters.append(
-                    make_gain_db(port_name, sin_amp, source_info.get("z0", 50.0), node)
-                )
+        # Both large-signal analyses offer the spectrum goals; the netlist's own comes first.
+        analyses = [SimulationType.HB, SimulationType.TRAN]
+        if self._netlist_sim_type is SimulationType.TRAN:
+            analyses.reverse()
+        for analysis in analyses:
+            self._available_parameters.append(make_power_dbm(node, analysis))
+            self._available_parameters.append(make_isolation_db(node, analysis))
+            # Gain needs the input drive level, so only ports with a SIN/AC source qualify.
+            for port_name, source_info in sorted(self._port_sources.items()):
+                sin_amp = source_info.get("sin_amplitude") or source_info.get("ac_amplitude")
+                if sin_amp is not None:
+                    self._available_parameters.append(
+                        make_gain_db(port_name, sin_amp, source_info.get("z0", 50.0), node, analysis)
+                    )
 
-    def on_hb_point_changed(self) -> None:
+    def on_analysis_point_changed(self) -> None:
         self._rebuild_design_parameters()
-        self.update_hb_spectrum_plot()
+        self.update_spectrum_plot()
 
     def _refresh_sim_params_for_goals(self) -> None:
         """Rebuild sim-param widgets for the native sim type and any goal-required additions."""
@@ -1518,9 +1568,9 @@ class MainWindow(QMainWindow):
         self.sim_type_value_label.setText(all_types_str)
         self._populate_sim_param_widgets(required)
 
-        show_hb = SimulationType.HB in required and bool(self._hb_probe_nodes)
-        self.hb_point_label.setVisible(show_hb)
-        self.hb_point_combo.setVisible(show_hb)
+        show_point = bool(required & _LARGE_SIGNAL_TYPES) and bool(self._probe_nodes)
+        self.analysis_point_label.setVisible(show_point)
+        self.analysis_point_combo.setVisible(show_point)
         self._update_plot_view_availability()
 
     def _populate_sim_param_widgets(self, sim_types: "set[SimulationType]") -> None:
@@ -2209,13 +2259,15 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
             logger.warning("S-parameter plot update failed: %s", exc)
 
-        # 5. Update HB Spectrum Plot
+        # 5. Update Spectrum Plot (HB / transient)
         try:
-            hb_result = sim_results.get(SimulationType.HB)
-            if hb_result is not None:
-                self.update_hb_spectrum_plot(hb_result)
+            for sim_type in _LARGE_SIGNAL_TYPES:
+                result = sim_results.get(sim_type)
+                if result is not None:
+                    self._spectrum_dataframes[sim_type] = dict(result.dataframes)
+            self.update_spectrum_plot()
         except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
-            logger.warning("HB spectrum plot update failed: %s", exc)
+            logger.warning("Spectrum plot update failed: %s", exc)
 
     @Slot()
     def on_finished(self):

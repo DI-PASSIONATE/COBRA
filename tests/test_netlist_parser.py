@@ -162,16 +162,21 @@ def test_port_sources_only_include_ports_with_a_source(minimal_ac):
     assert minimal_ac.port_sources["P1"] == {"z0": 50.0, "ac_amplitude": 1.0}
 
 
-def test_sin_source_amplitude_is_the_third_token(parser_factory):
-    """``SIN <offset> <amplitude> <freq>`` — the amplitude is the second argument."""
+def test_sin_source_amplitude_and_frequency_follow_the_offset(parser_factory):
+    """``SIN <offset> <amplitude> <freq>`` — amplitude and frequency are the 2nd and 3rd arguments."""
     parser = parser_factory("hb_two_tone")
-    assert parser.port_sources["P1"] == {"z0": 50.0, "sin_amplitude": 0.2}
-    assert parser.port_sources["P2"] == {"z0": 50.0, "sin_amplitude": 0.5}
+    assert parser.port_sources["P1"] == {"z0": 50.0, "sin_amplitude": 0.2, "sin_frequency": 95e9}
+    assert parser.port_sources["P2"] == {"z0": 50.0, "sin_amplitude": 0.5, "sin_frequency": 10e9}
 
 
-def test_hb_probe_nodes_requires_matching_voltage_and_current(parser_factory):
+def test_probe_nodes_requires_matching_voltage_and_current(parser_factory):
     parser = parser_factory("hb_two_tone")
-    assert parser.hb_probe_nodes == ["OUT"]
+    assert parser.probe_nodes == ["OUT"]
+
+
+def test_probe_nodes_are_read_from_a_print_tran_line(parser_factory):
+    parser = parser_factory("tran_single_tone")
+    assert parser.probe_nodes == ["OUT"]
 
 
 def test_options_directives_strip_the_internal_line_index(parser_factory):
@@ -341,7 +346,7 @@ def test_update_simulation_directive_expands_multi_token_values(editable_netlist
 def test_update_simulation_directive_raises_for_missing_directive(editable_netlist):
     parser = editable_netlist("minimal_ac")
     with pytest.raises(KeyError, match=r"\.TRAN"):
-        parser.update_simulation_directive(".TRAN", {"step": "1n"})
+        parser.update_simulation_directive(".TRAN", {"initial_step": "1n"})
 
 
 def test_update_options_directive(editable_netlist):

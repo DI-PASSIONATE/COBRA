@@ -6,6 +6,10 @@ design-goal formulas and the GUI plot share one implementation.
 
 Phasor convention: Xyce stores two-sided spectra, i.e. each bin holds amplitude/2.
 The apparent power therefore is ``S = Vrms * Irms = 2 * |V_pk * I_pk|``.
+
+A transient result reaches the same layout through
+:func:`cobra.spice_sim.tran_spectrum.to_frequency_domain`, so everything here
+applies to it unchanged.
 """
 
 import re

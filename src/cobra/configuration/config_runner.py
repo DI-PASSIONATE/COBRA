@@ -44,9 +44,10 @@ def _build_goal(config: DesignGoalConfig, parser: XyceNetlistParser) -> DesignGo
                 f"{parameter.min_ports} ports; netlist has {parser.num_ports}"
             )
     elif config.kind in {"power_dbm", "isolation_db"}:
-        if config.node not in parser.hb_probe_nodes:
+        analysis = config.analysis_type()
+        if config.node not in parser.probe_nodes:
             raise ConfigurationError(
-                f"HB goal node '{config.node}' is not available in the netlist"
+                f"{analysis.value} goal node '{config.node}' is not available in the netlist"
             )
         if config.kind == "isolation_db" and not config.frequency_range:
             raise ConfigurationError(
@@ -54,25 +55,27 @@ def _build_goal(config: DesignGoalConfig, parser: XyceNetlistParser) -> DesignGo
                 "target line, e.g. '35GHz'"
             )
         parameter = (
-            make_power_dbm(config.node or "")
+            make_power_dbm(config.node or "", analysis)
             if config.kind == "power_dbm"
-            else make_isolation_db(config.node or "")
+            else make_isolation_db(config.node or "", analysis)
         )
     else:
+        analysis = config.analysis_type()
         source = parser.port_sources.get(config.port or "")
-        if config.node not in parser.hb_probe_nodes:
+        if config.node not in parser.probe_nodes:
             raise ConfigurationError(
-                f"HB goal node '{config.node}' is not available in the netlist"
+                f"{analysis.value} goal node '{config.node}' is not available in the netlist"
             )
         if source is None:
             raise ConfigurationError(
-                f"HB gain goal port '{config.port}' is not a driven netlist port"
+                f"{analysis.value} gain goal port '{config.port}' is not a driven netlist port"
             )
         parameter = make_gain_db(
             config.port or "",
             config.source_amplitude if config.source_amplitude is not None else source["sin_amplitude"],
             config.impedance if config.impedance is not None else source.get("z0", 50.0),
             config.node or "",
+            analysis,
         )
     if parameter.name != config.parameter:
         raise ConfigurationError(

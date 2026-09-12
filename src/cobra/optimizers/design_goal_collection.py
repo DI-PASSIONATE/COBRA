@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 import skrf as rf
@@ -7,6 +8,9 @@ from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Helper: Z-matrix accessor used by several lumped-parameter formulas
@@ -84,54 +88,93 @@ def _srf(sim_result: SimulationResult, frequency_range: str | None = None):
     srf_idx = np.where(np.diff(np.sign(np.imag(z11))))[0]
     return freq_ghz[srf_idx[0]] if len(srf_idx) > 0 else np.nan
 
+# ---------------------------------------------------------------------------
+# Large-signal spectrum parameters (HB or transient)
+# ---------------------------------------------------------------------------
+
+#: Name prefix per analysis a spectrum goal can read. HB names stay unprefixed
+#: because they predate transient support.
+_LARGE_SIGNAL_PREFIX: dict[SimulationType, str] = {
+    SimulationType.HB: "",
+    SimulationType.TRAN: "TRAN:",
+}
+
+
+def large_signal_name(base: str, simulation_type: SimulationType) -> str:
+    """Parameter name of a spectrum goal, e.g. ``Power_dBm[Out]`` or ``TRAN:Power_dBm[Out]``."""
+    if simulation_type not in _LARGE_SIGNAL_PREFIX:
+        raise ValueError(
+            f"Spectrum goals need an HB or TRAN analysis, got {simulation_type.value}"
+        )
+    return f"{_LARGE_SIGNAL_PREFIX[simulation_type]}{base}"
+
+
+def _spectrum_dataframe(
+    sim_result: SimulationResult, node: str, simulation_type: SimulationType
+) -> "pd.DataFrame":
+    """The result table holding the spectrum at *node*, whichever analysis produced it."""
+    df = hb_spectrum.find_dataframe(sim_result.dataframes, node, "power")
+    if df is None:
+        raise KeyError(
+            f"No {simulation_type.value} result containing V({node}) and I(V{node}) was found. "
+            f"Add both to the netlist's '.PRINT {simulation_type.name.lower()}' line."
+        )
+    return df
+
+
 def _power(
     sim_result: SimulationResult,
     frequency_range: str | None = None,
     node: str = "OUT",
+    simulation_type: SimulationType = SimulationType.HB,
 ) -> np.ndarray:
-    """Output power in dBm at *node* from a Harmonic Balance result.
+    """Output power in dBm at *node* from an HB or transient spectrum.
 
     Requires the node voltage ``V(<node>)`` and the current ``I(V<node>)`` of the
-    0 V probe source in series with it to be present in the HB output.
+    0 V probe source in series with it to be present in the analysis output.
     """
-    df = hb_spectrum.find_dataframe(sim_result.dataframes, node, "power")
-    if df is None:
-        raise KeyError(
-            f"No HB result containing V({node}) and I(V{node}) was found. "
-            f"Add both to the netlist's '.PRINT hb' line."
-        )
+    df = _spectrum_dataframe(sim_result, node, simulation_type)
     _, p_dbm = hb_spectrum.spectrum(
         df, node, "power", DesignGoal.str_to_frequency_range(frequency_range)
     )
     return p_dbm
 
 
-def make_power_dbm(node: str) -> "DesignParameter":
-    """Return a ``Power_dBm[<node>]`` DesignParameter for HB simulations."""
+def make_power_dbm(
+    node: str, simulation_type: SimulationType = SimulationType.HB
+) -> "DesignParameter":
+    """Return a ``Power_dBm[<node>]`` DesignParameter for HB or transient simulations."""
 
     def _power_formula(
         sim_result: SimulationResult, frequency_range: str | None = None
     ) -> np.ndarray:
-        return _power(sim_result, frequency_range, node)
+        return _power(sim_result, frequency_range, node, simulation_type)
 
     return DesignParameter(
-        name=f"Power_dBm[{node}]",
-        simulation_type=SimulationType.HB,
+        name=large_signal_name(f"Power_dBm[{node}]", simulation_type),
+        simulation_type=simulation_type,
         formula=_power_formula,
         loss=calculate_array_penalty,
-        description=f"Output power in dBm at node '{node}' (from V({node}) and I(V{node})).",
+        description=(
+            f"Output power in dBm at node '{node}' from the {simulation_type.value} "
+            f"spectrum (from V({node}) and I(V{node}))."
+        ),
         min_ports=1,
     )
 
 
 def make_gain_db(
-    port_name: str, sin_amplitude: float, z0: float = 50.0, node: str = "OUT"
+    port_name: str,
+    sin_amplitude: float,
+    z0: float = 50.0,
+    node: str = "OUT",
+    simulation_type: SimulationType = SimulationType.HB,
 ) -> "DesignParameter":
-    """Return a ``Gain_dB[<port_name>@<node>]`` DesignParameter for HB simulations.
+    """Return a ``Gain_dB[<port_name>@<node>]`` DesignParameter for HB or transient simulations.
 
     Gain is defined as ``Pout[dBm] − Pin[dBm]`` where:
 
-    * ``Pout`` is the HB output power at *node* (see :func:`_power`).
+    * ``Pout`` is the output power at *node* in the analysis spectrum (see :func:`_power`).
     * ``Pin`` (available power at the input port) is the constant::
 
           P_avail = A² / (8 · z0)   →   Pin_dBm = 10·log10(P_avail / 1 mW)
@@ -148,21 +191,24 @@ def make_gain_db(
         Port impedance in Ohms (default 50 Ω).
     node:
         Output node the gain is measured at.
+    simulation_type:
+        The analysis whose spectrum supplies ``Pout`` (HB or TRAN).
     """
     pin_dbm = hb_spectrum.available_power_dbm(sin_amplitude, z0)
 
     def _gain_formula(
         sim_result: SimulationResult, frequency_range: str | None = None
     ) -> np.ndarray:
-        return _power(sim_result, frequency_range, node) - pin_dbm
+        return _power(sim_result, frequency_range, node, simulation_type) - pin_dbm
 
     return DesignParameter(
-        name=f"Gain_dB[{port_name}@{node}]",
-        simulation_type=SimulationType.HB,
+        name=large_signal_name(f"Gain_dB[{port_name}@{node}]", simulation_type),
+        simulation_type=simulation_type,
         formula=_gain_formula,
         loss=calculate_array_penalty,
         description=(
-            f"Transducer gain in dB at node '{node}' using {port_name} as input port "
+            f"Transducer gain in dB at node '{node}' from the {simulation_type.value} "
+            f"spectrum, using {port_name} as input port "
             f"(A={sin_amplitude:.6g} V, z0={z0:.4g} Ω → P_in={pin_dbm:.2f} dBm)."
         ),
         min_ports=1,
@@ -173,18 +219,14 @@ def _isolation(
     sim_result: SimulationResult,
     frequency_range: str | None = None,
     node: str = "OUT",
+    simulation_type: SimulationType = SimulationType.HB,
 ) -> float:
     """How far the strongest unwanted line sits below the target line, in dB.
 
     DC is not a mixing product, and the operating point would otherwise dominate
     the spur search, so the 0 Hz bin is excluded.
     """
-    df = hb_spectrum.find_dataframe(sim_result.dataframes, node, "power")
-    if df is None:
-        raise KeyError(
-            f"No HB result containing V({node}) and I(V{node}) was found. "
-            f"Add both to the netlist's '.PRINT hb' line."
-        )
+    df = _spectrum_dataframe(sim_result, node, simulation_type)
     if frequency_range is None:
         raise ValueError(
             f"Isolation at '{node}' needs a target frequency, e.g. '35GHz'; "
@@ -199,14 +241,21 @@ def _isolation(
     spurs = ~np.isin(freqs, target_freqs) & (freqs > 0.0)
     if not spurs.any():
         raise ValueError(
-            f"The HB spectrum at '{node}' holds no line outside {frequency_range}, "
-            "so isolation is undefined. Raise 'numfreq' to resolve more products."
+            f"The {simulation_type.value} spectrum at '{node}' holds no line outside "
+            f"{frequency_range}, so isolation is undefined. "
+            + (
+                "Raise 'numfreq' to resolve more products."
+                if simulation_type is SimulationType.HB
+                else "Lengthen the .TRAN window to resolve more bins."
+            )
         )
     return float(np.min(target_dbm) - np.max(p_dbm[spurs]))
 
 
-def make_isolation_db(node: str) -> "DesignParameter":
-    """Return an ``Isolation_dB[<node>]`` DesignParameter for HB simulations.
+def make_isolation_db(
+    node: str, simulation_type: SimulationType = SimulationType.HB
+) -> "DesignParameter":
+    """Return an ``Isolation_dB[<node>]`` DesignParameter for HB or transient simulations.
 
     The goal's frequency range names the wanted line; every other non-DC line in
     the spectrum is a spur. The value is ``P_target - max(P_spur)`` in dB, so a
@@ -217,16 +266,16 @@ def make_isolation_db(node: str) -> "DesignParameter":
     def _isolation_formula(
         sim_result: SimulationResult, frequency_range: str | None = None
     ) -> float:
-        return _isolation(sim_result, frequency_range, node)
+        return _isolation(sim_result, frequency_range, node, simulation_type)
 
     return DesignParameter(
-        name=f"Isolation_dB[{node}]",
-        simulation_type=SimulationType.HB,
+        name=large_signal_name(f"Isolation_dB[{node}]", simulation_type),
+        simulation_type=simulation_type,
         formula=_isolation_formula,
         loss=calculate_array_penalty,
         description=(
             f"Margin in dB between the target line at node '{node}' and the "
-            "strongest other line in the HB spectrum (DC excluded)."
+            f"strongest other line in the {simulation_type.value} spectrum (DC excluded)."
         ),
         min_ports=1,
     )

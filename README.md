@@ -330,7 +330,7 @@ Output power needs both a voltage and a current. The Qucs-S convention is a labe
 VOut Out _net6 DC 0
 ```
 
-This yields the pair `V(Out)` and `I(VOut)`. COBRA scans the `.PRINT hb` line and offers every node that has **both** halves of such a pair in the **HB Analysis Point** dropdown in the configuration panel. The selected node is what the HB design parameters and the spectrum plot refer to.
+This yields the pair `V(Out)` and `I(VOut)`. COBRA scans the `.PRINT hb` line and offers every node that has **both** halves of such a pair in the **Analysis Point** dropdown in the configuration panel. The selected node is what the HB design parameters and the spectrum plot refer to.
 
 ### Goals
 
@@ -346,10 +346,13 @@ During optimization the visualization panel plots the output spectrum of the sel
 - **Fundamentals** are highlighted in a separate colour from the remaining lines.
 - **Click any line** to drop a marker labelled with its frequency, value, and harmonic index — `H2` for a single-tone analysis, or the mixing-product decomposition such as `2f1-f2` for multi-tone, so unwanted products are easy to identify when tuning for isolation.
 
-When both an `.AC` and an `.HB` analysis run, a selector switches the left plot between the S-parameters and the HB spectrum; when only one of them is active, that plot is shown and the selector is disabled.
+When the run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them; when only one is active, that plot is shown and the selector is disabled.
 
-> [!NOTE]
-> Transient (`.TRAN`) analyses are parsed and can be simulated, but time-domain spectrum plotting is not implemented yet.
+### Transient analysis
+
+A `.TRAN` analysis reaches the same spectrum by a different route: Xyce integrates in time, and COBRA takes the FFT of the printed window. The `.TRAN` arguments are `<print step> <stop time> [<start time> [<max step>]]`; the start time (output start) is the settling time — nothing before it is printed, so nothing before it enters the FFT.
+
+The `.PRINT tran` line must use `format=csv` (Qucs-S exports `format=raw`, which COBRA does not read). The spectrum is written next to Xyce's output as `<netlist>.TRAN.FD.csv`, and the goals are the HB ones with a `TRAN:` prefix — `TRAN:Power_dBm[Out]`, `TRAN:Gain_dB[P2@Out]`, `TRAN:Isolation_dB[Out]` — so HB and transient goals can be mixed in one run. `examples/configs/mixer_tran_config.json` is the transient counterpart of the HB mixer example.
 
 ## Typical Inputs and Outputs
 

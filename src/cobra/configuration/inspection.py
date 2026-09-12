@@ -177,10 +177,11 @@ class NetlistReport:
     simulation_directives: list[dict[str, Any]] = field(default_factory=list)
     options_directives: dict[str, dict[str, str]] = field(default_factory=dict)
     print_directives: list[dict[str, Any]] = field(default_factory=list)
-    hb_probe_nodes: list[str] = field(default_factory=list)
+    probe_nodes: list[str] = field(default_factory=list)
     available_goal_parameters: list[str] = field(default_factory=list)
     ac_goal_parameters: list[str] = field(default_factory=list)
     hb_goal_parameters: list[str] = field(default_factory=list)
+    tran_goal_parameters: list[str] = field(default_factory=list)
     element_counts: dict[str, int] = field(default_factory=dict)
     elements: list[ElementReport] = field(default_factory=list)
     netlist_variables: dict[str, str] = field(default_factory=dict)
@@ -212,10 +213,11 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
     report.simulation_type = parser.simulation_type.value
     report.num_ports = parser.num_ports
     report.inline_subcircuits = sorted(parser.inline_subckt_names)
-    report.hb_probe_nodes = list(parser.hb_probe_nodes)
+    report.probe_nodes = list(parser.probe_nodes)
     report.available_goal_parameters = list(parser.available_design_parameters)
     report.ac_goal_parameters = SimulationType.AC.available_parameters(parser.num_ports)
-    report.hb_goal_parameters = _hb_goal_parameters(parser)
+    report.hb_goal_parameters = _large_signal_goal_parameters(parser, SimulationType.HB)
+    report.tran_goal_parameters = _large_signal_goal_parameters(parser, SimulationType.TRAN)
 
     for element in parser.list_elements():
         report.elements.append(
@@ -335,15 +337,22 @@ def _included_subcircuits(path: Path, report: NetlistReport) -> list[str]:
         return []
 
 
-def _hb_goal_parameters(parser: XyceNetlistParser) -> list[str]:
-    """List the HB goal parameter names this netlist can support."""
-    names = [f"Power_dBm[{node}]" for node in parser.hb_probe_nodes]
+def _large_signal_goal_parameters(
+    parser: XyceNetlistParser, simulation_type: SimulationType
+) -> list[str]:
+    """List the HB or transient goal parameter names this netlist can support."""
+    # Imported here: the goal collection pulls in numpy and scikit-rf.
+    from cobra.optimizers.design_goal_collection import large_signal_name
+
+    names = [large_signal_name(f"Power_dBm[{node}]", simulation_type) for node in parser.probe_nodes]
     names.extend(
-        f"Gain_dB[{port}@{node}]"
+        large_signal_name(f"Gain_dB[{port}@{node}]", simulation_type)
         for port in sorted(parser.port_sources)
-        for node in parser.hb_probe_nodes
+        for node in parser.probe_nodes
     )
-    names.extend(f"Isolation_dB[{node}]" for node in parser.hb_probe_nodes)
+    names.extend(
+        large_signal_name(f"Isolation_dB[{node}]", simulation_type) for node in parser.probe_nodes
+    )
     return names
 
 
@@ -379,15 +388,28 @@ def _check_netlist(report: NetlistReport, parser: XyceNetlistParser) -> None:
                 "No P (port) elements found; S-parameter design goals are unavailable.",
             )
         )
-    if parser.simulation_type is SimulationType.HB and not parser.hb_probe_nodes:
+    if parser.simulation_type in (SimulationType.HB, SimulationType.TRAN) and not parser.probe_nodes:
         report.issues.append(
             Issue(
                 Severity.WARNING,
                 "netlist",
-                "No HB probe node found; a node needs both V(<node>) and I(V<node>), "
+                "No probe node found; a node needs both V(<node>) and I(V<node>), "
                 "which requires a 0 V source named V<node>.",
             )
         )
+    for directive in parser.print_directives:
+        output_format = next(
+            (value for key, value in directive.kv_params.items() if key.lower() == "format"), ""
+        )
+        if directive.analysis in ("hb", "tran") and output_format.lower() == "raw":
+            report.issues.append(
+                Issue(
+                    Severity.WARNING,
+                    f"netlist.print:{directive.line_index + 1}",
+                    f".PRINT {directive.analysis} format=raw cannot be read by COBRA; "
+                    "use format=csv (or drop format= for the default table).",
+                )
+            )
     included_subcircuits = {
         name: include.resolved_path
         for include in report.includes
@@ -975,7 +997,7 @@ def _check_design_goals(
         )
         location = f"design_goals.{goal.parameter}"
         simulation_type = (
-            SimulationType.HB
+            goal.analysis_type()
             if goal.kind in {"power_dbm", "gain_db", "isolation_db"}
             else SimulationType.for_parameter(goal.parameter)
         )
@@ -1017,6 +1039,33 @@ def _check_design_goals(
         )
 
 
+def _configured_parameter(configuration: RunConfiguration, key: str, name: str) -> str | None:
+    """The value ``simulation_parameters[key][name]`` will write, or ``None`` when unset."""
+    for candidate, values in configuration.simulation_parameters.items():
+        normalised = candidate if candidate.startswith(".") else f".{candidate}"
+        if normalised.upper() != key.upper():
+            continue
+        return next((str(v) for k, v in values.items() if k.lower() == name.lower()), None)
+    return None
+
+
+def _tran_window(
+    configuration: RunConfiguration, positional: list[str]
+) -> float | None:
+    """The printed ``.TRAN`` window in seconds (``stop_time - start_time``) the run will use."""
+    names = ["step", "stop_time", "start_time", "max_step"]
+    tokens = dict(zip(names, positional, strict=False))
+    for name in ("stop_time", "start_time"):
+        configured = _configured_parameter(configuration, ".TRAN", name)
+        if configured is not None:
+            tokens[name] = configured
+    stop = _spice_number(tokens.get("stop_time", ""))
+    start = _spice_number(tokens.get("start_time", "0"))
+    if stop is None or start is None:
+        return None
+    return stop - start
+
+
 def _hb_grid(
     configuration: RunConfiguration,
     parser: XyceNetlistParser,
@@ -1031,12 +1080,7 @@ def _hb_grid(
     from cobra.spice_sim import hb_spectrum
 
     def configured(key: str, name: str) -> str | None:
-        for candidate, values in configuration.simulation_parameters.items():
-            normalised = candidate if candidate.startswith(".") else f".{candidate}"
-            if normalised.upper() != key.upper():
-                continue
-            return next((str(v) for k, v in values.items() if k.lower() == name.lower()), None)
-        return None
+        return _configured_parameter(configuration, key, name)
 
     netlist_numfreq = next(
         (
@@ -1068,10 +1112,12 @@ def _check_goal_frequency(
     ``.HB`` reaches a mixing grid rather than a range: ``.HB 95E9 10E9`` with
     ``numfreq=4,40`` legitimately resolves 35 GHz and 130 GHz even though neither
     is a fundamental.  Comparing against the first fundamental alone would reject
-    every multi-tone goal, so HB is checked against the grid instead.
+    every multi-tone goal, so HB is checked against the grid instead.  A ``.TRAN``
+    spectrum has bins at multiples of ``1 / (stop_time - start_time)``, so its
+    goals are checked against that grid.
     """
     from cobra.optimizers.design_goal import DesignGoal
-    from cobra.spice_sim import hb_spectrum
+    from cobra.spice_sim import hb_spectrum, tran_spectrum
 
     if parser is None or frequency_range is None:
         return
@@ -1091,6 +1137,19 @@ def _check_goal_frequency(
                         f"Goal frequency {frequency_range} is not on the .HB grid of "
                         f"{', '.join(f'{tone:g}' for tone in tones)} Hz with "
                         f"numfreq={','.join(str(order) for order in orders)}.",
+                    )
+                )
+            return
+        if simulation_type is SimulationType.TRAN:
+            window = _tran_window(configuration, directive.positional)
+            if window is not None and not tran_spectrum.on_fft_grid(window, low, high):
+                report.issues.append(
+                    Issue(
+                        Severity.WARNING,
+                        location,
+                        f"Goal frequency {frequency_range} is not on the FFT grid of the "
+                        f".TRAN window {window:g} s (resolution {1.0 / window:g} Hz); make "
+                        "stop_time - start_time a whole number of periods of the goal frequency.",
                     )
                 )
             return
@@ -1318,7 +1377,7 @@ def render_netlist_report(report: NetlistReport, *, full: bool = False, issues: 
     _field(lines, "primary analysis", report.simulation_type)
     _field(lines, "ports", report.num_ports)
     _field(lines, "surrogate components", len(report.components))
-    _field(lines, "hb probe nodes", _join(report.hb_probe_nodes))
+    _field(lines, "probe nodes", _join(report.probe_nodes))
     _field(
         lines,
         "elements",
@@ -1408,6 +1467,7 @@ def render_netlist_report(report: NetlistReport, *, full: bool = False, issues: 
     _field_list(lines, "available now", report.available_goal_parameters, full=full)
     _field_list(lines, "with .AC analysis", report.ac_goal_parameters, full=full)
     _field_list(lines, "with .HB analysis", report.hb_goal_parameters, full=full)
+    _field_list(lines, "with .TRAN analysis", report.tran_goal_parameters, full=full)
 
     _heading(lines, "Netlist variables (type netlist_variable)")
     _entries(

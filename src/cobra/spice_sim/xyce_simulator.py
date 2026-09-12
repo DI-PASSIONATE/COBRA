@@ -10,6 +10,7 @@ import skrf as rf
 
 from cobra.configuration.configuration import ConfigurationError
 from cobra.configuration.setting import CobraSetting
+from cobra.spice_sim import tran_spectrum
 from cobra.spice_sim.base_simulator import (
     BaseSimulator,
     SimulationResult,
@@ -65,7 +66,10 @@ _XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
         positional_param_descriptions={
             "step":       "Print/output time step.",
             "stop_time":  "Total simulation stop time.",
-            "start_time": "Time at which output begins (default 0).",
+            "start_time": "Time at which output begins (default 0). Everything before it is the\n"
+                          "start-up transient and is left out of the spectrum, so raise it until\n"
+                          "the circuit has settled. stop_time - start_time sets the FFT resolution\n"
+                          "and should be a whole number of signal periods.",
             "max_step":   "Maximum internal time step (optional).",
         },
         positional_param_defaults={"step": "1n", "stop_time": "100n", "start_time": "0", "max_step": "1n"},
@@ -246,8 +250,9 @@ class XyceSimulator(BaseSimulator):
             found.extend(outputs(".HB.FD.csv", ".HB.FD.prn"))
 
         elif sim_type in (SimulationType.TRAN, SimulationType.DC):
-            # Default PRN output for transient / DC sweeps
-            found.extend(glob.glob(os.path.join(results_dir, f"{netlist_base}.prn")))
+            # ".PRINT tran format=csv" writes <netlist>.csv; the default format writes <netlist>.prn.
+            for extension in (".csv", ".prn"):
+                found.extend(glob.glob(os.path.join(results_dir, netlist_base + extension)))
 
         else:
             # Unknown / UNKNOWN — accept any .prn or .s*p produced nearby
@@ -287,5 +292,22 @@ class XyceSimulator(BaseSimulator):
                 dataframes[prn_path] = df.apply(pd.to_numeric, errors="coerce")
             except Exception as exc:  # noqa: BLE001 - one unreadable output file must not abort the run
                 logger.warning("Could not parse simulation output %s: %s", prn_path, exc)
+
+        # --- Transient: derive the spectrum once, next to Xyce's own output -----
+        # Mirrors the <netlist>.HB.FD.csv Xyce writes for HB, so goals and the GUI
+        # read a transient result exactly like a Harmonic Balance one.
+        if sim_type is SimulationType.TRAN:
+            for prn_path, df in list(dataframes.items()):
+                if not tran_spectrum.is_time_domain(df):
+                    continue
+                fd_path = os.path.splitext(prn_path)[0] + ".TRAN.FD.csv"
+                try:
+                    spectrum = tran_spectrum.to_frequency_domain(df)
+                except (KeyError, ValueError) as exc:
+                    logger.warning("Could not compute the spectrum of %s: %s", prn_path, exc)
+                    continue
+                spectrum.to_csv(fd_path, index=False)
+                dataframes[fd_path] = spectrum
+                found.append(fd_path)
 
         return SimulationResult(output_files=found, network=network, dataframes=dataframes)

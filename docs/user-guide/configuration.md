@@ -172,10 +172,12 @@ apply to a run may use empty objects or arrays.
 }
 ```
 
-Optimization parameter types are `model_input` and `netlist_variable`. Dynamic HB
-goals use `power_dbm`, `gain_db` or `isolation_db` as their `kind`; gain goals
-additionally store the input port, source amplitude, and impedance required to
-reconstruct their power reference. An `isolation_db` goal needs a
+Optimization parameter types are `model_input` and `netlist_variable`. Dynamic
+spectrum goals use `power_dbm`, `gain_db` or `isolation_db` as their `kind` and
+name the analysis they read in `analysis`: `"HB"` (the default) or `"TRAN"`, in
+which case the parameter name carries a `TRAN:` prefix, e.g.
+`TRAN:Power_dBm[Out]`. Gain goals additionally store the input port, source
+amplitude, and impedance required to reconstruct their power reference. An `isolation_db` goal needs a
 `frequency_range` naming the wanted line — its value is the margin in dB down to
 the strongest other line in the spectrum, DC excluded — and is rejected without
 one.
@@ -211,5 +213,5 @@ store a JSON-relative Python file and class name. ORCA is imported only when an
 enabled configuration requires a geometry.
 
 Unknown fields, unsupported schema versions or backends, broken linked-parameter
-references, unavailable HB nodes or ports, and missing input files are rejected
-before optimization starts.
+references, unavailable analysis-point nodes or ports, and missing input files
+are rejected before optimization starts.

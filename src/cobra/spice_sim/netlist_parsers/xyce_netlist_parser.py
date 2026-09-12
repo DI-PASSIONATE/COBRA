@@ -399,18 +399,20 @@ class XyceNetlistParser(BaseNetlistParser):
     # -------------------------------------------------------------------------
 
     @property
-    def hb_probe_nodes(self) -> list[str]:
-        """Node names that can serve as an HB analysis point.
+    def probe_nodes(self) -> list[str]:
+        """Node names that can serve as a large-signal (HB or transient) analysis point.
 
         A node ``X`` qualifies when both its voltage ``V(X)`` and the current
         ``I(VX)`` of the 0 V probe source named ``VX`` are available, which is
-        the Qucs-S convention for a labelled node with a current probe.
-        Falls back to the netlist's V-elements when no ``.PRINT hb`` line exists.
+        the Qucs-S convention for a labelled node with a current probe. Both
+        ``.PRINT hb`` and ``.PRINT tran`` lines count, since the same probe
+        serves either analysis. Falls back to the netlist's V-elements when
+        neither line exists.
         """
         voltages: dict[str, str] = {}   # upper-case node → node as written
         currents: set[str] = set()      # upper-case source name
         for directive in self._print_directives:
-            if directive.analysis != "hb":
+            if directive.analysis not in ("hb", "tran"):
                 continue
             for token in directive.signals:
                 m = self._probe_re.match(token)
@@ -423,7 +425,7 @@ class XyceNetlistParser(BaseNetlistParser):
                     currents.add(arg.upper())
 
         if not voltages:
-            # No .PRINT hb line: derive candidates from the probe sources themselves.
+            # No .PRINT hb/tran line: derive candidates from the probe sources themselves.
             for elem in self.list_elements(["V"]):
                 if elem.nodes:
                     node = elem.nodes[0]
@@ -621,15 +623,19 @@ class XyceNetlistParser(BaseNetlistParser):
     # -------------------------------------------------------------------------
 
     def _extract_port_source_info(self, tokens: list[str]) -> dict[str, float]:
-        """Extract AC amplitude, SIN amplitude and z0 from a P-element token list.
+        """Extract AC amplitude, SIN amplitude/frequency and z0 from a P-element token list.
 
         Handles lines such as::
 
             P2 _net28 0 port=1 z0=100 AC 0.089442719 SIN 0 0.089442719 130G
 
-        Returns a dict with any subset of keys ``{"sin_amplitude", "ac_amplitude", "z0"}``.
-        Only populated when at least one of SIN or AC amplitude is found.
+        Returns a dict with any subset of keys ``{"sin_amplitude", "sin_frequency",
+        "ac_amplitude", "z0"}``. Only populated when at least one of SIN or AC
+        amplitude is found.
         """
+        # Imported here: hb_spectrum pulls in numpy and pandas.
+        from cobra.spice_sim.hb_spectrum import spice_float
+
         result: dict[str, float] = {}
 
         # z0 is a key=value token — collect it first.
@@ -652,6 +658,9 @@ class XyceNetlistParser(BaseNetlistParser):
                 # SIN <offset> <amplitude> [freq] [td] [theta]
                 with contextlib.suppress(ValueError):
                     result["sin_amplitude"] = float(tokens[i + 2])
+                if i + 3 < len(tokens):
+                    with contextlib.suppress(ValueError):
+                        result["sin_frequency"] = spice_float(tokens[i + 3])
                 i += 3
                 continue
             i += 1

@@ -1,0 +1,9 @@
+* Single-tone transient netlist used by the COBRA test suite
+P1 rfin 0 port=1 z0=50 SIN 0 0.2 130G
+P2 load 0 port=2 z0=50 SIN 0 0.5 0
+R1 rfin n1 50
+X1 n1 out amp_model
+VOUT out load 0
+.tran 1p 300p 100p 1p
+.PRINT tran format=csv v(OUT) I(VOUT)
+.END

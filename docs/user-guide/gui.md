@@ -11,7 +11,7 @@ cobra
 - Netlist source
 - Component-to-model mapping (`.onnx` or `.sNp`)
 - Design goals (S-parameter and RF metrics)
-- HB analysis point, when the netlist contains a Harmonic Balance analysis
+- Analysis point, when the run includes a Harmonic Balance or transient analysis
 - Optimization parameters and ranges
 - Iteration control and stop behavior
 - Optional fine-tuning settings
@@ -51,12 +51,12 @@ Setting the same value for min and max frequency selects one point; the nearest 
 The GUI displays:
 
 - live S-parameter traces,
-- the HB output spectrum at the selected analysis point, as power, gain, voltage or current,
+- the HB or transient output spectrum at the selected analysis point, as power, gain, voltage or current,
 - per-goal penalty/loss behavior,
 - current and best trial values,
 - progress against maximum iterations.
 
-When a run needs both an `.AC` and an `.HB` analysis, a selector switches the left plot between the two. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels.
+When a run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels, and **Advanced -> Transient Analysis** for the FFT window.
 
 ## Outputs
 

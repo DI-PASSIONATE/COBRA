@@ -29,6 +29,7 @@ nav:
     - Simulation and Netlist Parsing: api/simulation.md
   - Advanced:
     - Harmonic Balance: advanced/harmonic-balance.md
+    - Transient Analysis: advanced/transient.md
     - Fine-Tuning: advanced/fine-tuning.md
   
 # Configuration

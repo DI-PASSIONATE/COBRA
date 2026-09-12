@@ -58,12 +58,12 @@ This produces the pair `V(Out)` and `I(VOut)`. COBRA reads the `.PRINT hb` line 
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
 parser = XyceNetlistParser().from_file("examples/netlists/Mixer/mixer_hb.cir")
-parser.hb_probe_nodes
+parser.probe_nodes
 # ['IF_neg', 'IF_pos', 'LO_CM', 'LO_in', 'LO_neg', 'LO_pos', 'Out',
 #  'RF_CM', 'RF_M_n', 'RF_M_p', 'RF_in', 'RF_neg', 'RF_pos']
 ```
 
-In the GUI this list populates the **HB Analysis Point** dropdown in the configuration panel. The selected node is what both the HB design parameters and the spectrum plot refer to.
+In the GUI this list populates the **Analysis Point** dropdown in the configuration panel. The selected node is what both the HB design parameters and the spectrum plot refer to.
 
 !!! warning
     A node that is only printed as a voltage cannot carry a power or gain goal, because the probe current is missing. Add the corresponding current probe in Qucs-S if a node needs to be evaluated.
@@ -192,7 +192,7 @@ During optimization the visualization panel plots the spectrum at the selected a
 
 - **Fundamentals** are drawn in a distinct color from the remaining lines.
 - **Clicking a line** toggles a marker on it, labelled with its frequency, value, and harmonic index — `H2` for single-tone, or the mixing-product decomposition such as `2f1-f2` for multi-tone. Clicking a marked line again removes its marker, and the click snaps to the nearest line, so it need not land exactly on one.
-- When both an `.AC` and an `.HB` analysis run, a selector switches the left plot between S-parameters and the HB spectrum. When only one of them is active, that plot is shown and the selector is disabled.
+- When the run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. When only one is active, that plot is shown and the selector is disabled.
 
 The mixing-product labels are the practical tool for isolation work: they identify which unwanted product a given line belongs to while the optimizer is running.
 
@@ -226,7 +226,7 @@ Columns follow the Xyce convention `FREQ`, `Re(V(OUT))`, `Im(V(OUT))`, `Re(I(VOU
 ## Limitations
 
 !!! note
-    Transient (`.TRAN`) analyses are parsed and can be simulated, but time-domain spectrum plotting is not implemented yet. Use `.HB` to obtain a spectrum.
+    A transient (`.TRAN`) analysis yields the same spectrum through an FFT of the settled waveform, with `TRAN:`-prefixed goals; see [Transient Analysis](transient.md).
 
 - A node needs both a voltage label and a current probe to support power or gain goals.
 - Which frequencies are mixed, and how many harmonics per fundamental are considered, depends on the circuit and must be specified by the user — the tool cannot infer them.

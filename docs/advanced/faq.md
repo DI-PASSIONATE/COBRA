@@ -10,7 +10,7 @@ Yes. Map each component to either `.onnx` or fixed `.sNp` in the same run.
 
 ## Can I optimize large-signal behavior?
 
-Yes, through Harmonic Balance. If the netlist contains a `.HB` analysis, COBRA exposes output-power and gain goals at any node that has both a voltage label and a current probe, and plots the resulting spectrum live. See **Advanced -> Harmonic Balance**.
+Yes, through Harmonic Balance or a transient analysis. If the netlist contains a `.HB` or `.TRAN` analysis, COBRA exposes output-power, gain and isolation goals at any node that has both a voltage label and a current probe, and plots the resulting spectrum live. See **Advanced -> Harmonic Balance** and **Advanced -> Transient Analysis**.
 
 ## Can S-parameter and Harmonic Balance goals be combined?
 
@@ -18,11 +18,11 @@ Yes. COBRA runs one simulation per required analysis type and aggregates all pen
 
 ## How do I target a single frequency instead of a band?
 
-Set the same value for the minimum and maximum frequency of the goal. The nearest point of the sweep or HB spectrum is used.
+Set the same value for the minimum and maximum frequency of the goal. The nearest point of the sweep or spectrum is used.
 
 ## Is transient simulation supported?
 
-Transient netlists are parsed and simulated, but time-domain spectrum plotting is not implemented yet. Use Harmonic Balance to obtain a spectrum.
+Yes. The settled part of the waveform (from the `.TRAN` start time on) is turned into a spectrum by an FFT, and the `TRAN:`-prefixed power, gain and isolation goals read it exactly like their HB counterparts. The `.PRINT tran` line must use `format=csv`. See **Advanced -> Transient Analysis**.
 
 ## Is ORCA required?
 
