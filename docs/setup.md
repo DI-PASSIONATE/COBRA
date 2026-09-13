@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11 to 3.13
 - Xyce simulator available in your `PATH`
 - Qucs-S for generating/inspecting compatible netlists
 
@@ -12,7 +12,7 @@ Optional:
 - Palace if you want EM fine-tuning
 
 !!! note
-	COBRA supports Python 3.11 to 3.14.
+	COBRA supports Python 3.11 to 3.13; 3.14 has no PySide6, gmsh or onnxruntime wheels yet.
 
 ## Clone Repository
 

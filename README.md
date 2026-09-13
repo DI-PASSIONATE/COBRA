@@ -45,7 +45,7 @@ In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA 
 ## Installation
 ### Requirements
 
-- Python 3.11+
+- Python 3.11 to 3.13
 - [Xyce](https://xyce.sandia.gov/) (current circuit simulator backend)
 - [Qucs-S](https://qucs-s-help.readthedocs.io/en/latest/) (to create a '.cir' netlist for Xyce)
 - A component model source per parsed component:
