@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cobra"
+name = "cobra-rfic"
 version = "1.8.0"
 description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
 readme = "README.md"
@@ -16,7 +16,6 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -43,16 +42,11 @@ dependencies = [
 ]
 
 # ORCA supplies the geometry presets/classes used by EM fine-tuning.  COBRA guards
-# every ORCA import and degrades gracefully when it is absent, so it stays optional:
-#   uv sync --extra orca      (or)   pip install -e ".[orca]"
-#
-# The marker is required: ORCA pins itself to 3.12 (via ihp-gdsfactory), while COBRA
-# itself supports 3.11-3.14.  Without it the universal resolve fails on every other
-# interpreter.  Drop the marker once ORCA supports the same range as COBRA.
-[project.optional-dependencies]
-orca = [
-    "orca @ git+https://github.com/DI-PASSIONATE/ORCA.git ; python_version >= '3.12' and python_version < '3.13'",
-]
+# every ORCA import and degrades gracefully when it is absent
+# [project.optional-dependencies]
+# orca = [
+#     "orca-rfic"
+# ]
 
 [project.scripts]
 cobra = "cobra.__main__:main"
