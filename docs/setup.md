@@ -14,32 +14,48 @@ Optional:
 !!! note
 	COBRA supports Python 3.11 to 3.13; 3.14 has no PySide6, gmsh or onnxruntime wheels yet.
 
-## Clone Repository
-
-```bash
-git clone https://github.com/DI-PASSIONATE/COBRA
-cd COBRA
-```
-
 ## Install COBRA
 
-=== "Option A: uv (recommended)"
+=== "Users: from PyPI"
 
-	```bash
-	curl -LsSf https://astral.sh/uv/install.sh | sh
-	uv python install 3.13
-	uv venv --python 3.13
-	source .venv/bin/activate
-	uv pip install -e .
-	```
-
-=== "Option B: venv + pip"
+	COBRA is published as [`cobra-rfic`](https://pypi.org/project/cobra-rfic/);
+	the import package and the CLI are still called `cobra`.
 
 	```bash
 	python3 -m venv .venv
 	source .venv/bin/activate
+	pip install cobra-rfic
+	```
+
+	Or as an isolated `uv` tool that puts `cobra` on your `PATH`:
+
+	```bash
+	uv tool install cobra-rfic
+	```
+
+=== "Developers: uv (recommended)"
+
+	`uv sync` creates `.venv/` from `uv.lock` with COBRA in editable mode and the
+	dev tools (`pytest`, `ruff`, `ty`). Use `uv run <command>` or activate the
+	environment.
+
+	```bash
+	git clone https://github.com/DI-PASSIONATE/COBRA
+	cd COBRA
+	curl -LsSf https://astral.sh/uv/install.sh | sh   # if uv is missing
+	uv sync --python 3.12
+	source .venv/bin/activate
+	```
+
+=== "Developers: venv + pip"
+
+	```bash
+	git clone https://github.com/DI-PASSIONATE/COBRA
+	cd COBRA
+	python3 -m venv .venv
+	source .venv/bin/activate
 	pip install -U pip
-	pip install -e .
+	pip install -e . pytest pytest-cov
 	```
 
 ## Verify Setup
@@ -65,17 +81,15 @@ python examples/main.py
 
 The test suite is a quick way to confirm an installation is sound.
 
-=== "Option A: uv (recommended)"
+=== "uv"
 
 	```bash
-	uv sync
 	uv run pytest
 	```
 
-=== "Option B: venv + pip"
+=== "venv + pip"
 
 	```bash
-	pip install -e . pytest pytest-cov
 	pytest
 	```
 

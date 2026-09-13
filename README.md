@@ -57,7 +57,28 @@ Optional:
 - [AWS Palace](https://awslabs.github.io/palace/stable/), if you want EM fine-tuning
 - [ORCA](https://github.com/DI-PASSIONATE/ORCA) installed/importable in your Python environment if you use ORCA geometry presets/classes in scripts or GUI fine-tuning
 
-### Option A: Using `uv` (recommended)
+### For users: install from PyPI
+
+COBRA is published as [`cobra-rfic`](https://pypi.org/project/cobra-rfic/). The
+import package and the CLI are both still called `cobra`.
+
+Into a virtual environment with `pip`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install cobra-rfic
+```
+
+Or, with `uv`, as an isolated tool that puts the `cobra` command on your `PATH`:
+
+```bash
+uv tool install cobra-rfic
+```
+
+Upgrade later with `pip install -U cobra-rfic` or `uv tool upgrade cobra-rfic`.
+
+### For developers: install from source
 
 1. Clone the repository:
 
@@ -72,46 +93,25 @@ cd COBRA
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-3. Install a supported Python version:
+3. Create the environment from `uv.lock`. This installs COBRA in editable mode
+   plus the dev tools (`pytest`, `ruff`, `ty`), fetching a supported Python if
+   none is installed:
 
 ```bash
-uv python install 3.13
+uv sync --python 3.12
 ```
 
-4. Create and activate a virtual environment:
+Run commands through `uv run` (`uv run cobra`, `uv run pytest`), or activate the
+environment with `source .venv/bin/activate`. Re-run `uv sync` after pulling
+changes to `pyproject.toml` or `uv.lock`.
 
-```bash
-uv venv --python 3.13
-source .venv/bin/activate
-```
-
-5. Install COBRA in editable mode:
-
-```bash
-uv pip install -e .
-```
-
-### Option B: Using standard `venv` + `pip`
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/DI-PASSIONATE/COBRA
-cd COBRA
-```
-
-2. Create and activate a virtual environment:
+Without `uv`, a plain `venv` works too:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-3. Install COBRA:
-
-```bash
 pip install -U pip
-pip install -e .
+pip install -e . pytest pytest-cov
 ```
 
 ### Running the tests
@@ -121,8 +121,7 @@ and penalty math, the harmonic-balance spectrum helpers and the CLI. It is headl
 and requires **no display, no Xyce and no Palace**:
 
 ```bash
-uv sync          # or: pip install -e . pytest pytest-cov
-uv run pytest    # or: pytest
+uv run pytest                # or: pytest
 uv run pytest --cov          # with a coverage report
 ```
 
