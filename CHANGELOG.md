@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.8.1 - 2026-09-13
+
+### Changed
+- The distribution is published on PyPI as `cobra-rfic` (`pip install
+  cobra-rfic`); the import package and the `cobra` CLI are unchanged. The
+  `orca` extra is disabled until ORCA is published as `orca-rfic`.
+- A GitHub release now builds and uploads the package to PyPI via trusted
+  publishing (`.github/workflows/publish.yml`).
+- `requires-python` is now `>=3.11,<3.14`: PySide6, gmsh and onnxruntime ship
+  no wheels for 3.14 yet, so installs on it failed anyway.
+
 ## 1.8.0 - 2026-09-13
 
 ### Added

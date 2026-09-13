@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobra-rfic"
-version = "1.8.0"
+version = "1.8.1"
 description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
 ]
 
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "scikit-rf",
     "numpy",
