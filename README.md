@@ -16,7 +16,7 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 
 [Paper (Coming Soon)](#cite-this-work) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
 
-**COBRA** is an AI-assisted optimization framework for open-source RFIC (RF integrated circuit) design. It combines:
+**COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design: a circuit-level optimizer that consumes surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA). It combines:
 
 - surrogate-model S-parameter prediction (from [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
 - circuit-level SPICE simulation via Xyce,

@@ -1,9 +1,9 @@
 ---
 title: COBRA – AI-Assisted RFIC Circuit Optimizer (Xyce, ONNX, Optuna)
 description: >-
-  COBRA is an open-source, AI-assisted circuit-level optimizer for RFIC design.
-  It combines ONNX EM surrogate models, Xyce SPICE simulation, Optuna
-  goal-driven optimization and optional Palace EM fine-tuning.
+  COBRA is an open-source EDA tool for AI-assisted RFIC design: a circuit-level
+  optimizer that combines ORCA ONNX EM surrogate models, Xyce SPICE simulation,
+  Optuna goal-driven optimization and optional Palace EM fine-tuning.
 ---
 
 # COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design
