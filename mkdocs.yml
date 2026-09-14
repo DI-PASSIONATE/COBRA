@@ -1,6 +1,11 @@
 site_name: COBRA Documentation
+site_url: https://di-passionate.github.io/COBRA/
+site_author: The COBRA authors
 site_description: >-
-  Documentation for COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
+  COBRA is an AI-assisted optimizer for open-source RFIC design. It combines
+  ONNX EM surrogate models, Xyce SPICE circuit simulation, Optuna goal-driven
+  optimization and optional Palace EM fine-tuning in one workflow.
+copyright: Copyright &copy; 2026 The COBRA authors
 
 # Repository
 repo_name: DI-PASSIONATE/COBRA
@@ -31,7 +36,7 @@ nav:
     - Harmonic Balance: advanced/harmonic-balance.md
     - Transient Analysis: advanced/transient.md
     - Fine-Tuning: advanced/fine-tuning.md
-  
+
 # Configuration
 theme:
   name: material

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cobra-rfic"
 version = "1.8.1"
-description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
+description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer: Xyce SPICE simulation, ONNX EM surrogate models, and Optuna goal-driven optimization"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
@@ -13,9 +13,37 @@ authors = [
     {name = "Gianluca Simone", email = "gianluca.simone@fau.de"},
 ]
 
+keywords = [
+    "rfic",
+    "rf",
+    "microwave",
+    "eda",
+    "electronic-design-automation",
+    "circuit-optimization",
+    "circuit-simulation",
+    "spice",
+    "xyce",
+    "s-parameters",
+    "touchstone",
+    "surrogate-model",
+    "onnx",
+    "machine-learning",
+    "optuna",
+    "bayesian-optimization",
+    "electromagnetic-simulation",
+    "palace",
+    "harmonic-balance",
+    "analog-design",
+]
+
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
+    "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -23,6 +51,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Physics",
 ]
 
 requires-python = ">=3.11,<3.14"
@@ -50,6 +80,13 @@ dependencies = [
 
 [project.scripts]
 cobra = "cobra.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/DI-PASSIONATE/COBRA"
+Documentation = "https://di-passionate.github.io/COBRA/"
+Repository = "https://github.com/DI-PASSIONATE/COBRA"
+Issues = "https://github.com/DI-PASSIONATE/COBRA/issues"
+Changelog = "https://github.com/DI-PASSIONATE/COBRA/blob/main/CHANGELOG.md"
 
 # Linters and the test runner are development tools, not runtime requirements.
 # `uv sync` installs this group by default; `uv sync --no-dev` skips it for a
@@ -160,11 +197,11 @@ ignore = [
 # look like shadowed or unused arguments to the linter.
 "tests/*" = [
     "S101",    # assert is how pytest works
-    "ARG001",  
+    "ARG001",
     "ARG002",
-    "PLR6301", 
+    "PLR6301",
     "SLF001",  # pinning private behaviour (_tell, _parse_target) is the point
-    "TC003",   
+    "TC003",
     "T201",    # printing is how a test script reports
 ]
 
