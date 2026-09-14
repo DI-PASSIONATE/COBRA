@@ -92,6 +92,8 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/DI-PASSIONATE/COBRA
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/cobra-rfic/
 
 extra_css:
   - stylesheets/extra.css
@@ -108,6 +110,7 @@ markdown_extensions:
   - def_list
   - footnotes
   - md_in_html
+  - meta
   - toc:
       permalink: true
       toc_depth: 4

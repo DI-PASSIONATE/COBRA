@@ -1,3 +1,9 @@
+---
+title: Optimizers API – Goals, Parameters and Optuna in COBRA
+description: >-
+  API reference for COBRA optimization: OptimizationProperty, OptimizationType, DesignGoal, DesignParameter, OptunaOptimizer, and GradientDescentOptimizer.
+---
+
 # Optimizers API
 
 ## OptimizationProperty

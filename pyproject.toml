@@ -33,7 +33,12 @@ keywords = [
     "electromagnetic-simulation",
     "palace",
     "harmonic-balance",
+    "transient-analysis",
+    "vector-fitting",
+    "qucs-s",
     "analog-design",
+    "open-source-silicon",
+    "design-optimization",
 ]
 
 classifiers = [

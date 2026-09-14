@@ -1,3 +1,11 @@
+---
+title: COBRA – AI-Assisted RFIC Circuit Optimizer (Xyce, ONNX, Optuna)
+description: >-
+  COBRA is an open-source, AI-assisted circuit-level optimizer for RFIC design.
+  It combines ONNX EM surrogate models, Xyce SPICE simulation, Optuna
+  goal-driven optimization and optional Palace EM fine-tuning.
+---
+
 # COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design
 
 [![tests](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml)
@@ -44,6 +52,13 @@
 - GUI workflow and script-first workflow.
 
 ## Start Here
+
+```bash
+pip install cobra-rfic
+```
+
+COBRA is published on [PyPI](https://pypi.org/project/cobra-rfic/) and developed on
+[GitHub](https://github.com/DI-PASSIONATE/COBRA).
 
 - New users: go to **Getting Started -> Installation**.
 - First successful run: **Getting Started -> Quickstart**.

@@ -1,3 +1,9 @@
+---
+title: Examples – Runnable COBRA Netlists and Models
+description: >-
+  Runnable COBRA examples with netlists and component models, plus a suggested order for adapting them to your own RFIC design.
+---
+
 # Examples
 
 COBRA includes runnable assets in the `examples/` folder.

@@ -1,3 +1,9 @@
+---
+title: GUI Mode – COBRA Graphical Workflow for RFIC Optimization
+description: >-
+  Use the COBRA GUI to load a netlist, map components to ONNX surrogate or Touchstone models, define design goals, and watch the optimization in real time.
+---
+
 # GUI Mode
 
 The COBRA GUI is launched with:

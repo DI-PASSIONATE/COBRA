@@ -1,3 +1,9 @@
+---
+title: Core API – The COBRA Orchestrator Class
+description: >-
+  API reference for the COBRA class that orchestrates surrogate inference, Xyce simulation, goal checking, and optional EM fine-tuning.
+---
+
 # Core API
 
 ## COBRA

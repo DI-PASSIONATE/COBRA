@@ -1,3 +1,9 @@
+---
+title: Quickstart – Your First COBRA RFIC Optimization Run
+description: >-
+  First COBRA run step by step: prepare a Xyce netlist and component models, define design goals and parameters, start the optimization, and read the results.
+---
+
 # Quickstart
 
 This page walks through a first successful COBRA run.

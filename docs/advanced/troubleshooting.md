@@ -1,3 +1,9 @@
+---
+title: Troubleshooting – Fix Xyce, ORCA and Palace Errors in COBRA
+description: >-
+  Fix common COBRA problems: cobra command not found, Xyce simulation failures, component mapping and frequency range errors, ORCA and Palace issues, and slow runs.
+---
+
 # Troubleshooting
 
 ## Start With `cobra doctor`

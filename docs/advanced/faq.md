@@ -1,3 +1,9 @@
+---
+title: FAQ – Frequently Asked Questions about COBRA
+description: >-
+  Answers to common COBRA questions: GUI vs. script mode, mixing ONNX and Touchstone models, large-signal goals, ORCA and Palace requirements, and output locations.
+---
+
 # FAQ
 
 ## Can I use COBRA without the GUI?

@@ -1,3 +1,9 @@
+---
+title: Command Line – cobra run, parse and doctor
+description: >-
+  Reference for the cobra command line: run a JSON configuration, parse a netlist, check the environment with cobra doctor, output options, and exit codes.
+---
+
 # Command Line
 
 The `cobra` command runs a saved configuration, inspects an input file, checks

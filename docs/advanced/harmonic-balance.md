@@ -1,3 +1,9 @@
+---
+title: Harmonic Balance – Large-Signal RF Optimization with Xyce
+description: >-
+  Optimize large-signal RF circuits with Xyce Harmonic Balance in COBRA: netlist requirements, analysis points, output power, gain, and isolation goals, and spectrum plots.
+---
+
 # Harmonic Balance
 
 S-parameters describe only small-signal behavior. For large-signal design — power amplifiers, mixers, or any circuit where compression and mixing products matter — COBRA can optimize against a Harmonic Balance (`.HB`) analysis instead of, or together with, the `.AC` sweep.

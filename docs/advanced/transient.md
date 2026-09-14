@@ -1,3 +1,9 @@
+---
+title: Transient Analysis – FFT-Based Large-Signal Goals in COBRA
+description: >-
+  Use Xyce transient analysis with FFT as a large-signal spectrum source in COBRA, with the same power, gain, and isolation goals as Harmonic Balance.
+---
+
 # Transient Analysis
 
 A transient (`.TRAN`) analysis is the second way COBRA obtains a large-signal spectrum. Where [Harmonic Balance](harmonic-balance.md) solves for the periodic steady state directly, transient integrates the circuit in time; COBRA then takes the FFT of the settled part of the waveform. From that point on both analyses are identical: the same phasor convention, the same power formula, the same goals and the same plot.

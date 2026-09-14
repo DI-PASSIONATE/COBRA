@@ -1,3 +1,9 @@
+---
+title: JSON Configuration – COBRA Config File Reference
+description: >-
+  Schema reference for COBRA JSON configuration files: netlist, component models, design goals, optimization parameters, optimizer settings, and fine-tuning.
+---
+
 # JSON Configuration
 
 COBRA configurations are versioned JSON files containing the inputs required to

@@ -1,3 +1,9 @@
+---
+title: Simulation API – XyceSimulator and Netlist Parsing
+description: >-
+  API reference for XyceSimulator, netlist parsing, Harmonic Balance and transient spectra, component model strategies, and vector fitting in COBRA.
+---
+
 # Simulation and Netlist Parsing API
 
 ## XyceSimulator

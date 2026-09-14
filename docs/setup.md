@@ -1,4 +1,10 @@
-## Installation
+---
+title: Installation – Install COBRA, Xyce, Qucs-S, ORCA and Palace
+description: >-
+  Install COBRA from PyPI or source, set up Xyce, Qucs-S, and optional ORCA and Palace, and verify the environment with cobra doctor.
+---
+
+# Installation
 
 ## Requirements
 
@@ -16,23 +22,6 @@ Optional:
 
 ## Install COBRA
 
-=== "Users: from PyPI"
-
-	COBRA is published as [`cobra-rfic`](https://pypi.org/project/cobra-rfic/);
-	the import package and the CLI are still called `cobra`.
-
-	```bash
-	python3 -m venv .venv
-	source .venv/bin/activate
-	pip install cobra-rfic
-	```
-
-	Or as an isolated `uv` tool that puts `cobra` on your `PATH`:
-
-	```bash
-	uv tool install cobra-rfic
-	```
-
 === "Developers: uv (recommended)"
 
 	`uv sync` creates `.venv/` from `uv.lock` with COBRA in editable mode and the
@@ -45,6 +34,23 @@ Optional:
 	curl -LsSf https://astral.sh/uv/install.sh | sh   # if uv is missing
 	uv sync --python 3.12
 	source .venv/bin/activate
+	```
+=== "Users: from PyPI"
+
+	COBRA is published as [`cobra-rfic`](https://pypi.org/project/cobra-rfic/);
+	the import package and the CLI are still called `cobra`.
+	This is the easiest way to install COBRA for users, but it doesn't allow any modifications to the existing code or the provided examples.
+
+	```bash
+	python3 -m venv .venv
+	source .venv/bin/activate
+	pip install cobra-rfic
+	```
+
+	Or as an isolated `uv` tool that puts `cobra` on your `PATH`:
+
+	```bash
+	uv tool install cobra-rfic
 	```
 
 === "Developers: venv + pip"

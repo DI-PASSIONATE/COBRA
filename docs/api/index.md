@@ -1,3 +1,9 @@
+---
+title: API Reference – COBRA Python API Overview
+description: >-
+  Overview of the public COBRA Python API: the COBRA orchestrator, optimizers and goals, and the Xyce simulation and netlist parsing modules.
+---
+
 # API Reference
 
 This section documents the public API used in normal COBRA workflows.

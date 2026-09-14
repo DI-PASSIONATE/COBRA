@@ -1,3 +1,9 @@
+---
+title: EM Fine-Tuning – Refine Designs with AWS Palace and ORCA
+description: >-
+  Optional EM fine-tuning in COBRA: refine surrogate-optimized designs with full-wave AWS Palace simulations and ORCA geometry classes.
+---
+
 # Fine-Tuning
 
 Fine-tuning is an optional phase after surrogate-based optimization.

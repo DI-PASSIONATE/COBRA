@@ -1,7 +1,10 @@
 # COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
-[![Documentation](https://img.shields.io/badge/pages-documentation-green?logo=github)](https://di-passionate.github.io/COBRA/)
-[![tests](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml)
-[![docs](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/docs-COBRA-green?logo=materialformkdocs&logoColor=white)](https://di-passionate.github.io/COBRA/)
+[![License](https://img.shields.io/github/license/DI-PASSIONATE/COBRA)](https://github.com/DI-PASSIONATE/COBRA/blob/main/LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/cobra-rfic?logo=python)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/cobra-rfic?logo=pypi)](https://pypi.org/project/cobra-rfic/)
+[![Tests](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml)
+[![GitHub stars](https://img.shields.io/github/stars/DI-PASSIONATE/COBRA?style=social)](https://github.com/DI-PASSIONATE/COBRA/stargazers)
 
 ©2026 
 
@@ -23,11 +26,11 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 
 You can easily define goals and configurations in the GUI:
 
-![COBRA GUI screenshot showing netlist loading, component mapping, design goal configuration, and optimization controls](docs/cobra_config.png)
+![COBRA GUI screenshot showing netlist loading, component mapping, design goal configuration, and optimization controls](https://raw.githubusercontent.com/DI-PASSIONATE/COBRA/main/docs/cobra_config.png)
 
 and visualize optimization progress in real time:
 
-![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](docs/cobra_visual.png)
+![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](https://raw.githubusercontent.com/DI-PASSIONATE/COBRA/main/docs/cobra_visual.png)
 
 ## How COBRA Fits with ORCA
 

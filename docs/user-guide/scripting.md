@@ -1,3 +1,9 @@
+---
+title: Script Mode – Automate COBRA Optimizations in Python
+description: >-
+  Automate COBRA RFIC optimizations from Python: build the optimizer, goals, and parameters in a script for fully reproducible runs.
+---
+
 # Script Mode
 
 Script mode provides full automation and reproducibility.
