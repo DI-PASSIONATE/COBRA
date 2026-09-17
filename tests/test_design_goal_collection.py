@@ -175,7 +175,9 @@ def test_isolation_goal_inputs_are_a_lower_bound_at_one_frequency():
 
     assert inputs == GoalInputs(max_value=False, frequency_required=True, single_frequency=True)
     assert make_power_dbm("OUT").inputs == GoalInputs()
-    assert find_parameter("S21_dB").inputs == GoalInputs()
+    s21 = find_parameter("S21_dB")
+    assert s21 is not None
+    assert s21.inputs == GoalInputs()
 
 
 def test_isolation_is_the_margin_to_the_strongest_spur():
