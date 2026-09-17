@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import skrf as rf
 
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from cobra.optimizers.design_goal import DesignGoal, DesignParameter, GoalInputs
 from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
@@ -278,6 +278,7 @@ def make_isolation_db(
             f"strongest other line in the {simulation_type.value} spectrum (DC excluded)."
         ),
         min_ports=1,
+        inputs=GoalInputs(max_value=False, frequency_required=True, single_frequency=True),
     )
 
 

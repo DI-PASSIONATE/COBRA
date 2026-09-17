@@ -20,6 +20,9 @@ from cobra.configuration.geometry_loader import (
     discover_preset_geometries,
 )
 
+from .help_texts import tooltip
+from .theme import manager as theme_manager
+
 
 class GeometrySelectorWidget(QGroupBox):
     """
@@ -27,7 +30,7 @@ class GeometrySelectorWidget(QGroupBox):
     Supports both ORCA preset geometries and custom Python-file-based geometries.
     """
 
-    def __init__(self, title: str = "ORCA Geometry", parent=None):
+    def __init__(self, title: str = "ORCA geometry", parent=None):
         super().__init__(title, parent)
         self._preset_classes: dict = {}
         self._custom_classes: dict = {}
@@ -35,18 +38,20 @@ class GeometrySelectorWidget(QGroupBox):
         form = QFormLayout()
 
         self._source_combo = QComboBox()
-        self._source_combo.addItem("ORCA Preset", "preset")
-        self._source_combo.addItem("Custom Python File", "custom")
-        form.addRow("Source:", self._source_combo)
+        self._source_combo.addItem("ORCA preset", "preset")
+        self._source_combo.addItem("Custom Python file", "custom")
+        form.addRow("Source", self._source_combo)
 
-        self._preset_label = QLabel("Preset:")
+        self._preset_label = QLabel("Preset")
         self._preset_combo = QComboBox()
         form.addRow(self._preset_label, self._preset_combo)
 
-        self._file_label = QLabel("File:")
+        self._file_label = QLabel("File")
         self._file_edit = QLineEdit()
         self._file_btn = QPushButton("Browse")
+        self._file_btn.setToolTip(tooltip("geometry_file_btn"))
         self._file_btn.clicked.connect(self._browse_file)
+        theme_manager().bind_icon(self._file_btn, "folder-open-outline")
         self._file_widget = QWidget()
         file_layout = QHBoxLayout(self._file_widget)
         file_layout.setContentsMargins(0, 0, 0, 0)
@@ -54,7 +59,7 @@ class GeometrySelectorWidget(QGroupBox):
         file_layout.addWidget(self._file_btn)
         form.addRow(self._file_label, self._file_widget)
 
-        self._class_label = QLabel("Class:")
+        self._class_label = QLabel("Class")
         self._class_combo = QComboBox()
         form.addRow(self._class_label, self._class_combo)
 
@@ -78,7 +83,7 @@ class GeometrySelectorWidget(QGroupBox):
             self.reload_presets(show_errors=False)
 
     def _browse_file(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "Select Geometry File", "", "Python Files (*.py)")
+        fname, _ = QFileDialog.getOpenFileName(self, "Select geometry file", "", "Python files (*.py)")
         if fname:
             self._file_edit.setText(fname)
             self.load_custom_file(fname)
@@ -101,7 +106,7 @@ class GeometrySelectorWidget(QGroupBox):
                     self._preset_combo.setCurrentIndex(idx)
         except Exception as exc:  # noqa: BLE001 - ORCA is optional; report and keep the GUI usable
             if show_errors:
-                QMessageBox.critical(self, "ORCA Geometry", f"Failed to load ORCA presets:\n{exc}")
+                QMessageBox.critical(self, "ORCA geometry", f"Failed to load ORCA presets:\n{exc}")
         finally:
             self._preset_combo.blockSignals(False)
 
@@ -121,7 +126,7 @@ class GeometrySelectorWidget(QGroupBox):
                 self._class_combo.addItem(class_name, cls)
         except Exception as exc:  # noqa: BLE001 - user-supplied geometry modules can fail in any way
             if show_errors:
-                QMessageBox.critical(self, "ORCA Geometry", f"Failed to load custom geometry:\n{exc}")
+                QMessageBox.critical(self, "ORCA geometry", f"Failed to load custom geometry:\n{exc}")
             return False
         else:
             return True

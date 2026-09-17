@@ -12,12 +12,12 @@ the GUI or from a terminal.
 
 ## Save and Load in the GUI
 
-Use **Save Config** to write the current run inputs to a JSON file. Use **Load
-Config** to restore them. Loading rebuilds fields that depend on the netlist,
+Use **Save configuration** to write the current run inputs to a JSON file. Use
+**Load configuration** to restore them. Loading rebuilds fields that depend on the netlist,
 including component model selectors, available HB nodes and ports, simulation
 parameters, optimization properties, and goals.
 
-Pressing **START OPTIMIZATION** automatically saves the exact input configuration
+Pressing **Start optimization** automatically saves the exact input configuration
 as `cobra_config.json` in the new timestamped results directory. The snapshot is
 created before optimization starts, so it remains available if a run fails or is
 stopped.
@@ -202,6 +202,8 @@ actually shortens a run: Xyce is often slower with several MPI ranks than with
 one, so N concurrent trials beat one N-rank simulation. Do not combine it with
 `parallel_xyce` unless the machine has cores for both — `parallel_trials` times
 `parallel_xyce_processes` is the peak load, and COBRA warns when both are set.
+The GUI exposes the two as a single *Parallelism* selector and refuses to load
+a configuration that sets both.
 It requires an optimizer that can suggest a trial before the previous one
 reported back: Optuna can, gradient descent cannot and rejects any value above
 1. One consequence to be aware of: once the design goals are met, the trials

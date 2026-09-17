@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from cobra.optimizers.design_goal import DesignGoal
+from cobra.optimizers.design_goal import DesignGoal, GoalInputs
 from cobra.optimizers.design_goal_collection import (
     ALL_PARAMETERS,
     MAX_PORTS,
@@ -167,6 +167,17 @@ def test_isolation_db_name_format():
 
     assert parameter.name == "Isolation_dB[OUT]"
     assert parameter.simulation_type is SimulationType.HB
+
+
+def test_isolation_goal_inputs_are_a_lower_bound_at_one_frequency():
+    """The goal dialog hides the max value and only offers a single frequency."""
+    inputs = make_isolation_db("OUT").inputs
+
+    assert inputs == GoalInputs(max_value=False, frequency_required=True, single_frequency=True)
+    assert make_power_dbm("OUT").inputs == GoalInputs()
+    s21 = find_parameter("S21_dB")
+    assert s21 is not None
+    assert s21.inputs == GoalInputs()
 
 
 def test_isolation_is_the_margin_to_the_strongest_spur():

@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -30,6 +29,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from .theme import manager as theme_manager
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -255,7 +256,7 @@ class HuggingFaceModelDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("HuggingFace Surrogate Models")
+        self.setWindowTitle("Hugging Face Surrogate Models")
         self.resize(920, 600)
 
         self.selected_file_path: str | None = None
@@ -290,7 +291,8 @@ class HuggingFaceModelDialog(QDialog):
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self._loading_label = QLabel("Loading from HuggingFace…")
+        self._loading_label = QLabel("Loading from Hugging Face…")
+        self._loading_label.setProperty("role", "muted")
         self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._loading_label)
 
@@ -306,10 +308,8 @@ class HuggingFaceModelDialog(QDialog):
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 4, 8, 4)
 
-        title = QLabel("Model Details")
-        font = QFont()
-        font.setBold(True)
-        title.setFont(font)
+        title = QLabel("Model details")
+        title.setProperty("role", "heading")
         layout.addWidget(title)
 
         self._detail_labels: dict[str, QLabel] = {}
@@ -319,11 +319,11 @@ class HuggingFaceModelDialog(QDialog):
                     "Library", "Created", "Modified", "Fine-tuning", "Tags"):
             lbl = QLabel("—")
             lbl.setWordWrap(True)
-            form.addRow(f"{key}:", lbl)
+            form.addRow(key, lbl)
             self._detail_labels[key] = lbl
         layout.addLayout(form)
 
-        layout.addWidget(QLabel("Description:"))
+        layout.addWidget(QLabel("Description"))
         self._desc_label = QLabel()
         self._desc_label.setWordWrap(True)
         self._desc_label.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -339,6 +339,7 @@ class HuggingFaceModelDialog(QDialog):
         layout = QVBoxLayout()
 
         self._status_label = QLabel("")
+        self._status_label.setProperty("role", "muted")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._status_label)
 
@@ -352,19 +353,21 @@ class HuggingFaceModelDialog(QDialog):
         self._download_btn = QPushButton("Download")
         self._download_btn.setEnabled(False)
         self._download_btn.clicked.connect(self._on_download)
+        theme_manager().bind_icon(self._download_btn, "download-outline")
         btn_row.addWidget(self._download_btn)
 
         btn_row.addStretch()
 
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
         self._use_btn = QPushButton("Use")
+        self._use_btn.setProperty("primaryAction", True)
         self._use_btn.setEnabled(False)
         self._use_btn.setDefault(True)
         self._use_btn.clicked.connect(self._on_use)
         btn_row.addWidget(self._use_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
 
         layout.addLayout(btn_row)
         return layout

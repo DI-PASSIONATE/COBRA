@@ -108,7 +108,7 @@ A goal targets one spectral line by giving a single frequency, or a band by givi
     Power_dBm[Out] > 10 dB   @ 35ghz
     ```
 
-    Min and max frequency are set to the same value. The nearest spectral line is selected, matching `scikit-rf` slicing behavior.
+    *Single frequency* in the goal dialog, or a bare `35ghz` in a config. The nearest spectral line is selected, matching `scikit-rf` slicing behavior.
 
 === "Frequency band"
 

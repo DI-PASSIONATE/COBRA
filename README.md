@@ -173,7 +173,7 @@ The example in `examples/main.py` shows how to:
 
 ### 3. JSON configuration and CLI mode
 
-The GUI has **Save Config** and **Load Config** buttons for reproducible runs. A
+The GUI has **Save configuration** and **Load configuration** buttons for reproducible runs. A
 saved configuration restores the netlist, component models, simulation settings,
 optimizer and simulator options, optimization parameters, goals, and optional
 fine-tuning settings.

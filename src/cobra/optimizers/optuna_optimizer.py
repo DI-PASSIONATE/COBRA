@@ -1,6 +1,6 @@
 import importlib
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import optuna
 
@@ -177,7 +177,9 @@ class OptunaOptimizer(BaseOptimizer):
         optuna.logging.set_verbosity(
             optuna.logging.INFO if logger.isEnabledFor(logging.DEBUG) else optuna.logging.WARNING
         )
-        directions = ["minimize"] * num_goals if self.multi_objective else ["minimize"]
+        directions: list[Literal["minimize"]] = ["minimize"] * (
+            num_goals if self.multi_objective else 1
+        )
         self.study = optuna.create_study(
             directions=directions,
             sampler=self._create_sampler(),

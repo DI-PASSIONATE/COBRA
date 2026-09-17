@@ -19,6 +19,27 @@ FAILED_SIMULATION_PENALTY = 1e6
 """
 
 
+@dataclass(frozen=True)
+class GoalInputs:
+    """Which inputs a goal on a parameter takes; drives the design-goal dialog.
+
+    Attributes:
+    ----------
+    max_value:
+        Whether an upper bound is meaningful. A margin such as isolation only
+        has a lower bound.
+    frequency_required:
+        Whether the goal needs a frequency; without one, a goal covers the
+        whole sweep or spectrum.
+    single_frequency:
+        Whether the goal targets one frequency point and cannot take a range.
+    """
+
+    max_value: bool = True
+    frequency_required: bool = False
+    single_frequency: bool = False
+
+
 @dataclass
 class DesignParameter:
     """
@@ -37,6 +58,8 @@ class DesignParameter:
         Callable ``(min_value, max_value, current_value) -> float`` that computes the penalty for the current value relative to the goal range.
     description:
         Human-readable explanation shown as a tooltip in the GUI.
+    inputs:
+        Which bounds and frequency inputs a goal on this parameter takes.
     """
 
     name: str
@@ -46,6 +69,7 @@ class DesignParameter:
     description: str = ""
     min_ports: int = 1
     """Minimum number of netlist ports required to evaluate this parameter."""
+    inputs: GoalInputs = GoalInputs()
 
     def __hash__(self):
         return hash(self.name)

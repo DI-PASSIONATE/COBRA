@@ -103,8 +103,8 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   to test. Avoid hidden global state, mutable defaults, and one-letter names.
 - Validate inputs at boundaries and use existing errors, especially
   `ConfigurationError`, with actionable messages.
-- After implementing or modifying Python files, run `ruff check path/to/file.py`
-  and `ty check path/to/file.py`. Fix relevant findings before finishing.
+- After implementing or modifying Python files, run `ruff check`
+  and `ty check`. Fix relevant findings before finishing.
 
 ## CLI and Configuration
 
@@ -130,6 +130,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## GUI and Workers
 
+- Read `.claude/GUI_DESIGN.md` before editing `src/cobra/gui/`. It defines the
+  themes, colour tokens, component rules,
+  icon usage, and the both-themes check to run before finishing.
 - Reuse existing dialogs, themes, tooltips, and widgets.
 - Keep GUI configuration consistent with headless JSON execution.
 - Test configuration-building logic without a display when possible.

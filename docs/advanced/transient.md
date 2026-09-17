@@ -131,6 +131,8 @@ The fundamentals used to colour and label the lines are the SIN frequencies of t
 cobra run examples/configs/mixer_tran_config.json
 ```
 
+`examples/configs/mixer_hb_tran_config.json` evaluates both analyses in one run: it uses the HB netlist, injects the `.TRAN` analysis from `simulation_parameters`, and carries the HB and the `TRAN:` goals side by side. Both should report the same gain and isolation; with a 1 ps step the transient values sit within about 0.2 dB (gain) and 0.5 dB (isolation) of HB, and they converge onto the HB values as the step shrinks (0.1 ps: within 0.02 dB).
+
 ## Result Files
 
 ```text
