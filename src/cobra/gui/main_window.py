@@ -90,6 +90,12 @@ _SPECTRUM_VIEWS: dict[str, tuple[SimulationType, str]] = {
 _LARGE_SIGNAL_TYPES: frozenset[SimulationType] = frozenset(
     sim_type for sim_type, _ in _SPECTRUM_VIEWS.values()
 )
+#: Simulator settings the "Parallelism" selector drives instead of showing as rows.
+_SIMULATOR_MPI_FLAG = "parallel_xyce"
+_SIMULATOR_MPI_PROCESSES = "parallel_xyce_processes"
+_PARALLEL_TRIALS = "trials"
+_PARALLEL_SIMULATOR = "simulator"
+
 #: Primary button state → (label, icon name).
 _ACTION_STATES: dict[str, tuple[str, str]] = {
     "start": ("Start optimization", "play"),
@@ -262,11 +268,19 @@ class MainWindow(QMainWindow):
         self.max_iter_spin.setToolTip(_cobra_tips.get("max_iterations", ""))
         self.config_form_layout.addRow("Max iterations", self.max_iter_spin)
 
-        self.parallel_trials_spin = QSpinBox()
-        self.parallel_trials_spin.setRange(1, 4096)
-        self.parallel_trials_spin.setValue(1)
-        self.parallel_trials_spin.setToolTip(_cobra_tips.get("parallel_trials", ""))
-        self.config_form_layout.addRow("Parallel trials", self.parallel_trials_spin)
+        # Parallelism: N independent trials or one N-rank MPI simulation, never both.
+        # Maps onto ``parallel_trials`` and the simulator's MPI settings on save/load.
+        self.parallel_mode_combo = QComboBox()
+        self.parallel_mode_combo.setToolTip(tooltip("parallel_mode_combo"))
+        self.parallel_procs_spin = QSpinBox()
+        self.parallel_procs_spin.setRange(1, 4096)
+        self.parallel_procs_spin.setValue(min(os.cpu_count() or 1, 4))
+        self.parallel_procs_spin.setToolTip(tooltip("parallel_procs_spin"))
+        h_parallel = QHBoxLayout()
+        h_parallel.addWidget(self.parallel_mode_combo, stretch=1)
+        h_parallel.addWidget(QLabel("Processes"))
+        h_parallel.addWidget(self.parallel_procs_spin)
+        self.config_form_layout.addRow("Parallelism", h_parallel)
 
         # ---- Simulator selection + dynamic per-simulator options ----
         self.simulator_combo = QComboBox()
@@ -1013,6 +1027,19 @@ class MainWindow(QMainWindow):
 
     def update_simulator_options(self):
         self._rebuild_backend_options(self.simulator_combo, self.simulator_widgets)
+        # The parallelism selector owns the simulator's MPI settings.
+        for name in (_SIMULATOR_MPI_FLAG, _SIMULATOR_MPI_PROCESSES):
+            widget = self.simulator_widgets.get(name)
+            if widget is not None:
+                self.config_form_layout.setRowVisible(widget, False)
+        previous = self.parallel_mode_combo.currentData()
+        self.parallel_mode_combo.blockSignals(True)
+        self.parallel_mode_combo.clear()
+        self.parallel_mode_combo.addItem("Independent trials", _PARALLEL_TRIALS)
+        if _SIMULATOR_MPI_FLAG in self.simulator_widgets:
+            self.parallel_mode_combo.addItem("Parallel simulator (MPI)", _PARALLEL_SIMULATOR)
+        self.parallel_mode_combo.setCurrentIndex(max(self.parallel_mode_combo.findData(previous), 0))
+        self.parallel_mode_combo.blockSignals(False)
 
     @staticmethod
     def _widget_for_setting(dtype, default, choices=None) -> "QWidget":
@@ -1171,6 +1198,14 @@ class MainWindow(QMainWindow):
                 section, parameter = key.split(":", 1)
             simulation_parameters.setdefault(section, {})[parameter] = edit.text().strip()
 
+        simulator_settings = {name: self._widget_value(widget) for name, widget in self.simulator_widgets.items()}
+        processes = self.parallel_procs_spin.value()
+        mpi_mode = self.parallel_mode_combo.currentData() == _PARALLEL_SIMULATOR
+        if _SIMULATOR_MPI_FLAG in simulator_settings:
+            simulator_settings[_SIMULATOR_MPI_FLAG] = mpi_mode
+            if mpi_mode:
+                simulator_settings[_SIMULATOR_MPI_PROCESSES] = processes
+
         geometries = {}
         if self.finetune_cb.isChecked():
             geometries = {
@@ -1186,12 +1221,9 @@ class MainWindow(QMainWindow):
                 self.optimizer_combo.currentText(),
                 {name: self._widget_value(widget) for name, widget in self.optimizer_widgets.items()},
             ),
-            simulator=BackendConfig(
-                self.simulator_combo.currentText(),
-                {name: self._widget_value(widget) for name, widget in self.simulator_widgets.items()},
-            ),
+            simulator=BackendConfig(self.simulator_combo.currentText(), simulator_settings),
             max_iterations=self.max_iter_spin.value(),
-            parallel_trials=self.parallel_trials_spin.value(),
+            parallel_trials=1 if mpi_mode else processes,
             optimization_parameters=[
                 OptimizationParameterConfig(
                     name=parameter.name,
@@ -1297,7 +1329,18 @@ class MainWindow(QMainWindow):
                 edit.setText(value)
 
         self.max_iter_spin.setValue(config.max_iterations)
-        self.parallel_trials_spin.setValue(config.parallel_trials)
+        mpi_widget = self.simulator_widgets.get(_SIMULATOR_MPI_FLAG)
+        if mpi_widget is not None and self._widget_value(mpi_widget):
+            if config.parallel_trials > 1:
+                raise ConfigurationError(
+                    f"The GUI runs either {config.parallel_trials} parallel trials or an MPI "
+                    f"simulation, not both; set parallel_trials to 1 or {_SIMULATOR_MPI_FLAG} to false"
+                )
+            self._set_widget_value(self.parallel_mode_combo, _PARALLEL_SIMULATOR)
+            self.parallel_procs_spin.setValue(self._widget_value(self.simulator_widgets[_SIMULATOR_MPI_PROCESSES]))
+        else:
+            self._set_widget_value(self.parallel_mode_combo, _PARALLEL_TRIALS)
+            self.parallel_procs_spin.setValue(config.parallel_trials)
         fine_tuning = config.fine_tuning
         self.finetune_cb.setChecked(fine_tuning.enabled)
         self.palace_edit.setText(fine_tuning.palace_command)

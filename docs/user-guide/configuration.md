@@ -202,6 +202,8 @@ actually shortens a run: Xyce is often slower with several MPI ranks than with
 one, so N concurrent trials beat one N-rank simulation. Do not combine it with
 `parallel_xyce` unless the machine has cores for both — `parallel_trials` times
 `parallel_xyce_processes` is the peak load, and COBRA warns when both are set.
+The GUI exposes the two as a single *Parallelism* selector and refuses to load
+a configuration that sets both.
 It requires an optimizer that can suggest a trial before the previous one
 reported back: Optuna can, gradient descent cannot and rejects any value above
 1. One consequence to be aware of: once the design goals are met, the trials

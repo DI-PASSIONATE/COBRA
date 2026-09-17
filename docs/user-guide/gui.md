@@ -20,6 +20,7 @@ cobra
 - Analysis point, when the run includes a Harmonic Balance or transient analysis
 - Optimization parameters and ranges
 - Iteration control and stop behavior
+- Parallelism: either N independent trials or one N-rank MPI simulation
 - Optional fine-tuning settings
 
 ## Appearance
@@ -41,6 +42,22 @@ flowchart TD
     E --> F[Inspect Live Plots and Loss]
     F --> G[Review Saved Results]
 ```
+
+## Parallelism
+
+The **Parallelism** row offers one choice and one process count:
+
+- **Independent trials** — the recommended mode. `Processes` trials are
+  evaluated at the same time, each in its own single-core simulation. This is
+  saved as `parallel_trials`.
+- **Parallel simulator (MPI)** — one trial at a time, each simulation on
+  `Processes` MPI ranks (`parallel_xyce` and `parallel_xyce_processes`). Only
+  worthwhile for very large netlists; it needs an MPI-enabled Xyce build.
+
+The two modes compete for the same cores, so the GUI never enables both. A
+configuration file that sets `parallel_trials` above 1 *and* `parallel_xyce`
+is rejected when loaded into the GUI; headless runs still accept it with a
+warning.
 
 ## Design Goals in Practice
 

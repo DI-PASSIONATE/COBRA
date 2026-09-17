@@ -40,6 +40,13 @@ TOOLTIPS = {
     "geometry_file_btn": "Browse for a custom ORCA geometry Python file.",
     "optuna_sampler_combo": "Select the Optuna sampler strategy. SimulatedAnnealingSampler requires optunahub.",
     "optuna_pruner_combo": "Select an optional Optuna pruner. Pruners stop unpromising trials early to save time, but may miss good solutions.",
+    "parallel_mode_combo": (
+        "Independent trials: evaluate N trials at once, each in its own single-core simulation.\n"
+        "Near-linear speedup; the optimizer learns a little less per trial. Recommended.\n"
+        "Parallel simulator (MPI): one trial at a time, each simulation on N MPI ranks.\n"
+        "Only pays off for very large netlists and needs an MPI-enabled simulator build."
+    ),
+    "parallel_procs_spin": "Number of concurrent trials, or MPI ranks per simulation, depending on the mode.",
     "finetune_cb": "Run a few Palace iterations at the end to verify or refine surrogate results. Ensures final design actually meets goals via EM simulation.",
     "ft_optimizer_combo": "Reuse the surrogate optimizer state or switch to a different one (e.g., gradient descent).",
     "sim_type_tabs": "Design parameters grouped by the analysis that produces them. A goal on another tab adds that analysis to the run.",
