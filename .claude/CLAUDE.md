@@ -130,6 +130,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## GUI and Workers
 
+- Read `.claude/GUI_DESIGN.md` before editing `src/cobra/gui/`. It defines the
+  themes, colour tokens, component rules,
+  icon usage, and the both-themes check to run before finishing.
 - Reuse existing dialogs, themes, tooltips, and widgets.
 - Keep GUI configuration consistent with headless JSON execution.
 - Test configuration-building logic without a display when possible.
