@@ -1923,7 +1923,11 @@ class MainWindow(QMainWindow):
                 "available design parameters for your simulation type and port count.",
             )
             return
-        dlg = DesignGoalDialog(self, available_parameters=self._available_parameters)
+        dlg = DesignGoalDialog(
+            self,
+            available_parameters=self._available_parameters,
+            initial_simulation_type=self._netlist_sim_type,
+        )
         if dlg.exec():
             goal = dlg.get_data()
             self._add_goal_to_list(goal)

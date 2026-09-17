@@ -1,5 +1,7 @@
 import json
 import logging
+import re
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
@@ -11,36 +13,62 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QTabBar,
 )
 
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from cobra.optimizers.design_goal import DesignGoal, DesignParameter, GoalInputs
 
 from .help_texts import tooltip
+
+if TYPE_CHECKING:
+    from cobra.spice_sim.simulation_type import SimulationType
 
 logger = logging.getLogger(__name__)
 
 
+_FREQUENCY_RE = re.compile(
+    r"^\s*(?P<min>\d*\.?\d+)(?:-(?P<max>\d*\.?\d+))?\s*(?P<unit>[a-zA-Z]*)\s*$"
+)
+_FREQUENCY_UNITS = {"hz": "Hz", "khz": "kHz", "mhz": "MHz", "ghz": "GHz"}
+
+# Frequency modes of the goal dialog: how the frequency_range string is built.
+_FREQ_ANY = "Whole sweep / spectrum"
+_FREQ_POINT = "Single frequency"
+_FREQ_RANGE = "Frequency range"
+
+
 class DesignGoalDialog(QDialog):
+    """Create or edit a :class:`DesignGoal`.
+
+    The parameters are grouped by the analysis they need, one tab per analysis,
+    so the parameter list stays short for netlists with many ports and nodes.
+    The form adapts to the selected parameter's :class:`GoalInputs`: bounds the
+    goal cannot take are hidden, and the frequency mode is limited to what the
+    goal supports (a point, a range, or the whole sweep).
+    """
+
     def __init__(self, parent=None, goal: "DesignGoal | None" = None,
-                 available_parameters: "list[DesignParameter] | None" = None):
+                 available_parameters: "list[DesignParameter] | None" = None,
+                 initial_simulation_type: "SimulationType | None" = None):
         super().__init__(parent)
         self.setWindowTitle("Design Goal")
         self.setMinimumWidth(400)
         self.form_layout = QFormLayout(self)
 
-        self.param_combo = QComboBox()
-        if available_parameters:
-            for dp in available_parameters:
-                self.param_combo.addItem(dp.name, dp)
-                idx = self.param_combo.count() - 1
-                if dp.description:
-                    self.param_combo.setItemData(idx, dp.description, 3)  # Qt.ToolTipRole = 3
+        # Parameters per analysis, in order of first appearance.
+        self._parameters_by_type: dict[SimulationType, list[DesignParameter]] = {}
+        for dp in available_parameters or []:
+            self._parameters_by_type.setdefault(dp.simulation_type, []).append(dp)
+        if goal and goal.parameter not in self._parameters_by_type.get(goal.parameter.simulation_type, []):
+            # Not offered any more (netlist changed): keep it editable at the top of its tab.
+            self._parameters_by_type.setdefault(goal.parameter.simulation_type, []).insert(0, goal.parameter)
 
-        self.sim_type_label = QLabel()
-        self.sim_type_label.setEnabled(False)
-        self.param_combo.currentIndexChanged.connect(self._update_sim_type_label)
-        self._update_sim_type_label()
+        self.sim_type_tabs = QTabBar()
+        self.sim_type_tabs.setToolTip(tooltip("sim_type_tabs"))
+        for sim_type in self._parameters_by_type:
+            self.sim_type_tabs.addTab(sim_type.value)
+        self.param_combo = QComboBox()
 
         self.weight_edit = QLineEdit()
         self.weight_edit.setPlaceholderText("Default: 1.0")
@@ -58,57 +86,27 @@ class DesignGoalDialog(QDialog):
         self.min_edit.setValidator(value_validator)
         self.max_edit.setValidator(value_validator)
 
+        self.freq_mode_combo = QComboBox()
+        self.freq_mode_combo.setToolTip(tooltip("freq_mode_combo"))
+        self.freq_min_label = QLabel("Frequency:")
         self.freq_min_edit = QLineEdit()
         self.freq_max_edit = QLineEdit()
-        self.freq_min_edit.setPlaceholderText("Optional")
-        self.freq_max_edit.setPlaceholderText("Optional")
         freq_validator = QDoubleValidator(0.0, 1e15, 15, self)
         freq_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         self.freq_min_edit.setValidator(freq_validator)
         self.freq_max_edit.setValidator(freq_validator)
         self.freq_unit_combo = QComboBox()
-        self.freq_unit_combo.addItems(["Hz", "kHz", "MHz", "GHz", "THz"])
+        self.freq_unit_combo.addItems(list(_FREQUENCY_UNITS.values()))
         self.freq_unit_combo.setCurrentText("GHz")
         self.freq_unit_combo.setToolTip(tooltip("freq_unit_combo"))
 
-        self._raw_frequency_range = None
-
-        if goal:
-            # Select matching item; if not in combo (netlist changed) add it at top
-            found = False
-            for i in range(self.param_combo.count()):
-                if self.param_combo.itemData(i) == goal.parameter:
-                    self.param_combo.setCurrentIndex(i)
-                    found = True
-                    break
-            if not found:
-                self.param_combo.insertItem(0, goal.parameter.name, goal.parameter)
-                self.param_combo.setCurrentIndex(0)
-
-            if goal.min_value is not None:
-                self.min_edit.setText(str(goal.min_value))
-            if goal.max_value is not None:
-                self.max_edit.setText(str(goal.max_value))
-            if goal.frequency_range:
-                parsed = self._parse_frequency_range(goal.frequency_range)
-                if parsed is None:
-                    self._raw_frequency_range = goal.frequency_range
-                else:
-                    min_freq, max_freq, unit = parsed
-                    self.freq_min_edit.setText(min_freq)
-                    self.freq_max_edit.setText(max_freq)
-                    unit_label = self._normalize_frequency_unit(unit)
-                    if unit_label is not None:
-                        self.freq_unit_combo.setCurrentText(unit_label)
-            if goal.weight is not None:
-                self.weight_edit.setText(str(goal.weight))
-
+        self.form_layout.addRow(self.sim_type_tabs)
         self.form_layout.addRow("Parameter:", self.param_combo)
-        self.form_layout.addRow("Simulation Type:", self.sim_type_label)
         self.form_layout.addRow("Weight:", self.weight_edit)
         self.form_layout.addRow("Min Value:", self.min_edit)
         self.form_layout.addRow("Max Value:", self.max_edit)
-        self.form_layout.addRow("Min Frequency:", self.freq_min_edit)
+        self.form_layout.addRow("Frequency:", self.freq_mode_combo)
+        self.form_layout.addRow(self.freq_min_label, self.freq_min_edit)
         self.form_layout.addRow("Max Frequency:", self.freq_max_edit)
         self.form_layout.addRow("Frequency Unit:", self.freq_unit_combo)
 
@@ -117,112 +115,155 @@ class DesignGoalDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         self.form_layout.addRow(self.buttons)
 
-    def _update_sim_type_label(self):
+        self.sim_type_tabs.currentChanged.connect(self._on_sim_type_changed)
+        self.param_combo.currentIndexChanged.connect(self._on_parameter_changed)
+        self.freq_mode_combo.currentIndexChanged.connect(self._on_frequency_mode_changed)
+
+        sim_types = list(self._parameters_by_type)
+        selected = goal.parameter.simulation_type if goal else initial_simulation_type
+        self.sim_type_tabs.setCurrentIndex(sim_types.index(selected) if selected in sim_types else 0)
+        self._on_sim_type_changed()
+        if goal:
+            self.param_combo.setCurrentIndex(self.param_combo.findText(goal.parameter.name))
+
+        if goal:
+            if goal.min_value is not None:
+                self.min_edit.setText(str(goal.min_value))
+            if goal.max_value is not None:
+                self.max_edit.setText(str(goal.max_value))
+            if goal.weight is not None:
+                self.weight_edit.setText(str(goal.weight))
+            self._set_frequency(goal.frequency_range)
+
+    def _on_sim_type_changed(self):
+        """Offer the parameters of the analysis selected in the tab bar."""
+        sim_types = list(self._parameters_by_type)
+        index = self.sim_type_tabs.currentIndex()
+        parameters = self._parameters_by_type[sim_types[index]] if 0 <= index < len(sim_types) else []
+        self.param_combo.blockSignals(True)
+        self.param_combo.clear()
+        for dp in parameters:
+            self.param_combo.addItem(dp.name, dp)
+            if dp.description:
+                self.param_combo.setItemData(self.param_combo.count() - 1, dp.description, 3)  # Qt.ToolTipRole = 3
+        self.param_combo.blockSignals(False)
+        self._on_parameter_changed()
+
+    def _current_parameter(self) -> "DesignParameter | None":
         param = self.param_combo.currentData()
-        if param is not None and isinstance(param, DesignParameter):
-            self.sim_type_label.setText(param.simulation_type.value)
+        return param if isinstance(param, DesignParameter) else None
+
+    def _on_parameter_changed(self):
+        """Show the inputs the selected parameter's goals take."""
+        param = self._current_parameter()
+        inputs = param.inputs if param else GoalInputs()
+
+        self.form_layout.setRowVisible(self.max_edit, inputs.max_value)
+        self.min_edit.setPlaceholderText("Required" if not inputs.max_value else "Optional")
+
+        modes = [] if inputs.frequency_required else [_FREQ_ANY]
+        modes.append(_FREQ_POINT)
+        if not inputs.single_frequency:
+            modes.append(_FREQ_RANGE)
+        current = self.freq_mode_combo.currentText()
+        self.freq_mode_combo.blockSignals(True)
+        self.freq_mode_combo.clear()
+        self.freq_mode_combo.addItems(modes)
+        self.freq_mode_combo.blockSignals(False)
+        self.freq_mode_combo.setCurrentText(current if current in modes else modes[0])
+        self._on_frequency_mode_changed()
+
+    def _on_frequency_mode_changed(self):
+        mode = self.freq_mode_combo.currentText()
+        self.form_layout.setRowVisible(self.freq_min_edit, mode != _FREQ_ANY)
+        self.form_layout.setRowVisible(self.freq_max_edit, mode == _FREQ_RANGE)
+        self.form_layout.setRowVisible(self.freq_unit_combo, mode != _FREQ_ANY)
+        self.freq_min_label.setText("Frequency:" if mode == _FREQ_POINT else "Min Frequency:")
+
+    def _set_frequency(self, frequency_range: str | None):
+        """Fill the frequency inputs from a goal's ``frequency_range`` string."""
+        match = _FREQUENCY_RE.match(frequency_range or "")
+        if not match:
+            self.freq_mode_combo.setCurrentText(_FREQ_ANY)
+            return
+        self.freq_min_edit.setText(match.group("min"))
+        if match.group("max"):
+            self.freq_mode_combo.setCurrentText(_FREQ_RANGE)
+            self.freq_max_edit.setText(match.group("max"))
         else:
-            self.sim_type_label.setText("—")
+            self.freq_mode_combo.setCurrentText(_FREQ_POINT)
+        unit = _FREQUENCY_UNITS.get(match.group("unit").lower())
+        if unit is not None:
+            self.freq_unit_combo.setCurrentText(unit)
+
+    def _validate(self) -> str | None:
+        """The first problem with the current inputs, or ``None`` when they are valid."""
+        param = self._current_parameter()
+        if param is None:
+            return "No valid parameter selected."
+        min_text = self.min_edit.text().strip()
+        max_text = self.max_edit.text().strip() if param.inputs.max_value else ""
+        if min_text and not self.min_edit.hasAcceptableInput():
+            return "Min Value must be numeric."
+        if max_text and not self.max_edit.hasAcceptableInput():
+            return "Max Value must be numeric."
+        if self.weight_edit.text().strip() and not self.weight_edit.hasAcceptableInput():
+            return "Weight must be numeric."
+        if not min_text and not max_text:
+            if param.inputs.max_value:
+                return "At least one of Min Value or Max Value must be set."
+            return "Min Value must be set."
+        if min_text and max_text and float(min_text) > float(max_text):
+            return "Min Value must not exceed Max Value."
+
+        mode = self.freq_mode_combo.currentText()
+        freq_min = self.freq_min_edit.text().strip()
+        freq_max = self.freq_max_edit.text().strip()
+        if mode == _FREQ_POINT and not freq_min:
+            return "A frequency is required."
+        if mode == _FREQ_RANGE:
+            if not (freq_min and freq_max):
+                return "Both Min Frequency and Max Frequency are required for a range."
+            if float(freq_min) >= float(freq_max):
+                return "Min Frequency must be below Max Frequency."
+        return None
+
+    def _frequency_range(self) -> str | None:
+        mode = self.freq_mode_combo.currentText()
+        if mode == _FREQ_ANY:
+            return None
+        unit = self.freq_unit_combo.currentText().lower()
+        if mode == _FREQ_POINT:
+            return f"{self.freq_min_edit.text().strip()}{unit}"
+        return f"{self.freq_min_edit.text().strip()}-{self.freq_max_edit.text().strip()}{unit}"
 
     def get_data(self) -> DesignGoal:
-        param: DesignParameter = self.param_combo.currentData()
-        if param is None or not isinstance(param, DesignParameter):
-            raise ValueError("No valid parameter selected.")
+        param = self._current_parameter()
+        error = self._validate()
+        if error or param is None:
+            raise ValueError(error or "No valid parameter selected.")
 
-        min_val = float(self.min_edit.text()) if self.min_edit.text() else None
-        max_val = float(self.max_edit.text()) if self.max_edit.text() else None
-
-        freq_range, freq_error = self._build_frequency_range()
-        if freq_error:
-            raise ValueError(freq_error)
-
+        min_val = float(self.min_edit.text()) if self.min_edit.text().strip() else None
+        max_val = (
+            float(self.max_edit.text())
+            if param.inputs.max_value and self.max_edit.text().strip()
+            else None
+        )
         try:
             weight = float(self.weight_edit.text())
         except ValueError:
             weight = 1.0
 
-        return DesignGoal(parameter=param, frequency_range=freq_range,
+        return DesignGoal(parameter=param, frequency_range=self._frequency_range(),
                           min_value=min_val, max_value=max_val, weight=weight)
 
     def accept(self):
-        min_text = self.min_edit.text().strip()
-        max_text = self.max_edit.text().strip()
-        weight_text = self.weight_edit.text().strip()
-        if min_text and not self.min_edit.hasAcceptableInput():
-            QMessageBox.warning(self, "Invalid Value", "Min Value must be numeric.")
-            return
-        if max_text and not self.max_edit.hasAcceptableInput():
-            QMessageBox.warning(self, "Invalid Value", "Max Value must be numeric.")
-            return
-        if weight_text and not self.weight_edit.hasAcceptableInput():
-            QMessageBox.warning(self, "Invalid Weight", "Weight must be numeric.")
-            return
-        if not min_text and not max_text:
-            QMessageBox.warning(
-                self,
-                "Missing Value Range",
-                "At least one of Min Value or Max Value must be set.",
-            )
-            return
-        _, freq_error = self._build_frequency_range()
-        if freq_error:
-            QMessageBox.warning(self, "Invalid Frequency Range", freq_error)
+        error = self._validate()
+        if error:
+            QMessageBox.warning(self, "Invalid Design Goal", error)
             return
         super().accept()
 
-    def _build_frequency_range(self):
-        freq_min_text = self.freq_min_edit.text().strip()
-        freq_max_text = self.freq_max_edit.text().strip()
-        if freq_min_text or freq_max_text:
-            if not (freq_min_text and freq_max_text):
-                return None, "Both Min Frequency and Max Frequency are required when setting a frequency range."
-            try:
-                float(freq_min_text)
-                float(freq_max_text)
-            except ValueError:
-                return None, "Frequency values must be numeric."
-            unit = self.freq_unit_combo.currentText().lower()
-            return f"{freq_min_text}-{freq_max_text}{unit}", None
-        if self._raw_frequency_range:
-            return self._raw_frequency_range, None
-        return None, None
-
-    @staticmethod
-    def _parse_frequency_range(frequency_range: str):
-        if not frequency_range:
-            return None
-        parts = frequency_range.strip().split("-")
-        if len(parts) != 2:
-            return None
-        min_part = parts[0].strip()
-        max_part = parts[1].strip()
-        if not min_part or not max_part:
-            return None
-        unit = ""
-        max_digits = []
-        for ch in max_part:
-            if ch.isdigit() or ch == ".":
-                max_digits.append(ch)
-            else:
-                unit = max_part[len(max_digits):].strip()
-                break
-        if not unit:
-            return None
-        max_value = "".join(max_digits)
-        if not max_value:
-            return None
-        return min_part, max_value, unit
-
-    @staticmethod
-    def _normalize_frequency_unit(unit: str):
-        unit_map = {
-            "hz": "Hz",
-            "khz": "kHz",
-            "mhz": "MHz",
-            "ghz": "GHz",
-            "thz": "THz",
-        }
-        return unit_map.get(unit.strip().lower())
 
 class OptimizationParamDialog(QDialog):
     def __init__(

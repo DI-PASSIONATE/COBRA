@@ -32,7 +32,9 @@ TOOLTIPS = {
     "optuna_pruner_combo": "Select an optional Optuna pruner. Pruners stop unpromising trials early to save time, but may miss good solutions.",
     "finetune_cb": "Run a few Palace iterations at the end to verify or refine surrogate results. Ensures final design actually meets goals via EM simulation.",
     "ft_optimizer_combo": "Reuse the surrogate optimizer state or switch to a different one (e.g., gradient descent).",
-    "freq_unit_combo": "Unit for min/max frequency.",
+    "sim_type_tabs": "Design parameters grouped by the analysis that produces them. A goal on another tab adds that analysis to the run.",
+    "freq_mode_combo": "Whole sweep/spectrum: the goal applies everywhere. Single frequency: the nearest sweep point or spectral line. Range: every point or line inside the band.",
+    "freq_unit_combo": "Unit for the goal frequency.",
 }
 
 TUTORIAL_HTML = """
