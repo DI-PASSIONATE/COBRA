@@ -22,6 +22,14 @@ cobra
 - Iteration control and stop behavior
 - Optional fine-tuning settings
 
+## Appearance
+
+The GUI ships two themes: **Sandbank** (light) and **Deepwater** (dark). By
+default it follows the operating system's colour scheme and switches live when
+the system changes. The theme button in the top-right corner cycles through
+*system → light → dark*; the choice is stored in the COBRA settings
+(`appearance/mode`) and restored on the next start.
+
 ## Typical GUI Flow
 
 ```mermaid
@@ -60,7 +68,9 @@ The GUI displays:
 - the HB or transient output spectrum at the selected analysis point, as power, gain, voltage or current,
 - per-goal penalty/loss behavior,
 - current and best trial values,
-- progress against maximum iterations.
+- progress against maximum iterations. The progress bar turns amber while the
+  run is paused and green once it has finished; the status bar reports the end
+  of the run.
 
 When a run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels, and **Advanced -> Transient Analysis** for the FFT window.
 
