@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QTabBar,
 )
 
@@ -20,6 +19,7 @@ from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationTy
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter, GoalInputs
 
 from .help_texts import tooltip
+from .theme import refresh_style
 
 if TYPE_CHECKING:
     from cobra.spice_sim.simulation_type import SimulationType
@@ -38,6 +38,15 @@ _FREQ_POINT = "Single frequency"
 _FREQ_RANGE = "Frequency range"
 
 
+def _ok_cancel_buttons(dialog: QDialog) -> QDialogButtonBox:
+    """OK (primary) and Cancel buttons wired to *dialog*."""
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+    buttons.button(QDialogButtonBox.StandardButton.Ok).setProperty("primaryAction", True)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    return buttons
+
+
 class DesignGoalDialog(QDialog):
     """Create or edit a :class:`DesignGoal`.
 
@@ -52,7 +61,7 @@ class DesignGoalDialog(QDialog):
                  available_parameters: "list[DesignParameter] | None" = None,
                  initial_simulation_type: "SimulationType | None" = None):
         super().__init__(parent)
-        self.setWindowTitle("Design Goal")
+        self.setWindowTitle("Design goal")
         self.setMinimumWidth(400)
         self.form_layout = QFormLayout(self)
 
@@ -88,7 +97,7 @@ class DesignGoalDialog(QDialog):
 
         self.freq_mode_combo = QComboBox()
         self.freq_mode_combo.setToolTip(tooltip("freq_mode_combo"))
-        self.freq_min_label = QLabel("Frequency:")
+        self.freq_min_label = QLabel("Frequency")
         self.freq_min_edit = QLineEdit()
         self.freq_max_edit = QLineEdit()
         freq_validator = QDoubleValidator(0.0, 1e15, 15, self)
@@ -100,20 +109,27 @@ class DesignGoalDialog(QDialog):
         self.freq_unit_combo.setCurrentText("GHz")
         self.freq_unit_combo.setToolTip(tooltip("freq_unit_combo"))
 
-        self.form_layout.addRow(self.sim_type_tabs)
-        self.form_layout.addRow("Parameter:", self.param_combo)
-        self.form_layout.addRow("Weight:", self.weight_edit)
-        self.form_layout.addRow("Min Value:", self.min_edit)
-        self.form_layout.addRow("Max Value:", self.max_edit)
-        self.form_layout.addRow("Frequency:", self.freq_mode_combo)
-        self.form_layout.addRow(self.freq_min_label, self.freq_min_edit)
-        self.form_layout.addRow("Max Frequency:", self.freq_max_edit)
-        self.form_layout.addRow("Frequency Unit:", self.freq_unit_combo)
+        # Validation problems are shown here, next to the field they concern.
+        self.error_label = QLabel()
+        self.error_label.setProperty("role", "error")
+        self.error_label.setWordWrap(True)
+        self.error_label.setVisible(False)
 
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+        self.form_layout.addRow(self.sim_type_tabs)
+        self.form_layout.addRow("Parameter", self.param_combo)
+        self.form_layout.addRow("Weight", self.weight_edit)
+        self.form_layout.addRow("Min value", self.min_edit)
+        self.form_layout.addRow("Max value", self.max_edit)
+        self.form_layout.addRow("Frequency", self.freq_mode_combo)
+        self.form_layout.addRow(self.freq_min_label, self.freq_min_edit)
+        self.form_layout.addRow("Max frequency", self.freq_max_edit)
+        self.form_layout.addRow("Frequency unit", self.freq_unit_combo)
+        self.form_layout.addRow(self.error_label)
+
+        self.buttons = _ok_cancel_buttons(self)
         self.form_layout.addRow(self.buttons)
+        for edit in self._edits:
+            edit.textChanged.connect(self._clear_error)
 
         self.sim_type_tabs.currentChanged.connect(self._on_sim_type_changed)
         self.param_combo.currentIndexChanged.connect(self._on_parameter_changed)
@@ -178,7 +194,7 @@ class DesignGoalDialog(QDialog):
         self.form_layout.setRowVisible(self.freq_min_edit, mode != _FREQ_ANY)
         self.form_layout.setRowVisible(self.freq_max_edit, mode == _FREQ_RANGE)
         self.form_layout.setRowVisible(self.freq_unit_combo, mode != _FREQ_ANY)
-        self.freq_min_label.setText("Frequency:" if mode == _FREQ_POINT else "Min Frequency:")
+        self.freq_min_label.setText("Frequency" if mode == _FREQ_POINT else "Min frequency")
 
     def _set_frequency(self, frequency_range: str | None):
         """Fill the frequency inputs from a goal's ``frequency_range`` string."""
@@ -196,37 +212,58 @@ class DesignGoalDialog(QDialog):
         if unit is not None:
             self.freq_unit_combo.setCurrentText(unit)
 
-    def _validate(self) -> str | None:
-        """The first problem with the current inputs, or ``None`` when they are valid."""
+    @property
+    def _edits(self) -> tuple[QLineEdit, ...]:
+        return (self.weight_edit, self.min_edit, self.max_edit, self.freq_min_edit, self.freq_max_edit)
+
+    def _validate(self) -> tuple[str, QLineEdit | None] | None:
+        """The first problem with the current inputs and the field it concerns, or ``None``."""
         param = self._current_parameter()
         if param is None:
-            return "No valid parameter selected."
+            return "No valid parameter selected.", None
         min_text = self.min_edit.text().strip()
         max_text = self.max_edit.text().strip() if param.inputs.max_value else ""
         if min_text and not self.min_edit.hasAcceptableInput():
-            return "Min Value must be numeric."
+            return "Min value must be numeric.", self.min_edit
         if max_text and not self.max_edit.hasAcceptableInput():
-            return "Max Value must be numeric."
+            return "Max value must be numeric.", self.max_edit
         if self.weight_edit.text().strip() and not self.weight_edit.hasAcceptableInput():
-            return "Weight must be numeric."
+            return "Weight must be numeric.", self.weight_edit
         if not min_text and not max_text:
             if param.inputs.max_value:
-                return "At least one of Min Value or Max Value must be set."
-            return "Min Value must be set."
+                return "At least one of min value or max value must be set.", self.min_edit
+            return "Min value must be set.", self.min_edit
         if min_text and max_text and float(min_text) > float(max_text):
-            return "Min Value must not exceed Max Value."
+            return "Min value must not exceed max value.", self.max_edit
 
         mode = self.freq_mode_combo.currentText()
         freq_min = self.freq_min_edit.text().strip()
         freq_max = self.freq_max_edit.text().strip()
         if mode == _FREQ_POINT and not freq_min:
-            return "A frequency is required."
+            return "A frequency is required.", self.freq_min_edit
         if mode == _FREQ_RANGE:
-            if not (freq_min and freq_max):
-                return "Both Min Frequency and Max Frequency are required for a range."
+            if not freq_min:
+                return "Both min and max frequency are required for a range.", self.freq_min_edit
+            if not freq_max:
+                return "Both min and max frequency are required for a range.", self.freq_max_edit
             if float(freq_min) >= float(freq_max):
-                return "Min Frequency must be below Max Frequency."
+                return "Min frequency must be below max frequency.", self.freq_max_edit
         return None
+
+    def _show_error(self, message: str, field: QLineEdit | None) -> None:
+        self.error_label.setText(message)
+        self.error_label.setVisible(True)
+        if field is not None:
+            field.setProperty("invalid", True)
+            refresh_style(field)
+            field.setFocus()
+
+    def _clear_error(self) -> None:
+        self.error_label.setVisible(False)
+        for edit in self._edits:
+            if edit.property("invalid"):
+                edit.setProperty("invalid", False)
+                refresh_style(edit)
 
     def _frequency_range(self) -> str | None:
         mode = self.freq_mode_combo.currentText()
@@ -239,9 +276,9 @@ class DesignGoalDialog(QDialog):
 
     def get_data(self) -> DesignGoal:
         param = self._current_parameter()
-        error = self._validate()
-        if error or param is None:
-            raise ValueError(error or "No valid parameter selected.")
+        problem = self._validate()
+        if problem or param is None:
+            raise ValueError(problem[0] if problem else "No valid parameter selected.")
 
         min_val = float(self.min_edit.text()) if self.min_edit.text().strip() else None
         max_val = (
@@ -258,9 +295,9 @@ class DesignGoalDialog(QDialog):
                           min_value=min_val, max_value=max_val, weight=weight)
 
     def accept(self):
-        error = self._validate()
-        if error:
-            QMessageBox.warning(self, "Invalid Design Goal", error)
+        problem = self._validate()
+        if problem:
+            self._show_error(*problem)
             return
         super().accept()
 
@@ -278,7 +315,7 @@ class OptimizationParamDialog(QDialog):
         super().__init__(parent)
         self.metadata = metadata or {}
         self.link_candidates = link_candidates or []
-        self.setWindowTitle("Optimization Parameter")
+        self.setWindowTitle("Optimization parameter")
         self.form_layout = QFormLayout(self)
 
         self.name_edit = QLineEdit()
@@ -318,7 +355,7 @@ class OptimizationParamDialog(QDialog):
         if from_source == "ONNX" and source_data:
             self.name_combo = QComboBox()
             self.name_combo.addItems(source_data)
-            self.form_layout.addRow("Name:", self.name_combo)
+            self.form_layout.addRow("Name", self.name_combo)
             self.type_combo.setCurrentText(OptimizationType.MODEL_INPUT.value)
             self.type_combo.setEnabled(False)
             self.use_combo_name = True
@@ -330,23 +367,23 @@ class OptimizationParamDialog(QDialog):
         elif from_source == "NETLIST" and source_data:
             self.name_combo = QComboBox()
             self.name_combo.addItems(source_data)
-            self.form_layout.addRow("Name:", self.name_combo)
+            self.form_layout.addRow("Name", self.name_combo)
             self.type_combo.setCurrentText(OptimizationType.NETLIST_VARIABLE.value)
             self.type_combo.setEnabled(False)
             self.step_spin.setValue(1.0)
             self.use_combo_name = True
             self.name_combo.currentTextChanged.connect(self._refresh_link_targets)
         else:
-            self.form_layout.addRow("Name:", self.name_edit)
+            self.form_layout.addRow("Name", self.name_edit)
             self.use_combo_name = False
             self.name_edit.textChanged.connect(self._refresh_link_targets)
 
-        self.form_layout.addRow("Type:", self.type_combo)
-        self.form_layout.addRow("Min:", self.min_spin)
-        self.form_layout.addRow("Max:", self.max_spin)
-        self.form_layout.addRow("Step:", self.step_spin)
-        self.form_layout.addRow("Unit:", self.unit_edit)
-        self.form_layout.addRow("Link To:", self.link_to_combo)
+        self.form_layout.addRow("Type", self.type_combo)
+        self.form_layout.addRow("Min", self.min_spin)
+        self.form_layout.addRow("Max", self.max_spin)
+        self.form_layout.addRow("Step", self.step_spin)
+        self.form_layout.addRow("Unit", self.unit_edit)
+        self.form_layout.addRow("Link to", self.link_to_combo)
 
         self._refresh_link_targets(self.name_combo.currentText() if self.use_combo_name else self.name_edit.text())
         if param and param.linked_to:
@@ -357,9 +394,7 @@ class OptimizationParamDialog(QDialog):
         self.link_to_combo.currentIndexChanged.connect(self._on_link_target_changed)
         self._on_link_target_changed()
 
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+        self.buttons = _ok_cancel_buttons(self)
         self.form_layout.addRow(self.buttons)
 
     def _update_onnx_metadata(self, name):

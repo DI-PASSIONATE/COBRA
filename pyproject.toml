@@ -75,6 +75,7 @@ dependencies = [
     "pyqtgraph",
     "huggingface-hub",
     "gmsh",
+    "qtawesome>=1.4.2",
 ]
 
 # ORCA supplies the geometry presets/classes used by EM fine-tuning.  COBRA guards

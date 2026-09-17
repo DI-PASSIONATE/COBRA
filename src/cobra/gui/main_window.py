@@ -10,6 +10,7 @@ import numpy as np
 import onnxruntime
 import pyqtgraph as pg
 from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Slot
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -71,7 +72,8 @@ from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
 from .help_texts import TUTORIAL_HTML, tooltip
 from .hf_model_browser import HuggingFaceModelDialog
-from .theme import apply_theme
+from .theme import ThemeTokens, icon, refresh_style, style_plot
+from .theme import manager as theme_manager
 from .worker import OptimizationWorker
 
 if TYPE_CHECKING:
@@ -82,12 +84,19 @@ logger = logging.getLogger(__name__)
 
 #: Plot-selector entries for the analyses that yield a spectrum: key → (analysis, title).
 _SPECTRUM_VIEWS: dict[str, tuple[SimulationType, str]] = {
-    "hb": (SimulationType.HB, "HB Spectrum"),
-    "tran": (SimulationType.TRAN, "Transient Spectrum"),
+    "hb": (SimulationType.HB, "HB spectrum"),
+    "tran": (SimulationType.TRAN, "Transient spectrum"),
 }
 _LARGE_SIGNAL_TYPES: frozenset[SimulationType] = frozenset(
     sim_type for sim_type, _ in _SPECTRUM_VIEWS.values()
 )
+#: Primary button state → (label, icon name).
+_ACTION_STATES: dict[str, tuple[str, str]] = {
+    "start": ("Start optimization", "play"),
+    "pause": ("Pause", "pause"),
+    "resume": ("Resume", "play"),
+    "stopping": ("Stopping…", "stop"),
+}
 
 
 class MainWindow(QMainWindow):
@@ -95,12 +104,14 @@ class MainWindow(QMainWindow):
         super().__init__()
         gmsh.initialize()
 
-        # Initialize component ONNX selector dictionaries
-        self.component_onnx_edits: dict[str, QLineEdit] = {}
-        self.component_onnx_btns: dict[str, QPushButton] = {}
-        self.component_hf_btns: dict[str, QPushButton] = {}
+        self._theme = theme_manager()
+        self._theme.theme_changed.connect(self._on_theme_changed)
 
-        self.setWindowTitle("COBRA GUI")
+        # Per-component surrogate model path fields and the ONNX inputs they expose.
+        self.component_onnx_edits: dict[str, QLineEdit] = {}
+        self.component_inputs: dict[str, list[str]] = {}
+
+        self.setWindowTitle("COBRA")
         self.resize(1200, 800)
         self._last_config_path: str | None = None
         self._run_elapsed_timer = QElapsedTimer()
@@ -132,47 +143,55 @@ class MainWindow(QMainWindow):
         global_controls_layout.addWidget(self.config_panel_btn)
         global_controls_layout.addWidget(self.viz_panel_btn)
 
-        self.help_btn = QPushButton("?")
-        self.help_btn.setFixedSize(control_btn_height, control_btn_height)
-        self.help_btn.setToolTip(tooltip("help_btn"))
-        self.help_btn.clicked.connect(self.show_tutorial)
+        self._theme.bind_icon(self.config_panel_btn, "tune-variant", size=24)
+        self._theme.bind_icon(self.viz_panel_btn, "chart-line", size=24)
 
-        self.action_btn = QPushButton("START OPTIMIZATION")
+        self.help_btn = self._quiet_button("help-circle-outline", "Help", tooltip("help_btn"), self.show_tutorial)
+        self.theme_btn = self._quiet_button("theme-light-dark", "Appearance", "", self.on_theme_toggle_clicked)
+
+        self.action_btn = QPushButton("Start optimization")
         self.action_btn.setFixedSize(control_btn_width, control_btn_height)
         self.action_btn.setProperty("primaryAction", True)
         self.action_btn.setProperty("actionState", "start")
         self.action_btn.setToolTip(tooltip("action_btn"))
         self.action_btn.clicked.connect(self.on_action_clicked)
 
-        self.stop_btn = QPushButton("⬛")  # Square stop symbol
+        self.stop_btn = QPushButton("Stop")
         self.stop_btn.setToolTip(tooltip("stop_btn"))
-        self.stop_btn.setFixedSize(control_btn_height, control_btn_height)
+        self.stop_btn.setFixedHeight(control_btn_height)
         self.stop_btn.setProperty("dangerAction", True)
         self.stop_btn.clicked.connect(self.stop_optimization)
         self.stop_btn.setEnabled(False)
+        self._theme.bind_icon(self.stop_btn, "stop", on_fill=True, size=24)
 
-        self.save_config_btn = QPushButton("Save Config")
-        self.save_config_btn.setFixedHeight(control_btn_height)
+        self.save_config_btn = QPushButton("Save configuration")
+        self.save_config_btn.setToolTip(tooltip("save_config_btn"))
         self.save_config_btn.clicked.connect(self.save_configuration)
-        self.load_config_btn = QPushButton("Load Config")
-        self.load_config_btn.setFixedHeight(control_btn_height)
+        self._theme.bind_icon(self.save_config_btn, "content-save-outline")
+        self.load_config_btn = QPushButton("Load configuration")
+        self.load_config_btn.setToolTip(tooltip("load_config_btn"))
         self.load_config_btn.clicked.connect(self.load_configuration)
+        self._theme.bind_icon(self.load_config_btn, "folder-open-outline")
 
+        global_controls_layout.setSpacing(self._theme.tokens.space_2)
         global_controls_layout.addStretch()
         global_controls_layout.addWidget(self.save_config_btn)
         global_controls_layout.addWidget(self.load_config_btn)
         global_controls_layout.addWidget(self.action_btn)
         global_controls_layout.addWidget(self.stop_btn)
+        global_controls_layout.addWidget(self.theme_btn)
         global_controls_layout.addWidget(self.help_btn)
 
         root_layout.addLayout(global_controls_layout)
 
         global_progress_layout = QHBoxLayout()
         self.progress_label = QLabel("Iteration 0/0 (0.0%)")
+        self.progress_label.setProperty("role", "muted")
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.elapsed_label = QLabel("Time: 0.0s")
+        self.elapsed_label = QLabel("Time: 0.0 s")
+        self.elapsed_label.setProperty("role", "muted")
         global_progress_layout.addWidget(self.progress_label)
         global_progress_layout.addWidget(self.progress_bar, stretch=1)
         global_progress_layout.addWidget(self.elapsed_label)
@@ -192,137 +211,109 @@ class MainWindow(QMainWindow):
         self.config_form_layout = QFormLayout()
 
         self.netlist_edit = QLineEdit()
-        self.netlist_btn = QPushButton("Browse")
-        self.netlist_btn.setToolTip(tooltip("netlist_btn"))
-        self.netlist_btn.clicked.connect(self.on_netlist_selected)
-        self.netlist_label = QLabel("Netlist:")
+        self.netlist_btn = self._browse_button(tooltip("netlist_btn"), self.on_netlist_selected)
         h_net = QHBoxLayout()
         h_net.addWidget(self.netlist_edit)
         h_net.addWidget(self.netlist_btn)
-        self.config_form_layout.addRow(self.netlist_label, h_net)
+        self.config_form_layout.addRow("Netlist", h_net)
 
-        self.sim_type_label = QLabel("Simulation Type:")
         self.sim_type_value_label = QLabel()
-        self.sim_type_value_label.setToolTip(
-            "Primary analysis directive detected from the loaded netlist.\n"
-            "If any design goal requires an .AC S-parameter simulation and the netlist\n"
-            "does not already contain .AC, COBRA will add it automatically."
-        )
-        self.config_form_layout.addRow(self.sim_type_label, self.sim_type_value_label)
-        self.sim_type_label.setVisible(False)
-        self.sim_type_value_label.setVisible(False)
+        self.sim_type_value_label.setToolTip(tooltip("sim_type_value_label"))
+        self.config_form_layout.addRow("Simulation type", self.sim_type_value_label)
+        self.config_form_layout.setRowVisible(self.sim_type_value_label, False)
 
         # Analysis point — the node whose HB / transient spectrum is plotted and used by
         # the power, gain and isolation goals.
-        self.analysis_point_label = QLabel("Analysis Point:")
         self.analysis_point_combo = QComboBox()
         self.analysis_point_combo.setToolTip(tooltip("analysis_point_combo"))
         self.analysis_point_combo.currentIndexChanged.connect(self.on_analysis_point_changed)
-        self.config_form_layout.addRow(self.analysis_point_label, self.analysis_point_combo)
-        self.analysis_point_label.setVisible(False)
-        self.analysis_point_combo.setVisible(False)
+        self.config_form_layout.addRow("Analysis point", self.analysis_point_combo)
+        self.config_form_layout.setRowVisible(self.analysis_point_combo, False)
 
         # Simulation Parameters — populated dynamically when a netlist is loaded.
         # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
         self.sim_params_container = QWidget()
         self.sim_params_layout = QVBoxLayout(self.sim_params_container)
         self.sim_params_layout.setContentsMargins(0, 0, 0, 0)
-        self.sim_params_layout.setSpacing(6)
+        self.sim_params_layout.setSpacing(self._theme.tokens.space_2)
         self.sim_params_container.setVisible(False)
         self.config_form_layout.addRow("", self.sim_params_container)
 
         self.component_onnx_container = QWidget()
         self.component_onnx_layout = QVBoxLayout(self.component_onnx_container)
         self.component_onnx_layout.setContentsMargins(0, 0, 0, 0)
-        self.component_onnx_layout.setSpacing(6)
+        self.component_onnx_layout.setSpacing(self._theme.tokens.space_2)
         self.component_onnx_container.setVisible(False)
         self.config_form_layout.addRow("", self.component_onnx_container)
 
         # ---- Optimizer selection + dynamic per-optimizer options ----
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
-        self.config_form_layout.addRow("Optimizer:", self.optimizer_combo)
-
-        # Track position for inserting dynamic optimizer options (CobraSetting-driven)
-        self.opt_options_insert_pos = self.config_form_layout.rowCount()
-        self.opt_options_count = 0
+        self.config_form_layout.addRow("Optimizer", self.optimizer_combo)
         self.optimizer_widgets: dict[str, QWidget] = {}
         self.optimizer_combo.currentIndexChanged.connect(self.update_optimizer_options)
 
-        # ---- Simulator selection + dynamic per-simulator options ----
-        self.simulator_combo = QComboBox()
-        self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
-        self.config_form_layout.addRow("Simulator:", self.simulator_combo)
-
-        # Track position for inserting dynamic simulator options
-        self.sim_options_insert_pos = self.config_form_layout.rowCount()
-        self.sim_options_count = 0
-        self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
-        self.simulator_widgets: dict[str, QWidget] = {}
-
-        # ---- COBRA-level settings (tooltips sourced from COBRA._settings) ----
+        # ---- Run budget (tooltips sourced from COBRA._settings) ----
+        # Placed after the optimizer; its dynamic option rows are inserted between.
         _cobra_tips = {s.name: s.description for s in getattr(COBRA, "_settings", [])}
         self.max_iter_spin = QSpinBox()
         self.max_iter_spin.setRange(1, 99999)
         self.max_iter_spin.setValue(500)
         self.max_iter_spin.setToolTip(_cobra_tips.get("max_iterations", ""))
-        self.config_form_layout.addRow("Max Iterations:", self.max_iter_spin)
+        self.config_form_layout.addRow("Max iterations", self.max_iter_spin)
 
         self.parallel_trials_spin = QSpinBox()
         self.parallel_trials_spin.setRange(1, 4096)
         self.parallel_trials_spin.setValue(1)
         self.parallel_trials_spin.setToolTip(_cobra_tips.get("parallel_trials", ""))
-        self.config_form_layout.addRow("Parallel Trials:", self.parallel_trials_spin)
+        self.config_form_layout.addRow("Parallel trials", self.parallel_trials_spin)
 
-        #### OPTIONAL - Fine-tuning with palace ####
-        self.finetune_cb = QCheckBox("Perform finetuning")
+        # ---- Simulator selection + dynamic per-simulator options ----
+        self.simulator_combo = QComboBox()
+        self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
+        self.config_form_layout.addRow("Simulator", self.simulator_combo)
+        self.simulator_widgets: dict[str, QWidget] = {}
+        self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
+
+        # ---- Optional EM fine-tuning with Palace ----
+        self.finetune_cb = QCheckBox("Perform fine-tuning")
         self.finetune_cb.setToolTip(tooltip("finetune_cb"))
         self.config_form_layout.addRow("", self.finetune_cb)
 
-        self.palace_label = QLabel("Palace Command:")
         self.palace_edit = QLineEdit("palace")
         self.palace_edit.setToolTip(_cobra_tips.get("palace_fine_tuning_command", ""))
-        self.config_form_layout.addRow(self.palace_label, self.palace_edit)
+        self.config_form_layout.addRow("Palace command", self.palace_edit)
 
-        self.palace_procs_label = QLabel("Palace Processes:")
         self.palace_procs_spin = QSpinBox()
         self.palace_procs_spin.setRange(1, 4096)
         self.palace_procs_spin.setValue(DEFAULT_PALACE_PROCESSES)
         self.palace_procs_spin.setToolTip(_cobra_tips.get("palace_fine_tuning_processes", ""))
-        self.config_form_layout.addRow(self.palace_procs_label, self.palace_procs_spin)
+        self.config_form_layout.addRow("Palace processes", self.palace_procs_spin)
 
-        self.ft_iter_label = QLabel("Finetuning Iterations:")
         self.ft_iter_spin = QSpinBox()
         self.ft_iter_spin.setRange(1, 100)
         self.ft_iter_spin.setValue(3)
         self.ft_iter_spin.setToolTip(_cobra_tips.get("fine_tuning_iterations", ""))
-        self.config_form_layout.addRow(self.ft_iter_label, self.ft_iter_spin)
+        self.config_form_layout.addRow("Fine-tuning iterations", self.ft_iter_spin)
 
-        self.ft_optimizer_label = QLabel("Finetuning Optimizer:")
         self.ft_optimizer_combo = QComboBox()
         self.ft_optimizer_combo.addItem("Reuse surrogate optimizer", "reuse")
         self.ft_optimizer_combo.addItem("Gradient descent", "gradient_descent")
         self.ft_optimizer_combo.setToolTip(tooltip("ft_optimizer_combo"))
-        self.config_form_layout.addRow(self.ft_optimizer_label, self.ft_optimizer_combo)
+        self.config_form_layout.addRow("Fine-tuning optimizer", self.ft_optimizer_combo)
+        self._finetune_fields = (
+            self.palace_edit, self.palace_procs_spin, self.ft_iter_spin, self.ft_optimizer_combo
+        )
 
         self.component_geometry_container = QWidget()
         self.component_geometry_layout = QVBoxLayout(self.component_geometry_container)
         self.component_geometry_layout.setContentsMargins(0, 0, 0, 0)
-        self.component_geometry_layout.setSpacing(6)
+        self.component_geometry_layout.setSpacing(self._theme.tokens.space_2)
         self.component_geometry_container.setVisible(False)
         self.component_geometry_selectors: dict[str, GeometrySelectorWidget] = {}
 
-        # Disable fine-tuning fields by default
-        self.palace_label.setVisible(False)
-        self.palace_edit.setVisible(False)
-        self.palace_procs_label.setVisible(False)
-        self.palace_procs_spin.setVisible(False)
-        self.ft_iter_label.setVisible(False)
-        self.ft_iter_spin.setVisible(False)
-        self.ft_optimizer_label.setVisible(False)
-        self.ft_optimizer_combo.setVisible(False)
-
-        # If fine-tuning is toggled, show palace command and per-component geometry selectors
+        # Fine-tuning fields and per-component geometry selectors follow the checkbox.
+        self.on_finetune_toggled(False)
         self.finetune_cb.toggled.connect(self.on_finetune_toggled)
 
         # Populate initial optimizer options
@@ -342,10 +333,10 @@ class MainWindow(QMainWindow):
         self.config_scroll_area.setWidget(self.config_scroll_widget)
 
         # 2. Optimization Parameters
-        param_group = QGroupBox("Optimization Parameters")
+        param_group = QGroupBox("Optimization parameters")
         param_layout = QVBoxLayout(param_group)
         self.param_table = QTableWidget(0, 7)
-        self.param_table.setHorizontalHeaderLabels(["Name", "Type", "Min", "Current", "Max", "Unit", "Linked To"])
+        self.param_table.setHorizontalHeaderLabels(["Name", "Type", "Min", "Current", "Max", "Unit", "Linked to"])
         self.param_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.param_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.param_table.customContextMenuRequested.connect(self.param_context_menu)
@@ -353,23 +344,25 @@ class MainWindow(QMainWindow):
         param_layout.addWidget(self.param_table)
 
         h_param_btns = QHBoxLayout()
-        add_net_btn = QPushButton("Add from Netlist")
+        add_net_btn = QPushButton("Add from netlist")
         add_net_btn.setToolTip(tooltip("add_net_btn"))
         add_net_btn.clicked.connect(self.add_netlist_param)
+        self._theme.bind_icon(add_net_btn, "plus")
         h_param_btns.addWidget(add_net_btn)
         param_layout.addLayout(h_param_btns)
 
         # 3. Design Goals
-        goal_group = QGroupBox("Design Goals")
+        goal_group = QGroupBox("Design goals")
         goal_layout = QVBoxLayout(goal_group)
         self.goal_list = QListWidget()
         self.goal_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.goal_list.customContextMenuRequested.connect(self.goal_context_menu)
         self.goal_list.doubleClicked.connect(lambda idx: self.edit_goal(self.goal_list.item(idx.row())))
         goal_layout.addWidget(self.goal_list)
-        add_goal_btn = QPushButton("Add Goal")
+        add_goal_btn = QPushButton("Add goal")
         add_goal_btn.setToolTip(tooltip("add_goal_btn"))
         add_goal_btn.clicked.connect(self.add_design_goal)
+        self._theme.bind_icon(add_goal_btn, "plus")
         goal_layout.addWidget(add_goal_btn)
 
         config_layout.addWidget(self.config_scroll_area, stretch=1)
@@ -378,7 +371,7 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(param_group, stretch=1)
+        right_layout.addWidget(param_group, stretch=2)
         right_layout.addWidget(goal_group, stretch=1)
 
         # Left panel: Configuration
@@ -395,7 +388,7 @@ class MainWindow(QMainWindow):
         # 1. Plots Area (Horizontal split)
         plot_controls = QHBoxLayout()
         self.plot_view_combo = QComboBox()
-        self.plot_view_combo.addItem("S-Parameters", "sparam")
+        self.plot_view_combo.addItem("S-parameters", "sparam")
         self.plot_view_combo.setToolTip(tooltip("plot_view_combo"))
         self.plot_view_combo.currentIndexChanged.connect(self.on_plot_view_changed)
 
@@ -412,15 +405,17 @@ class MainWindow(QMainWindow):
         # The lambda drops the index Qt emits; the slot takes no arguments.
         self.spectrum_input_port_combo.currentIndexChanged.connect(lambda: self.update_spectrum_plot())  # noqa: PLW0108
 
-        self.show_goals_cb = QCheckBox("Show Goals")
+        self.show_goals_cb = QCheckBox("Show goals")
         self.show_goals_cb.setChecked(True)
+        self.show_goals_cb.setToolTip(tooltip("show_goals_cb"))
         self.show_goals_cb.stateChanged.connect(self.refresh_overlays)
 
-        self.zoom_btn = QPushButton("Zoom to Goal Frequency Range")
+        self.zoom_btn = QPushButton("Zoom to goal frequency range")
         self.zoom_btn.setToolTip(tooltip("zoom_btn"))
         self.zoom_btn.clicked.connect(self.zoom_to_range)
+        self._theme.bind_icon(self.zoom_btn, "magnify-scan")
 
-        plot_controls.addWidget(QLabel("Plot:"))
+        plot_controls.addWidget(QLabel("Plot"))
         plot_controls.addWidget(self.plot_view_combo)
         plot_controls.addWidget(self.spectrum_quantity_combo)
         plot_controls.addWidget(self.spectrum_input_port_combo)
@@ -433,18 +428,16 @@ class MainWindow(QMainWindow):
         plots_layout = QHBoxLayout()
 
         # S-Param Plot
-        self.s_param_plot = pg.PlotWidget(title="S-Parameters (dB)")
+        self.s_param_plot = pg.PlotWidget(title="S-parameters (dB)")
         self.s_param_plot.addLegend()
         self.s_param_plot.setLabel("left", "Magnitude", units="dB")
         self.s_param_plot.setLabel("bottom", "Frequency", units="Hz")
-        self.s_param_plot.setBackground("w")
 
         # Spectrum Plot (HB or transient) — shares the left slot with the S-parameter plot
         self.spectrum_plot = pg.PlotWidget(title="Spectrum")
         self.spectrum_plot.addLegend()
         self.spectrum_plot.setLabel("left", "Power", units="dBm")
         self.spectrum_plot.setLabel("bottom", "Frequency", units="Hz")
-        self.spectrum_plot.setBackground("w")
         # PlotWidget.scene() is declared as QGraphicsScene by Qt, but pyqtgraph
         # returns its own GraphicsScene, which provides the mouse-click signal.
         spectrum_scene = cast("GraphicsScene", self.spectrum_plot.scene())
@@ -456,15 +449,11 @@ class MainWindow(QMainWindow):
         plots_layout.addWidget(self.left_plot_stack)
 
         # Loss Plot
-        self.loss_plot = pg.PlotWidget(title="Goal Losses")
+        self.loss_plot = pg.PlotWidget(title="Goal losses")
         self.loss_plot.addLegend()
         self.loss_plot.setLabel("left", "Loss")
-        self.loss_plot.setBackground("w")
         plots_layout.addWidget(self.loss_plot)
-
-        self._style_plot_for_light_background(self.s_param_plot)
-        self._style_plot_for_light_background(self.spectrum_plot)
-        self._style_plot_for_light_background(self.loss_plot)
+        self._plots = (self.s_param_plot, self.spectrum_plot, self.loss_plot)
 
         viz_layout.addLayout(plots_layout, stretch=2)
 
@@ -472,19 +461,19 @@ class MainWindow(QMainWindow):
         tables_layout = QHBoxLayout()
 
         # Current Parameter Table (read-only runtime values)
-        current_params_group = QGroupBox("Current Parameters")
+        current_params_group = QGroupBox("Current parameters")
         current_params_layout = QVBoxLayout(current_params_group)
         self.current_param_table = QTableWidget(0, 2)
-        self.current_param_table.setHorizontalHeaderLabels(["Name", "Current Value"])
+        self.current_param_table.setHorizontalHeaderLabels(["Name", "Current value"])
         self.current_param_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         current_params_layout.addWidget(self.current_param_table)
         tables_layout.addWidget(current_params_group)
 
         # Goal Status Table (Current Goal Metrics)
-        goal_group_viz = QGroupBox("Goal Status")
+        goal_group_viz = QGroupBox("Goal status")
         goal_viz_layout = QVBoxLayout(goal_group_viz)
         self.goal_table = QTableWidget(0, 3)
-        self.goal_table.setHorizontalHeaderLabels(["Goal Param", "Target", "Current [Min, Max] (Penalty)"])
+        self.goal_table.setHorizontalHeaderLabels(["Goal", "Target", "Current [min, max] (penalty)"])
         self.goal_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         goal_viz_layout.addWidget(self.goal_table)
         tables_layout.addWidget(goal_group_viz)
@@ -520,33 +509,65 @@ class MainWindow(QMainWindow):
             lambda: setattr(self, "_simulator_cls", self.simulator_combo.currentData() or XyceSimulator)
         )
 
-        apply_theme(self)
         self._set_action_button_state("start")
+        self._set_progress_state("running")
+        self._on_theme_changed(self._theme.tokens)
         self.update_simulator_options()
         self._update_plot_view_availability()
         self.set_active_panel("config")
 
-    def _refresh_widget_style(self, widget: QWidget):
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-        widget.update()
+    # ------------------------------------------------------------------
+    # Appearance
+    # ------------------------------------------------------------------
+
+    def _quiet_button(self, icon_name: str, name: str, tip: str, slot) -> QPushButton:
+        """An icon-only tertiary button; *name* doubles as the accessible name."""
+        button = QPushButton()
+        button.setProperty("flat", True)
+        button.setFixedSize(self._theme.tokens.control_h_lg, self._theme.tokens.control_h_lg)
+        button.setAccessibleName(name)
+        button.setToolTip(tip)
+        button.clicked.connect(slot)
+        self._theme.bind_icon(button, icon_name, tertiary=True, size=24)
+        return button
+
+    def _browse_button(self, tip: str, slot) -> QPushButton:
+        button = QPushButton("Browse")
+        button.setToolTip(tip)
+        button.clicked.connect(slot)
+        self._theme.bind_icon(button, "folder-open-outline")
+        return button
+
+    def on_theme_toggle_clicked(self) -> None:
+        self._theme.cycle_mode()
+
+    def _on_theme_changed(self, tokens: ThemeTokens) -> None:
+        for plot in self._plots:
+            style_plot(plot, tokens)
+        self.theme_btn.setToolTip(tooltip("theme_btn").format(mode=self._theme.mode, theme=tokens.name))
+        self.action_btn.setIcon(icon(self._action_icon_name, tokens, on_fill=True))
+        self.action_btn.setIconSize(self.stop_btn.iconSize())
+        # Series colours are read from the tokens when the plots are redrawn.
+        self.draw_overlays()
+        self.update_spectrum_plot()
 
     def _set_tab_state(self, button: QPushButton, active: bool):
         button.setProperty("tabActive", active)
         button.setEnabled(not active)
-        self._refresh_widget_style(button)
+        refresh_style(button)
 
     def _set_action_button_state(self, state: str, enabled: bool = True):
-        label_map = {
-            "start": "START OPTIMIZATION",
-            "pause": "PAUSE",
-            "resume": "RESUME",
-            "stopping": "STOPPING...",
-        }
-        self.action_btn.setText(label_map.get(state, state))
+        label, self._action_icon_name = _ACTION_STATES[state]
+        self.action_btn.setText(label)
+        self.action_btn.setIcon(icon(self._action_icon_name, self._theme.tokens, on_fill=True))
         self.action_btn.setEnabled(enabled)
         self.action_btn.setProperty("actionState", state)
-        self._refresh_widget_style(self.action_btn)
+        refresh_style(self.action_btn)
+
+    def _set_progress_state(self, state: str) -> None:
+        """Colour the progress bar: ``running`` (tide), ``paused`` (ochre) or ``finished`` (moss)."""
+        self.progress_bar.setProperty("progressState", state)
+        refresh_style(self.progress_bar)
 
     def set_active_panel(self, panel: str):
         if panel == "viz":
@@ -584,24 +605,30 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(iteration)
         self.progress_label.setText(f"Iteration {iteration}/{max_iterations} ({percentage:.1f}%)")
 
+    @staticmethod
+    def _read_only_item(text: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(text)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+
     def _add_current_param_row(self, name, value):
         display_val = f"{round(float(value), 4)}" if isinstance(value, (float, np.floating)) else str(value)
-
         row = self.current_param_table.rowCount()
         self.current_param_table.insertRow(row)
-        name_item = QTableWidgetItem(name)
-        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.current_param_table.setItem(row, 0, name_item)
-        val_item = QTableWidgetItem(display_val)
-        val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.current_param_table.setItem(row, 1, val_item)
+        self.current_param_table.setItem(row, 0, self._read_only_item(name))
+        self.current_param_table.setItem(row, 1, self._read_only_item(display_val))
 
-    def _style_plot_for_light_background(self, plot_widget: pg.PlotWidget):
-        axis_pen = pg.mkPen("k")
-        for axis_name in ("left", "bottom", "top", "right"):
-            axis = plot_widget.getAxis(axis_name)
-            axis.setPen(axis_pen)
-            axis.setTextPen(axis_pen)
+    def _add_current_param_section(self, title: str) -> None:
+        """A non-selectable heading row that groups the parameters below it."""
+        tokens = self._theme.tokens
+        row = self.current_param_table.rowCount()
+        self.current_param_table.insertRow(row)
+        for column, text in enumerate((title, "")):
+            item = QTableWidgetItem(text)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setBackground(QColor(tokens.surface_alt))
+            item.setForeground(QColor(tokens.text_muted))
+            self.current_param_table.setItem(row, column, item)
 
     def _update_finetuning_display(self, iteration: int, total_iterations: int):
         total_iterations = max(1, int(total_iterations))
@@ -638,7 +665,7 @@ class MainWindow(QMainWindow):
         elapsed_ms = self._elapsed_before_pause
         if self._run_elapsed_display_timer.isActive():
             elapsed_ms += self._run_elapsed_timer.elapsed()
-        self.elapsed_label.setText(f"Time: {elapsed_ms / 1000.0:.1f}s")
+        self.elapsed_label.setText(f"Time: {elapsed_ms / 1000.0:.1f} s")
 
     def _goal_sparam_specs(self) -> list[tuple[str, int, int]]:
         # Parse goal parameter names like S11 or S21_dB into (label, row_idx, col_idx).
@@ -677,12 +704,12 @@ class MainWindow(QMainWindow):
         """Offer one plot view per analysis the run produces; enable the switch when there are several."""
         views: list[tuple[str, str]] = []
         if SimulationType.AC in self._required_sim_types:
-            views.append(("S-Parameters", "sparam"))
+            views.append(("S-parameters", "sparam"))
         for key, (sim_type, title) in _SPECTRUM_VIEWS.items():
             if sim_type in self._required_sim_types and self._probe_nodes:
                 views.append((title, key))
         if not views:
-            views.append(("S-Parameters", "sparam"))
+            views.append(("S-parameters", "sparam"))
 
         previous = self.plot_view_combo.currentData()
         self.plot_view_combo.blockSignals(True)
@@ -790,10 +817,11 @@ class MainWindow(QMainWindow):
         baseline = max(float(np.min(values)), v_max - 150.0)
         span = max(v_max - baseline, 1.0)
 
+        tokens = self._theme.tokens
         fundamental_mask = np.array([hb_spectrum.is_fundamental(label) for label in labels], dtype=bool)
         for mask, color, name in (
-            (~fundamental_mask, (65, 105, 225), "Harmonics / mixing products"),
-            (fundamental_mask, (220, 20, 60), "Fundamental"),
+            (~fundamental_mask, tokens.tide, "Harmonics / mixing products"),
+            (fundamental_mask, tokens.ember, "Fundamental"),
         ):
             if not mask.any():
                 continue
@@ -845,13 +873,14 @@ class MainWindow(QMainWindow):
             number += 1
 
         freq, value, label = freqs[idx], values[idx], labels[idx]
+        text_color = self._theme.tokens.text
         marker = pg.ScatterPlotItem(
-            [freq], [value], symbol="o", size=10, pen=pg.mkPen("k"), brush=None
+            [freq], [value], symbol="o", size=10, pen=pg.mkPen(text_color), brush=None
         )
         text = pg.TextItem(
             f"M{number}: {freq/1e9:.3f} GHz  {value:.2f} {unit}"
             + (f"  [{label}]" if label else ""),
-            color="k",
+            color=text_color,
             anchor=(0, 1),
         )
         text.setPos(freq, value)
@@ -862,118 +891,67 @@ class MainWindow(QMainWindow):
     def refresh_overlays(self, _state):
         self.draw_overlays()
 
+    def _goal_band_hz(self, goal: DesignGoal) -> tuple[float, float] | None:
+        """The goal's frequency band in Hz, or ``None`` when it has none or it is malformed."""
+        try:
+            low, high = DesignGoal.str_to_frequency_range(goal.frequency_range)
+        except ValueError:
+            return None
+        if low is None or high is None:
+            return None
+        return low, high
+
     def zoom_to_range(self):
-        # Range = min and max frequency from the goals if specified
-        min_f = float("inf")
-        max_f = float("-inf")
-        found_any = False
-
-        for goal in self.goals:
-            try:
-                if not goal.frequency_range:
-                    continue
-
-                freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
-                if "-" in freq_str:
-                    parts = freq_str.split("-")
-                    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
-                        f_start = float(parts[0])
-                        f_end = float(parts[1])
-                        # Convert to Hz
-                        f_start_hz = f_start * 1e9
-                        f_end_hz = f_end * 1e9
-
-                        min_f = min(min_f, f_start_hz)
-                        max_f = max(max_f, f_end_hz)
-                        found_any = True
-            except ValueError:
-                # Goal frequency range is not a numeric "a-b" pair; skip it.
-                continue
-
-        if found_any:
-            # Add some padding (e.g. 5%)
-            span = max_f - min_f
-            if span > 0:
-                self.s_param_plot.setXRange(min_f - span*0.05, max_f + span*0.05)
-            else:
-                self.s_param_plot.setXRange(min_f * 0.95, max_f * 1.05)
+        bands = [band for goal in self.goals if (band := self._goal_band_hz(goal))]
+        if not bands:
+            self.statusBar().showMessage("No goal has a frequency range to zoom to.", 5000)
+            return
+        min_f = min(low for low, _ in bands)
+        max_f = max(high for _, high in bands)
+        span = max_f - min_f
+        if span > 0:
+            self.s_param_plot.setXRange(min_f - span * 0.05, max_f + span * 0.05)
         else:
-            QMessageBox.information(self, "Info", "No valid frequency ranges found in goals.")
+            self.s_param_plot.setXRange(min_f * 0.95, max_f * 1.05)
 
     def draw_overlays(self):
-        # Remove previously tracked overlay items
+        """Draw each S-parameter goal's bounds on the S-parameter plot as dashed segments."""
         for item in self.overlay_items:
             try:
-                # If item is still in scene, remove it
                 if item.scene() is not None:
                     self.s_param_plot.removeItem(item)
             except RuntimeError:
-                # The underlying C++ item was already deleted; nothing to remove.
-                continue
+                continue  # the underlying C++ item was already deleted
         self.overlay_items = []
 
         if not self.show_goals_cb.isChecked():
             return
 
-        # Draw Goal Lines
+        tokens = self._theme.tokens
         for goal in self.goals:
-            try:
-                if not goal.frequency_range:
+            band = self._goal_band_hz(goal)
+            p_name = goal.parameter_name
+            if band is None or band[0] == band[1] or not (p_name.startswith("S") and "_dB" in p_name):
+                continue
+            f_start_hz, f_end_hz = band
+            # (bound, colour, label text colour, comparison, text anchor)
+            bounds = (
+                (goal.min_value, tokens.moss, tokens.moss_strong, ">", (0, 1)),
+                (goal.max_value, tokens.ember, tokens.ember_strong, "<", (0, 0)),
+            )
+            for value, color, text_color, comparison, anchor in bounds:
+                if value is None:
                     continue
-
-                freq_str = goal.frequency_range.lower().replace("ghz", "").strip()
-                if "-" not in freq_str:
-                    continue
-
-                parts = freq_str.split("-")
-                if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-                    continue
-
-                f_start = float(parts[0])
-                f_end = float(parts[1])
-                f_start_hz = f_start * 1e9
-                f_end_hz = f_end * 1e9
-
-                p_name = goal.parameter_name
-                if p_name.startswith("S") and "_dB" in p_name:
-                    if goal.min_value is not None:
-                        # Draw line segment
-                        min_y = goal.min_value
-                        line = pg.PlotCurveItem(
-                            x=[f_start_hz, f_end_hz],
-                            y=[min_y, min_y],
-                            pen=pg.mkPen("g", width=3, style=Qt.PenStyle.SolidLine)
-                        )
-                        self.s_param_plot.addItem(line)
-                        self.overlay_items.append(line)
-
-                        # Add label for min
-                        text = pg.TextItem(f"{p_name} > {goal.min_value}", color="g", anchor=(0, 1))
-                        text.setPos(f_start_hz, min_y)
-                        self.s_param_plot.addItem(text)
-                        self.overlay_items.append(text)
-
-                    if goal.max_value is not None:
-                        # Draw line segment
-                        max_y = goal.max_value
-                        line = pg.PlotCurveItem(
-                            x=[f_start_hz, f_end_hz],
-                            y=[max_y, max_y],
-                            pen=pg.mkPen("r", width=3, style=Qt.PenStyle.SolidLine)
-                        )
-                        self.s_param_plot.addItem(line)
-                        self.overlay_items.append(line)
-
-                        # Add label for max
-                        text = pg.TextItem(f"{p_name} < {goal.max_value}", color="r", anchor=(0, 0))
-                        text.setPos(f_start_hz, max_y)
-                        self.s_param_plot.addItem(text)
-                        self.overlay_items.append(text)
-
-
-            except Exception as e:  # noqa: BLE001 - one bad goal must not stop the overlay redraw
-                logger.warning("Could not draw the overlay for a design goal: %s", e)
-
+                line = pg.PlotCurveItem(
+                    x=[f_start_hz, f_end_hz],
+                    y=[value, value],
+                    pen=pg.mkPen(color, width=3, style=Qt.PenStyle.DashLine),
+                )
+                text = pg.TextItem(f"{p_name} {comparison} {value}", color=text_color, anchor=anchor)
+                text.setPos(f_start_hz, value)
+                for item in (line, text):
+                    self.s_param_plot.addItem(item)
+                    self.overlay_items.append(item)
 
     def _form_row_of(self, widget: QWidget) -> int:
         """Row of *widget* in the configuration form, or -1 when it is not in it.
@@ -984,125 +962,57 @@ class MainWindow(QMainWindow):
         row, _role = cast("tuple[int, int]", self.config_form_layout.getWidgetPosition(widget))
         return row
 
-    def update_optimizer_options(self):
-        """Rebuild per-optimizer settings rows using the selected optimizer's _settings list."""
-        rows = sorted(
-            {
-                row
-                for widget in self.optimizer_widgets.values()
-                if (row := self._form_row_of(widget)) >= 0
-            },
-            reverse=True,
-        )
+    @staticmethod
+    def _setting_label(name: str) -> str:
+        return name.replace("_", " ").capitalize()
+
+    def _rebuild_backend_options(self, combo: QComboBox, widgets: dict[str, QWidget]) -> None:
+        """Replace the settings rows under *combo* with those of its selected class.
+
+        Classes that declare a ``_settings`` list of ``CobraSetting`` descriptors get
+        typed widgets with tooltips; others fall back to their ``__init__`` signature.
+        """
+        rows = sorted({row for w in widgets.values() if (row := self._form_row_of(w)) >= 0}, reverse=True)
         for row in rows:
             result = self.config_form_layout.takeRow(row)
-            if result.labelItem:
-                w = result.labelItem.widget()
-                if w:
-                    w.deleteLater()
-            if result.fieldItem:
-                w = result.fieldItem.widget()
-                if w:
-                    w.deleteLater()
+            for item in (result.labelItem, result.fieldItem):
+                widget = item.widget() if item else None
+                if widget:
+                    widget.deleteLater()
+        widgets.clear()
 
-        self.opt_options_count = 0
-        self.optimizer_widgets.clear()
-
-        opt_cls = self.optimizer_combo.currentData()
-        if not opt_cls:
+        backend_cls = combo.currentData()
+        if not backend_cls:
             return
+        idx = self._form_row_of(combo) + 1
 
-        idx = self._form_row_of(self.optimizer_combo) + 1
-        count = 0
-
-        cobra_settings = getattr(opt_cls, "_settings", None)
+        cobra_settings = getattr(backend_cls, "_settings", None)
         if cobra_settings:
             for setting in cobra_settings:
                 widget = self._widget_for_setting(setting.dtype, setting.default, setting.choices)
                 widget.setToolTip(setting.description)
-                label_text = setting.name.replace("_", " ").title()
-                self.config_form_layout.insertRow(idx, label_text + ":", widget)
-                self.optimizer_widgets[setting.name] = widget
+                self.config_form_layout.insertRow(idx, self._setting_label(setting.name), widget)
+                widgets[setting.name] = widget
                 idx += 1
-                count += 1
-        else:
-            try:
-                sig = inspect.signature(opt_cls.__init__)
-            except ValueError:
-                return
-            for name, param in sig.parameters.items():
-                if name in ("self", "args", "kwargs"):
-                    continue
-                widget = self._widget_for_setting(param.annotation, param.default)
-                label_text = name.replace("_", " ").title()
-                self.config_form_layout.insertRow(idx, label_text + ":", widget)
-                self.optimizer_widgets[name] = widget
-                idx += 1
-                count += 1
+            return
 
-        self.opt_options_count = count
+        try:
+            sig = inspect.signature(backend_cls.__init__)
+        except ValueError:
+            return
+        for name, param in sig.parameters.items():
+            if name in ("self", "args", "kwargs"):
+                continue
+            widget = self._widget_for_setting(param.annotation, param.default)
+            self.config_form_layout.insertRow(idx, self._setting_label(name), widget)
+            widgets[name] = widget
+            idx += 1
+
+    def update_optimizer_options(self):
+        self._rebuild_backend_options(self.optimizer_combo, self.optimizer_widgets)
 
     def update_simulator_options(self):
-        # Clear existing dynamic options using takeRow + deleteLater
-        rows = sorted(
-            {
-                row
-                for widget in self.simulator_widgets.values()
-                if (row := self._form_row_of(widget)) >= 0
-            },
-            reverse=True,
-        )
-        for row in rows:
-            result = self.config_form_layout.takeRow(row)
-            if result.labelItem:
-                w = result.labelItem.widget()
-                if w:
-                    w.deleteLater()
-            if result.fieldItem:
-                w = result.fieldItem.widget()
-                if w:
-                    w.deleteLater()
-
-        self.sim_options_count = 0
-        self.simulator_widgets.clear()
-
-        # Get selected simulator class
-        sim_cls = self.simulator_combo.currentData()
-        if not sim_cls:
-            return
-
-        idx = self._form_row_of(self.simulator_combo) + 1
-        count = 0
-
-        # Prefer _settings list (CobraSetting descriptors) for rich metadata.
-        # Fall back to inspect.signature for classes that don't declare _settings.
-        cobra_settings = getattr(sim_cls, "_settings", None)
-
-        if cobra_settings:
-            for setting in cobra_settings:
-                widget = self._widget_for_setting(setting.dtype, setting.default, setting.choices)
-                widget.setToolTip(setting.description)
-                label_text = setting.name.replace("_", " ").title()
-                self.config_form_layout.insertRow(idx, label_text + ":", widget)
-                self.simulator_widgets[setting.name] = widget
-                idx += 1
-                count += 1
-        else:
-            try:
-                sig = inspect.signature(sim_cls.__init__)
-            except ValueError:
-                return
-            for name, param in sig.parameters.items():
-                if name in ("self", "args", "kwargs"):
-                    continue
-                widget = self._widget_for_setting(param.annotation, param.default)
-                label_text = name.replace("_", " ").title()
-                self.config_form_layout.insertRow(idx, label_text + ":", widget)
-                self.simulator_widgets[name] = widget
-                idx += 1
-                count += 1
-
-        self.sim_options_count = count
+        self._rebuild_backend_options(self.simulator_combo, self.simulator_widgets)
 
     @staticmethod
     def _widget_for_setting(dtype, default, choices=None) -> "QWidget":
@@ -1138,18 +1048,12 @@ class MainWindow(QMainWindow):
         return widget
 
     def on_finetune_toggled(self, checked):
-        self.palace_label.setVisible(checked)
-        self.palace_edit.setVisible(checked)
-        self.palace_procs_label.setVisible(checked)
-        self.palace_procs_spin.setVisible(checked)
-        self.ft_iter_label.setVisible(checked)
-        self.ft_iter_spin.setVisible(checked)
-        self.ft_optimizer_label.setVisible(checked)
-        self.ft_optimizer_combo.setVisible(checked)
+        for field in self._finetune_fields:
+            self.config_form_layout.setRowVisible(field, checked)
         self._update_geometry_selectors_visibility()
 
     def browse_file(self, line_edit, name_filter):
-        fname, _ = QFileDialog.getOpenFileName(self, "Select File", "", name_filter)
+        fname, _ = QFileDialog.getOpenFileName(self, "Select file", "", name_filter)
         if fname:
             line_edit.setText(fname)
 
@@ -1410,7 +1314,7 @@ class MainWindow(QMainWindow):
     def save_configuration(self) -> None:
         suggested = self._last_config_path or str(Path.cwd() / "cobra_config.json")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save COBRA Configuration", suggested, "JSON Files (*.json)"
+            self, "Save COBRA configuration", suggested, "JSON files (*.json)"
         )
         if not path:
             return
@@ -1419,12 +1323,12 @@ class MainWindow(QMainWindow):
             self._last_config_path = str(saved)
             self.statusBar().showMessage(f"Configuration saved to {saved}", 5000)
         except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
-            QMessageBox.critical(self, "Save Configuration", str(exc))
+            QMessageBox.critical(self, "Save configuration", str(exc))
 
     def load_configuration(self) -> None:
         start = self._last_config_path or str(Path.cwd())
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load COBRA Configuration", start, "JSON Files (*.json)"
+            self, "Load COBRA configuration", start, "JSON files (*.json)"
         )
         if not path:
             return
@@ -1434,11 +1338,11 @@ class MainWindow(QMainWindow):
             self._last_config_path = str(Path(path).resolve())
             self.statusBar().showMessage(f"Configuration loaded from {path}", 5000)
         except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
-            QMessageBox.critical(self, "Load Configuration", str(exc))
+            QMessageBox.critical(self, "Load configuration", str(exc))
 
     def on_netlist_selected(self):
         """Handle netlist selection with automatic parsing."""
-        fname, _ = QFileDialog.getOpenFileName(self, "Select Netlist", "", "Netlist Files (*.cir *.sp)")
+        fname, _ = QFileDialog.getOpenFileName(self, "Select netlist", "", "Netlist files (*.cir *.sp)")
         if fname:
             self.netlist_edit.setText(fname)
             self.opt_params.clear()
@@ -1464,8 +1368,7 @@ class MainWindow(QMainWindow):
             self._rebuild_design_parameters()
 
             self.sim_type_value_label.setText(sim_type.display_name)
-            self.sim_type_label.setVisible(True)
-            self.sim_type_value_label.setVisible(True)
+            self.config_form_layout.setRowVisible(self.sim_type_value_label, True)
 
             # Populate editable simulation-parameter fields for required sim types
             self._refresh_sim_params_for_goals()
@@ -1479,11 +1382,10 @@ class MainWindow(QMainWindow):
                 self.clear_component_onnx_selectors()
                 self.statusBar().showMessage("No components found in netlist.")
         except Exception as e:  # noqa: BLE001 - GUI boundary: any parse failure is reported in a dialog
-            QMessageBox.warning(self, "Netlist Parsing Error", f"Failed to parse netlist:\n{e!s}")
+            QMessageBox.warning(self, "Netlist parsing error", f"Failed to parse netlist:\n{e!s}")
             self.clear_component_onnx_selectors()
             self._netlist_sim_type = None
-            self.sim_type_label.setVisible(False)
-            self.sim_type_value_label.setVisible(False)
+            self.config_form_layout.setRowVisible(self.sim_type_value_label, False)
             self._populate_sim_param_widgets(set())
 
     @property
@@ -1569,8 +1471,7 @@ class MainWindow(QMainWindow):
         self._populate_sim_param_widgets(required)
 
         show_point = bool(required & _LARGE_SIGNAL_TYPES) and bool(self._probe_nodes)
-        self.analysis_point_label.setVisible(show_point)
-        self.analysis_point_combo.setVisible(show_point)
+        self.config_form_layout.setRowVisible(self.analysis_point_combo, show_point)
         self._update_plot_view_availability()
 
     def _populate_sim_param_widgets(self, sim_types: "set[SimulationType]") -> None:
@@ -1618,7 +1519,7 @@ class MainWindow(QMainWindow):
                     break
 
             # --- Main directive group box ---
-            group = QGroupBox(f"{sim_type.value} Parameters")
+            group = QGroupBox(f"{sim_type.value} parameters")
             form = QFormLayout(group)
             for name in visible_params:
                 value = parsed_values.get(name, defaults.get(name, ""))
@@ -1626,8 +1527,7 @@ class MainWindow(QMainWindow):
                 edit = QLineEdit(value)
                 if name in descriptions:
                     edit.setToolTip(descriptions[name])
-                label = name.replace("_", " ").title()
-                form.addRow(f"{label}:", edit)
+                form.addRow(self._setting_label(name), edit)
                 self._sim_param_edits[key] = edit
             self.sim_params_layout.addWidget(group)
 
@@ -1641,8 +1541,7 @@ class MainWindow(QMainWindow):
                     edit = QLineEdit(opt_value)
                     if opt_name.lower() in opt_descriptions:
                         edit.setToolTip(opt_descriptions[opt_name.lower()])
-                    label = opt_name.replace("_", " ").title()
-                    opt_form.addRow(f"{label}:", edit)
+                    opt_form.addRow(self._setting_label(opt_name), edit)
                     self._sim_param_edits[key] = edit
                 self.sim_params_layout.addWidget(opt_group)
 
@@ -1650,13 +1549,7 @@ class MainWindow(QMainWindow):
 
     def update_component_onnx_selectors(self, components: dict, netlist_path: str):
         """Create ONNX/Touchstone selectors for each detected component."""
-        # Clear existing component selectors if any
         self.clear_component_onnx_selectors()
-
-        # Create component ONNX selector widgets
-        self.component_onnx_edits = {}
-        self.component_onnx_btns = {}
-        self.component_hf_btns = {}
         self.component_onnx_container.setVisible(bool(components))
         if not components:
             return
@@ -1677,39 +1570,35 @@ class MainWindow(QMainWindow):
                 # Always populate the GUI, even if the file isn't found locally yet
                 comp_edit.setText(tstone_file)
 
-            comp_btn = QPushButton("Browse")
-            comp_btn.clicked.connect(
-                lambda _checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone Files (*.onnx *.s*p *.snp)")
+            comp_btn = self._browse_button(
+                tooltip("onnx_btn"),
+                lambda _checked, edit=comp_edit: self.browse_file(edit, "ONNX/Touchstone files (*.onnx *.s*p *.snp)"),
             )
-            comp_hf_btn = QPushButton("Select from HuggingFace")
-            comp_hf_btn.setToolTip("Browse and download ORCA surrogate models from HuggingFace")
+            comp_hf_btn = QPushButton("Hugging Face")
+            comp_hf_btn.setToolTip(tooltip("hf_btn"))
             comp_hf_btn.clicked.connect(
                 lambda _checked, edit=comp_edit: self._open_hf_model_dialog(edit)
             )
+            self._theme.bind_icon(comp_hf_btn, "download-outline")
             comp_edit.textChanged.connect(
                 lambda text, c=comp_name: self.on_onnx_file_changed(c, text)
             )
 
-            h_layout = QHBoxLayout()
-            h_layout.addWidget(comp_edit)
-            h_layout.addWidget(comp_btn)
-            h_layout.addWidget(comp_hf_btn)
-
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(QLabel(f"{comp_name} Model:"))
-            row_layout.addLayout(h_layout)
+            row_layout.addWidget(QLabel(f"{comp_name} model"))
+            row_layout.addWidget(comp_edit, stretch=1)
+            row_layout.addWidget(comp_btn)
+            row_layout.addWidget(comp_hf_btn)
             self.component_onnx_layout.addWidget(row_widget)
             self.component_onnx_edits[comp_name] = comp_edit
-            self.component_onnx_btns[comp_name] = comp_btn
-            self.component_hf_btns[comp_name] = comp_hf_btn
 
         # Create a geometry selector for each component (shown only when fine-tuning is enabled
         # and the component uses an ONNX surrogate rather than a fixed .snp file)
         self.component_geometry_selectors = {}
         for comp_name in sorted(components.keys()):
-            selector = GeometrySelectorWidget(f"ORCA Geometry for {comp_name}", parent=self)
+            selector = GeometrySelectorWidget(f"ORCA geometry for {comp_name}", parent=self)
             selector.setVisible(False)
             self.component_geometry_selectors[comp_name] = selector
             self.component_geometry_layout.addWidget(selector)
@@ -1718,43 +1607,21 @@ class MainWindow(QMainWindow):
         self._update_geometry_selectors_visibility()
 
     def clear_component_onnx_selectors(self):
-        """Remove all component ONNX selectors from the UI."""
-        if hasattr(self, "component_onnx_edits"):
-            for edit in self.component_onnx_edits.values():
-                edit.deleteLater()
-            self.component_onnx_edits.clear()
+        """Remove all component model rows and geometry selectors from the UI."""
+        self.component_onnx_edits.clear()
+        self.component_inputs.clear()
+        while self.component_onnx_layout.count():
+            item = self.component_onnx_layout.takeAt(0)
+            widget = item.widget() if item else None
+            if widget:
+                widget.deleteLater()
+        self.component_onnx_container.setVisible(False)
 
-        if hasattr(self, "component_onnx_btns"):
-            for btn in self.component_onnx_btns.values():
-                btn.deleteLater()
-            self.component_onnx_btns.clear()
-
-        if hasattr(self, "component_hf_btns"):
-            for btn in self.component_hf_btns.values():
-                btn.deleteLater()
-            self.component_hf_btns.clear()
-
-        if hasattr(self, "component_onnx_container"):
-            self.component_onnx_container.setVisible(False)
-
-        if hasattr(self, "component_onnx_layout"):
-            while self.component_onnx_layout.count():
-                item = self.component_onnx_layout.takeAt(0)
-                widget = item.widget() if item else None
-                if widget:
-                    widget.deleteLater()
-
-        if hasattr(self, "component_inputs"):
-            self.component_inputs.clear()
-
-        # Clear geometry selectors
-        if hasattr(self, "component_geometry_selectors"):
-            for selector in self.component_geometry_selectors.values():
-                self.component_geometry_layout.removeWidget(selector)
-                selector.deleteLater()
-            self.component_geometry_selectors.clear()
-        if hasattr(self, "component_geometry_container"):
-            self.component_geometry_container.setVisible(False)
+        for selector in self.component_geometry_selectors.values():
+            self.component_geometry_layout.removeWidget(selector)
+            selector.deleteLater()
+        self.component_geometry_selectors.clear()
+        self.component_geometry_container.setVisible(False)
 
     def on_onnx_file_changed(self, comp_name: str, path: str):
         path = path.strip()
@@ -1768,9 +1635,6 @@ class MainWindow(QMainWindow):
             sess = onnxruntime.InferenceSession(path)
             all_inputs = [i.name for i in sess.get_inputs()]
             metadata = sess.get_modelmeta().custom_metadata_map
-
-            if not hasattr(self, "component_inputs"):
-                self.component_inputs = {}
 
             # Filter out 'frequency' from inputs
             filtered_inputs = [p for p in all_inputs if p.lower() != "frequency"]
@@ -1819,7 +1683,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             new_param = dlg.get_data()
             self.opt_params[row] = new_param
-            self._update_param_row(row, new_param)
+            self._set_param_row(row, new_param)
 
     def delete_param(self, row):
         if row < 0 or row >= len(self.opt_params):
@@ -1827,21 +1691,13 @@ class MainWindow(QMainWindow):
         del self.opt_params[row]
         self.param_table.removeRow(row)
 
-    def _update_param_row(self, row, param):
+    def _set_param_row(self, row: int, param: OptimizationProperty) -> None:
+        """Fill the editable columns of *row*; the current-value column is kept if present."""
         self.param_table.setItem(row, 0, QTableWidgetItem(param.name))
-
-        type_item = QTableWidgetItem(param.type.value)
-        type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.param_table.setItem(row, 1, type_item)
-
+        self.param_table.setItem(row, 1, self._read_only_item(param.type.value))
         self.param_table.setItem(row, 2, QTableWidgetItem(str(param.min_value)))
-
-        # Preserve current val if possible, otherwise N/A
         if not self.param_table.item(row, 3):
-             curr_item = QTableWidgetItem("N/A")
-             curr_item.setFlags(curr_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-             self.param_table.setItem(row, 3, curr_item)
-
+            self.param_table.setItem(row, 3, self._read_only_item("N/A"))
         self.param_table.setItem(row, 4, QTableWidgetItem(str(param.max_value)))
         self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
         self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
@@ -1849,8 +1705,8 @@ class MainWindow(QMainWindow):
     def add_netlist_param(self):
         path = self.netlist_edit.text()
         if not path:
-             QMessageBox.warning(self, "Error", "Select Netlist file first")
-             return
+            QMessageBox.warning(self, "No netlist", "Select a netlist file first")
+            return
         try:
             # We use XyceNetlistParser to identify valid targets
             # Since parser needs instance but we just want to scan, we instantiate it
@@ -1886,39 +1742,19 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", str(e))
 
     def _add_param_to_table(self, param: OptimizationProperty):
-        # Check duplicate
-        for p in self.opt_params:
-            if p.name == param.name:
-                QMessageBox.warning(self, "Duplicate", f"Parameter {p.name} already exists")
-                # Update existing?
-                return
-
+        if any(p.name == param.name for p in self.opt_params):
+            QMessageBox.warning(self, "Duplicate parameter", f"Parameter {param.name} already exists")
+            return
         self.opt_params.append(param)
         row = self.param_table.rowCount()
         self.param_table.insertRow(row)
-        self.param_table.setItem(row, 0, QTableWidgetItem(param.name))
-
-        # Type
-        type_item = QTableWidgetItem(param.type.value)
-        type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.param_table.setItem(row, 1, type_item)
-
-        self.param_table.setItem(row, 2, QTableWidgetItem(str(param.min_value)))
-
-        # Current Value (Not editable)
-        curr_item = QTableWidgetItem("N/A")
-        curr_item.setFlags(curr_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.param_table.setItem(row, 3, curr_item)
-
-        self.param_table.setItem(row, 4, QTableWidgetItem(str(param.max_value)))
-        self.param_table.setItem(row, 5, QTableWidgetItem(str(param.unit or "")))
-        self.param_table.setItem(row, 6, QTableWidgetItem(str(param.linked_to or "")))
+        self._set_param_row(row, param)
 
     def add_design_goal(self):
         if not self._available_parameters:
             QMessageBox.information(
                 self,
-                "Load a Netlist First",
+                "Load a netlist first",
                 "Please select a netlist file so that COBRA can determine the "
                 "available design parameters for your simulation type and port count.",
             )
@@ -2008,21 +1844,23 @@ class MainWindow(QMainWindow):
             self.worker.resume()
             self._resume_elapsed_clock()
             self._set_action_button_state("pause")
+            self._set_progress_state("running")
         else:
             self.worker.pause()
             self._pause_elapsed_clock()
             self._set_action_button_state("resume")
+            self._set_progress_state("paused")
 
     def start_optimization(self):
         try:
             run_configuration = self.create_run_configuration()
             configured_run = build_configured_run(run_configuration)
         except Exception as exc:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
-            QMessageBox.critical(self, "Invalid Configuration", str(exc))
+            QMessageBox.critical(self, "Invalid configuration", str(exc))
             return
 
-        # Change button to PAUSE (running state)
         self._set_action_button_state("pause")
+        self._set_progress_state("running")
         self.stop_btn.setEnabled(True)
         self._update_progress_display(0, self.max_iter_spin.value())
         self._start_elapsed_clock()
@@ -2057,7 +1895,7 @@ class MainWindow(QMainWindow):
         # Ask user for new max iterations
         new_max, ok = QInputDialog.getInt(
             self,
-            "Target Not Reached",
+            "Target not reached",
             f"Maximum iterations ({current_max}) reached without hitting the design goals.\n\nEnter a new maximum to continue, or cancel to stop:",
             value=current_max,
             minValue=current_max,
@@ -2113,44 +1951,19 @@ class MainWindow(QMainWindow):
         self.current_param_table.setRowCount(0)
 
         # Determine how to display the current parameters: Group them by component if any
-        if hasattr(self, "component_inputs") and self.component_inputs:
+        if self.component_inputs:
             all_comp_inputs = {inp for inputs in self.component_inputs.values() for inp in inputs}
             other_params = [name for name in current_values if name not in all_comp_inputs]
 
             for comp_name, inputs in sorted(self.component_inputs.items()):
-                # Add component header row
-                r = self.current_param_table.rowCount()
-                self.current_param_table.insertRow(r)
-
-                header_item = QTableWidgetItem(f"--- {comp_name} ---")
-                header_item.setFlags(Qt.ItemFlag.NoItemFlags)
-                header_item.setBackground(Qt.GlobalColor.lightGray)
-                self.current_param_table.setItem(r, 0, header_item)
-
-                empty_item = QTableWidgetItem("")
-                empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
-                empty_item.setBackground(Qt.GlobalColor.lightGray)
-                self.current_param_table.setItem(r, 1, empty_item)
-
+                self._add_current_param_section(comp_name)
                 for name in sorted(inputs):
                     if name in current_values:
                         display_name = name.split(":", 1)[1] if ":" in name else name
                         self._add_current_param_row(display_name, current_values[name])
 
             if other_params:
-                r = self.current_param_table.rowCount()
-                self.current_param_table.insertRow(r)
-
-                header_item = QTableWidgetItem("--- Netlist / Other ---")
-                header_item.setFlags(Qt.ItemFlag.NoItemFlags)
-                header_item.setBackground(Qt.GlobalColor.lightGray)
-                self.current_param_table.setItem(r, 0, header_item)
-
-                empty_item = QTableWidgetItem("")
-                empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
-                empty_item.setBackground(Qt.GlobalColor.lightGray)
-                self.current_param_table.setItem(r, 1, empty_item)
-
+                self._add_current_param_section("Netlist / other")
                 for name in sorted(other_params):
                     self._add_current_param_row(name, current_values[name])
         else:
@@ -2193,27 +2006,18 @@ class MainWindow(QMainWindow):
 
             r = self.goal_table.rowCount()
             self.goal_table.insertRow(r)
+            self.goal_table.setItem(r, 0, self._read_only_item(p_name))
+            self.goal_table.setItem(r, 1, self._read_only_item(target_str))
 
-            name_item = QTableWidgetItem(p_name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.goal_table.setItem(r, 0, name_item)
-
-            target_item = QTableWidgetItem(target_str)
-            target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.goal_table.setItem(r, 1, target_item)
-
-            val_item = QTableWidgetItem(f"{display_val} (Penalty={loss_val:.2f})")
-            val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # The penalty text carries the verdict; the tint only reinforces it.
+            violated = loss_val > 0
+            tokens = self._theme.tokens
+            val_item = self._read_only_item(
+                f"{display_val} (penalty {loss_val:.2f}, {'violated' if violated else 'met'})"
+            )
+            val_item.setBackground(QColor(tokens.ember_subtle if violated else tokens.moss_subtle))
+            val_item.setForeground(QColor(tokens.ember_strong if violated else tokens.moss_strong))
             self.goal_table.setItem(r, 2, val_item)
-
-            # Color-code the penalty cell based on loss value
-            item = self.goal_table.item(r, 2)
-            if item:
-                if loss_val > 0:
-                    item.setBackground(Qt.GlobalColor.red)
-                else:
-                    item.setBackground(Qt.GlobalColor.green)
-
 
         # 3. Update Loss Plot
         losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in current_goals]
@@ -2226,7 +2030,7 @@ class MainWindow(QMainWindow):
             self.loss_plot.clear()
             for i, hist in self.loss_history.items():
                 if hist:
-                    color = pg.intColor(i, hues=max(len(self.loss_history), 1))
+                    color = self._theme.tokens.series_color(i)
                     self.loss_plot.plot(hist, pen=pg.mkPen(color, width=2), name=f"Goal {i+1}")
 
         # 4. Update S-parameter Plot
@@ -2236,25 +2040,12 @@ class MainWindow(QMainWindow):
             sim_results = context.simulation_results
             ntwk_n = next((r.network for r in sim_results.values() if r.network is not None), None)
             requested_sparams = self._goal_sparam_specs()
-            color_map: dict[str, tuple[int, int, int]] = {
-                "S11": (220, 20, 60),
-                "S21": (65, 105, 225),
-                "S12": (46, 139, 87),
-                "S22": (255, 140, 0),
-            }
 
             if ntwk_n is not None:
                 freq = ntwk_n.f
-                for label, i, j in requested_sparams:
+                for index, (label, i, j) in enumerate(requested_sparams):
                     if i < ntwk_n.nports and j < ntwk_n.nports:
-                        fallback_qcolor = pg.intColor((i * 10 + j) % 24, hues=24)
-                        fallback_color: tuple[int, int, int] = (
-                            fallback_qcolor.red(),
-                            fallback_qcolor.green(),
-                            fallback_qcolor.blue(),
-                        )
-                        base_color = color_map.get(label, fallback_color)
-                        curr_pen = pg.mkPen(base_color, width=3)
+                        curr_pen = pg.mkPen(self._theme.tokens.series_color(index), width=3)
                         self.s_param_plot.plot(freq, ntwk_n.s_db[:, i, j], pen=curr_pen, name=label)
 
             # Redraw overlays on top
@@ -2273,21 +2064,20 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - a plotting failure must not abort the iteration update
             logger.warning("Spectrum plot update failed: %s", exc)
 
-    @Slot()
-    def on_finished(self):
+    def _end_run(self) -> None:
         self._stop_elapsed_clock()
         self._set_action_button_state("start", enabled=True)
-
         self.stop_btn.setEnabled(False)
 
-        QMessageBox.information(self, "Done", "Optimization Finished!")
+    @Slot()
+    def on_finished(self):
+        self._end_run()
+        self._set_progress_state("finished")
+        self.statusBar().showMessage("Optimization finished.", 10000)
 
     @Slot(str)
     def on_error(self, msg):
-        self._stop_elapsed_clock()
-        self._set_action_button_state("start", enabled=True)
-
-        self.stop_btn.setEnabled(False)
-
-        QMessageBox.critical(self, "Error", msg)
+        self._end_run()
+        self._set_progress_state("running")
+        QMessageBox.critical(self, "Optimization error", msg)
 
