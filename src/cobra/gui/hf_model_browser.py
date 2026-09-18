@@ -36,7 +36,7 @@ from .theme import manager as theme_manager
 # Constants
 # ---------------------------------------------------------------------------
 
-HF_TAG = "orca-surrogate"
+HF_TAG = "orca-rfic"
 MODELS_DIR = Path("models")
 
 
@@ -129,7 +129,7 @@ class LocalModelScanner:
 class HFQueryWorker(QThread):
     """
     Background thread that queries HuggingFace for public models tagged
-    ``orca-surrogate``, sorted by downloads (descending).
+    ``orca-rfic``, sorted by downloads (descending).
 
     Signals
     -------

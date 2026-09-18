@@ -79,6 +79,13 @@ If goal range parsing fails:
 - Use format similar to `125-135ghz`.
 - Avoid malformed ranges like trailing separators.
 
+If `cobra parse` warns that an analysis evaluates the circuit outside the band the
+model covers, the surrogate is only predicted inside the `frequency` range of its
+ONNX metadata; beyond it the vector-fitted subcircuit extrapolates. Narrow the
+`.AC` sweep or `numfreq`, or use a model trained over the wider band. A model
+without that metadata is rejected: re-export it with `input_parameter_ranges`
+(ORCA writes it) so the band is known.
+
 ## ORCA Geometry Import Errors
 
 - Ensure ORCA is installed in the same Python environment.

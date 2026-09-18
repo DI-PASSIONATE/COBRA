@@ -1,3 +1,4 @@
+import json
 import os
 from typing import TYPE_CHECKING
 
@@ -5,10 +6,42 @@ import numpy as np
 import skrf as rf
 from onnxruntime import InferenceSession
 
+from cobra.configuration.configuration import ConfigurationError
 from cobra.stages.base_stage import COBRABaseStage
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
+
+#: Spacing of the inference grid, in Hz.
+FREQUENCY_STEP = 1e9
+
+
+def surrogate_frequency_range(session: InferenceSession) -> tuple[float, float] | None:
+    """The band an ONNX surrogate was trained on, ``(min_hz, max_hz)``.
+
+    ORCA records every input's range in the ``input_parameter_ranges`` metadata
+    entry; the ``frequency`` input is the model's validity band. Returns ``None``
+    when the model does not declare a usable one; COBRA refuses to run such a
+    model rather than guess a band for it.
+    """
+    raw = session.get_modelmeta().custom_metadata_map.get("input_parameter_ranges")
+    if raw is None:
+        return None
+    try:
+        bounds = json.loads(raw)["frequency"]
+        low, high = float(bounds["min"]), float(bounds["max"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+    if not 0 < low < high:
+        return None
+    return low, high
+
+
+def inference_frequencies(frequency_range: tuple[float, float]) -> np.ndarray:
+    """The frequencies (Hz) the surrogate is evaluated at: *frequency_range* in ``FREQUENCY_STEP`` steps.
+    """
+    low, high = frequency_range
+    return np.arange(low, high + FREQUENCY_STEP / 2, FREQUENCY_STEP)
 
 
 class EMSurrogateStage(COBRABaseStage):
@@ -23,13 +56,25 @@ class EMSurrogateStage(COBRABaseStage):
         # Touchstone components store their file path; ONNX components an InferenceSession.
         self.session: list[str | InferenceSession] = []
         self.is_touchstone: list[bool] = []
+        # Band each ONNX model is evaluated over; None for Touchstone components.
+        self.frequency_ranges: list[tuple[float, float] | None] = []
         for model_path in em_surrogate_model:
             if str(model_path).lower().endswith((*tuple(f".s{i}p" for i in range(1, 10)), ".snp")):
                 self.session.append(model_path)
                 self.is_touchstone.append(True)
+                self.frequency_ranges.append(None)
             else:
-                self.session.append(InferenceSession(model_path))
+                session = InferenceSession(model_path)
+                frequency_range = surrogate_frequency_range(session)
+                if frequency_range is None:
+                    raise ConfigurationError(
+                        f"{model_path} declares no frequency range in its metadata; COBRA needs "
+                        "input_parameter_ranges.frequency (min and max in Hz, as written by ORCA) "
+                        "to know the band the surrogate is valid over."
+                    )
+                self.session.append(session)
                 self.is_touchstone.append(False)
+                self.frequency_ranges.append(frequency_range)
 
         self.component_names = component_names or []
 
@@ -37,8 +82,10 @@ class EMSurrogateStage(COBRABaseStage):
         params = context.model_parameters
         results_dir = context.results_dir
         context.predicted_networks = []
-        for session, is_ts, comp_name in zip(self.session, self.is_touchstone, self.component_names, strict=True):
-            if is_ts:
+        for session, is_ts, frequency_range, comp_name in zip(
+            self.session, self.is_touchstone, self.frequency_ranges, self.component_names, strict=True
+        ):
+            if is_ts or frequency_range is None:  # both mean a Touchstone component
                 ntwk = rf.Network(str(session))
             else:
                 comp_params = {}
@@ -49,7 +96,7 @@ class EMSurrogateStage(COBRABaseStage):
                             comp_params[p_name] = v
                     else:
                         comp_params[k] = v
-                ntwk = self.inference_snp(session, comp_params)
+                ntwk = self.inference_snp(session, comp_params, frequency_range)
 
             ntwk.name = comp_name
             context.predicted_networks.append(ntwk)
@@ -61,9 +108,14 @@ class EMSurrogateStage(COBRABaseStage):
         return context
 
 
-    def inference_snp(self, session, input_params: dict) -> rf.Network:
+    def inference_snp(
+        self,
+        session,
+        input_params: dict,
+        frequency_range: tuple[float, float],
+    ) -> rf.Network:
         """
-        Runs inference on the model for the given geometry parameters and frequency points, and saves the predicted S-parameters to a Touchstone file.
+        Runs inference on the model for the given geometry parameters over *frequency_range* and returns the predicted S-parameters as a network.
         """
         # Check compatability of input parameters with model input
         for param_name in input_params:
@@ -73,8 +125,7 @@ class EMSurrogateStage(COBRABaseStage):
         input_names = list(input_params)
         input_values = np.array([input_params[name] for name in input_names], dtype=np.float32)
 
-        # Create frequency points from 1 GHz to 200 GHz in 1 GHz steps
-        frequency_points = np.arange(1e9, 201e9, 1e9)
+        frequency_points = inference_frequencies(frequency_range)
 
         # Create batched input by repeating the input parameters for each frequency point and adding the frequency as an additional feature
         batched_input = np.repeat(input_values[np.newaxis, :], len(frequency_points), axis=0)

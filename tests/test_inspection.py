@@ -285,3 +285,87 @@ def test_isolation_goal_without_a_target_frequency_is_an_error(config_dir: Path)
 
     assert has_errors(report)
     assert any("frequency_range" in issue.message for issue in all_issues(report))
+
+
+# ---------------------------------------------------------------------------
+# Surrogate model frequency band
+# ---------------------------------------------------------------------------
+
+
+def _onnx_config(config_dir: Path, netlist: str, band: tuple[float, float] | None, monkeypatch) -> Path:
+    """A configuration whose X1 is an ONNX model declaring *band*, on *netlist*.
+
+    Loading a real ONNX file needs a model asset the suite does not ship, so the
+    model inspection is stubbed with the band under test.
+    """
+    from cobra.configuration import inspection
+
+    shutil.copy(netlist_path(netlist), config_dir / "circuit.cir")
+    (config_dir / "model.onnx").write_bytes(b"")
+    monkeypatch.setattr(
+        inspection, "_inspect_onnx", lambda _path: (2, ["w", "frequency"], band, None)
+    )
+    data = make_config_data(
+        component_models={"X1": "model.onnx"},
+        simulation_parameters={},
+        optimization_parameters=[
+            {
+                "name": "X1:w",
+                "type": "model_input",
+                "min_value": 1.0,
+                "max_value": 2.0,
+                "step": 0.1,
+                "unit": None,
+                "linked_to": None,
+            },
+        ],
+    )
+    path = config_dir / "onnx.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _band_issues(path: Path) -> list[str]:
+    return [
+        issue.message
+        for issue in all_issues(inspect_path(path, check_models=True))
+        if "the model only covers" in issue.message
+    ]
+
+
+def test_model_band_covering_the_ac_sweep_is_not_flagged(config_dir: Path, monkeypatch):
+    # minimal_ac sweeps .AC LIN 101 1G 10G.
+    path = _onnx_config(config_dir, "minimal_ac", (1e9, 10e9), monkeypatch)
+
+    report = inspect_path(path, check_models=True)
+
+    assert isinstance(report, ConfigurationReport)
+    assert _band_issues(path) == []
+    assert report.component_models[0].model_frequency_range == (1e9, 10e9)
+    assert "band=1-10 GHz" in render_report(report)
+
+
+def test_ac_sweep_beyond_the_model_band_is_flagged(config_dir: Path, monkeypatch):
+    path = _onnx_config(config_dir, "minimal_ac", (2e9, 8e9), monkeypatch)
+
+    messages = _band_issues(path)
+
+    assert len(messages) == 1
+    assert messages[0].startswith(".AC evaluates the circuit from 1 to 10 GHz")
+    assert "2-8 GHz" in messages[0]
+
+
+def test_hb_harmonics_are_checked_against_the_model_band(config_dir: Path, monkeypatch):
+    # .HB 95E9 10E9 with numfreq=5 reaches the fifth harmonic at 475 GHz.
+    assert _band_issues(_onnx_config(config_dir, "hb_two_tone", (1e9, 500e9), monkeypatch)) == []
+    messages = _band_issues(_onnx_config(config_dir, "hb_two_tone", (1e9, 400e9), monkeypatch))
+
+    assert len(messages) == 1
+    assert messages[0].startswith(".HB evaluates the circuit from 10 to 475 GHz")
+
+
+def test_model_without_a_declared_band_is_an_error(config_dir: Path, monkeypatch):
+    report = inspect_path(_onnx_config(config_dir, "minimal_ac", None, monkeypatch), check_models=True)
+
+    assert has_errors(report)
+    assert any("declares no frequency range" in issue.message for issue in all_issues(report))
