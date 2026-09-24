@@ -487,6 +487,8 @@ class ComponentModelReport:
     model_ports: int | None = None
     instance_nodes: int | None = None
     model_inputs: list[str] = field(default_factory=list)
+    model_frequency_range: tuple[float, float] | None = None
+    """Band (Hz) an ONNX model declares in its metadata; the surrogate is evaluated over it."""
     detail: str | None = None
 
 
@@ -610,6 +612,7 @@ def inspect_configuration(path: str | Path, *, check_models: bool = True) -> Con
         report.netlist = build_netlist_report(parser, configuration.netlist)
 
     _check_component_models(configuration, parser, report, check_models=check_models)
+    _check_model_frequency_bands(configuration, parser, report)
     _check_optimization_parameters(configuration, parser, report)
     _check_design_goals(configuration, parser, report)
     _check_simulation_parameters(configuration, parser, report)
@@ -716,23 +719,29 @@ def _inspect_touchstone(path: Path) -> tuple[int | None, str | None]:
         return None, f"Touchstone file could not be read: {exc}"
 
 
-def _inspect_onnx(path: Path) -> tuple[int | None, list[str], str | None]:
-    """Return (ports, input names, detail) for an ONNX surrogate model."""
+def _inspect_onnx(
+    path: Path,
+) -> tuple[int | None, list[str], tuple[float, float] | None, str | None]:
+    """Return (ports, input names, frequency range, detail) for an ONNX surrogate model."""
     try:
         from onnxruntime import InferenceSession
+
+        from cobra.stages.em_surrogate_stage import surrogate_frequency_range
     except ImportError as exc:
-        return None, [], f"onnxruntime is unavailable ({exc})"
+        return None, [], None, f"onnxruntime is unavailable ({exc})"
     try:
         session = InferenceSession(str(path), providers=["CPUExecutionProvider"])
     except Exception as exc:  # noqa: BLE001 - onnxruntime errors derive from Exception
-        return None, [], f"ONNX model could not be loaded: {exc}"
+        return None, [], None, f"ONNX model could not be loaded: {exc}"
     inputs = [node.name for node in session.get_inputs()]
     outputs = [node.name for node in session.get_outputs()]
+    frequency_range = surrogate_frequency_range(session)
     ports = math.isqrt(len(outputs) // 2)
     # Every port pair contributes an Sij real and imaginary output.
     if 2 * ports * ports != len(outputs):
-        return None, inputs, f"Model has {len(outputs)} outputs, which is not 2*N*N S-parameters"
-    return ports, inputs, None
+        detail = f"Model has {len(outputs)} outputs, which is not 2*N*N S-parameters"
+        return None, inputs, frequency_range, detail
+    return ports, inputs, frequency_range, None
 
 
 def _check_component_models(
@@ -792,7 +801,22 @@ def _check_component_models(
             if entry.kind == "touchstone":
                 entry.model_ports, entry.detail = _inspect_touchstone(model_path)
             else:
-                entry.model_ports, entry.model_inputs, entry.detail = _inspect_onnx(model_path)
+                (
+                    entry.model_ports,
+                    entry.model_inputs,
+                    entry.model_frequency_range,
+                    entry.detail,
+                ) = _inspect_onnx(model_path)
+                if entry.detail is None and entry.model_frequency_range is None:
+                    report.issues.append(
+                        Issue(
+                            Severity.ERROR,
+                            location,
+                            "Model declares no frequency range: the run needs "
+                            "input_parameter_ranges.frequency (min and max in Hz) in the ONNX "
+                            "metadata to know the band the surrogate is valid over.",
+                        )
+                    )
             if entry.detail:
                 report.issues.append(Issue(Severity.WARNING, location, entry.detail))
         elif suffix_match:
@@ -813,6 +837,88 @@ def _check_component_models(
                 )
             )
         report.component_models.append(entry)
+
+
+def _analysis_frequency_span(
+    configuration: RunConfiguration, parser: XyceNetlistParser
+) -> tuple[float, float, str] | None:
+    """The lowest and highest frequency the netlist's analyses evaluate a surrogate at.
+
+    ``.AC`` sweeps its start-stop range; ``.HB`` reaches every harmonic up to
+    ``numfreq`` times each fundamental. Returns ``None`` when neither is present
+    or readable, with the directives that set the span as the third element.
+    """
+    lows: list[float] = []
+    highs: list[float] = []
+    names: list[str] = []
+    seen: set[SimulationType] = set()
+    for directive in parser.simulation_directives:
+        simulation_type = SimulationType.from_directive(directive.directive)
+        # .AC and .LIN are the same analysis; only its first line carries the sweep.
+        if simulation_type in seen:
+            continue
+        seen.add(simulation_type)
+        if simulation_type is SimulationType.AC:
+            names_positional = ["sweep_type", "points", "start_freq", "stop_freq"]
+            tokens = dict(zip(names_positional, directive.positional, strict=False))
+            for name in ("start_freq", "stop_freq"):
+                configured = _configured_parameter(configuration, ".AC", name)
+                if configured is not None:
+                    tokens[name] = configured
+            start = _spice_number(tokens.get("start_freq", ""))
+            stop = _spice_number(tokens.get("stop_freq", ""))
+            if start is None or stop is None:
+                continue
+            lows.append(start)
+            highs.append(stop)
+        elif simulation_type is SimulationType.HB:
+            tones, orders = _hb_grid(configuration, parser, directive.positional)
+            if not tones or not orders:
+                continue
+            lows.append(min(tones))
+            highs.append(
+                max(
+                    tone * orders[min(index, len(orders) - 1)]
+                    for index, tone in enumerate(tones)
+                )
+            )
+        else:
+            continue
+        names.append(directive.directive)
+    if not highs:
+        return None
+    return min(lows), max(highs), "/".join(names)
+
+
+def _check_model_frequency_bands(
+    configuration: RunConfiguration,
+    parser: XyceNetlistParser | None,
+    report: ConfigurationReport,
+) -> None:
+    """Warn when an analysis evaluates a surrogate outside the band its model declares.
+
+    The surrogate is only predicted inside that band; the vector fit Xyce
+    simulates extrapolates beyond it, so results there are not backed by the model.
+    """
+    if parser is None:
+        return
+    span = _analysis_frequency_span(configuration, parser)
+    if span is None:
+        return
+    low, high, directives = span
+    for entry in report.component_models:
+        band = entry.model_frequency_range
+        if band is None or (band[0] <= low and high <= band[1]):
+            continue
+        report.issues.append(
+            Issue(
+                Severity.WARNING,
+                f"component_models.{entry.component}",
+                f"{directives} evaluates the circuit from {low / 1e9:g} to {high / 1e9:g} GHz, "
+                f"but the model only covers {band[0] / 1e9:g}-{band[1] / 1e9:g} GHz; outside "
+                "that band the vector fit extrapolates and the result is not backed by the model.",
+            )
+        )
 
 
 def _check_optimization_parameters(
@@ -1515,6 +1621,12 @@ def render_configuration_report(report: ConfigurationReport, *, full: bool = Fal
                 f"               kind={entry.kind}  exists={'yes' if entry.exists else 'no'}  "
                 f"model_ports={entry.model_ports}  instance_nodes={entry.instance_nodes}"
                 + (f"  inputs={_join(entry.model_inputs)}" if entry.model_inputs else "")
+                + (
+                    f"  band={entry.model_frequency_range[0] / 1e9:g}-"
+                    f"{entry.model_frequency_range[1] / 1e9:g} GHz"
+                    if entry.model_frequency_range
+                    else ""
+                )
                 for entry in report.component_models
             ],
             full=full,

@@ -1,11 +1,11 @@
-site_name: COBRA Documentation
+site_name: COBRA - A Circuit-Level Open-Source RFIC AI-Assisted Optimizer
 site_url: https://di-passionate.github.io/COBRA/
-site_author: The COBRA authors
+site_author: LITES, Friedrich-Alexander-Universität Erlangen-Nürnberg
 site_description: >-
   COBRA is an open-source EDA tool for AI-assisted RFIC design: a circuit-level
   optimizer that combines ORCA ONNX EM surrogate models, Xyce SPICE circuit
-  simulation, Optuna goal-driven optimization and optional Palace EM
-  fine-tuning in one workflow.
+  simulation, Optuna goal-driven optimization and optional Palace EM/circuit
+  co-simulation fine-tuning in one workflow.
 copyright: Copyright &copy; 2026 The COBRA authors
 
 # Repository

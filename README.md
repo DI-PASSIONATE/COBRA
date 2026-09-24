@@ -223,14 +223,14 @@ Coming soon
 
 ### Using the HuggingFace Model Browser
 
-The GUI includes a built-in browser for ORCA surrogate models shared on HuggingFace. How to upload your own models to HuggingFace and make them discoverable in COBRA is covered in ORCA's documentation, but the basic convention is to tag your HuggingFace repo with `orca-surrogate` and include the required files (`<repo>.onnx` and optionally `<repo>.py`).
+The GUI includes a built-in browser for ORCA surrogate models shared on HuggingFace. How to upload your own models to HuggingFace and make them discoverable in COBRA is covered in ORCA's documentation, but the basic convention is to tag your HuggingFace repo with `orca-rfic` and include the required files (`<repo>.onnx` and optionally `<repo>.py`).
 Each component selector row in the configuration panel has a **HuggingFace** button next to the standard Browse button.
 
 **Browsing and downloading a model:**
 
 1. Click **HuggingFace** for any component.
 2. The dialog opens and immediately shows any models you have already downloaded (marked `[LOCAL]`) at the top of the list.
-3. While the list loads, public models tagged `orca-surrogate` on HuggingFace are fetched in the background and appended once available, sorted by download count.
+3. While the list loads, public models tagged `orca-rfic` on HuggingFace are fetched in the background and appended once available, sorted by download count.
 4. Select a model to see its details on the right (owner, downloads, likes, tags, description, and whether EM fine-tuning is available).
 5. If the model is not yet local, click **Download** — the repo is saved to `./models/<owner>/<repo>/`.
 6. Once downloaded (or if already local), click **Use** to populate the component's file field with the path to `<repo>.onnx`.
@@ -429,7 +429,9 @@ Before each simulation the netlist is updated in two ways:
 
 ### Stage 3 — EM surrogate inference (`EMSurrogateStage`)
 
-The ONNX model (produced by ORCA) receives the current geometry parameters and a fixed frequency sweep (1 GHz–200 GHz, 1 GHz steps) as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
+The ONNX model (produced by ORCA) receives the current geometry parameters and a frequency sweep as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
+
+The sweep covers the whole band the model declares in its `input_parameter_ranges` metadata (the `frequency` entry, written by ORCA), in 1 GHz steps; a model without that metadata is rejected before the run starts, since COBRA will not guess a band. The full band is used deliberately rather than just the design goals' range: the vector fit of the next stage extrapolates freely outside the frequencies it was given, and Xyce evaluates the fitted subcircuit at the DC operating point and at every harmonic of an `.HB` or `.TRAN` analysis. `cobra parse` warns when the netlist's `.AC` sweep or `.HB` harmonics reach beyond the model's band.
 
 ONNX was chosen because it is a portable, framework-agnostic format: the model runs with `onnxruntime` at inference time without requiring the full training environment (PyTorch, TensorFlow, …), keeping COBRA's dependency footprint small and deployment straightforward.
 

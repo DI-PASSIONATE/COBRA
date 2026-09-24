@@ -54,7 +54,8 @@ netlist it references:
 
 - every surrogate component in the netlist has a `component_models` entry, and
   every mapped model file exists, loads, and has as many ports as the instance
-  has nodes;
+  has nodes; the `.AC` sweep and `.HB` harmonics stay inside the band an ONNX
+  model declares in its metadata (the surrogate is evaluated over that band);
 - every `netlist_variable` resolves to an element (or an `instance:parameter`)
   that exists, and every `model_input` matches an input of the mapped ONNX model;
 - every design goal is buildable, its frequency range parses, and the analysis it
