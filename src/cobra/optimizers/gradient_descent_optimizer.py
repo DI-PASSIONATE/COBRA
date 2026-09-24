@@ -247,8 +247,9 @@ class GradientDescentOptimizer(BaseOptimizer):
         updated_point: dict[str, float] = {}
         for name in self._master_order:
             prop = self._master_properties[name]
-            denominator = 2.0 * max(step_sizes[name], 1e-9)
-            gradient = ((penalty_value - plus_penalty) / denominator) * direction[name]
+            # The probes sit at base ± exploration_scale·step along the direction.
+            denominator = 2.0 * max(self.exploration_scale * step_sizes[name], 1e-9)
+            gradient = ((plus_penalty - penalty_value) / denominator) * direction[name]
             next_value = base_point[name] - self.learning_rate * gradient
             next_value = self._round_to_step(self._clip(next_value, prop), prop)
             updated_point[name] = self._clip(next_value, prop)
