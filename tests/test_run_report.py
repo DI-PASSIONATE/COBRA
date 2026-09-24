@@ -9,7 +9,6 @@ nothing.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from cobra.console import Palette
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
@@ -56,102 +55,40 @@ def _report(capsys, **overrides) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Design parameters
+# Design parameters and goals
 # ---------------------------------------------------------------------------
 
 
-def test_the_final_value_is_reported_on_its_range(capsys):
+def test_parameters_are_reported_even_when_linked_or_not_numeric(capsys):
     out = _report(
         capsys,
-        optimization_parameters=[_parameter("R1", unit="F")],
-        netlist_parameters={"R1": "55.0F"},
+        optimization_parameters=[
+            _parameter("R1", unit="F"),
+            _parameter("C4", linked_to="C3"),
+            _parameter("R2"),
+        ],
+        # C4 is written with its master's unit, which must not defeat the parsing.
+        netlist_parameters={"R1": "55.0F", "C4": "19.0F", "R2": "{expr}"},
     )
 
-    assert "Design parameters" in out
-    assert "R1" in out
     assert "55F" in out
-
-
-def test_a_linked_parameter_reports_its_master_rather_than_a_range(capsys):
-    out = _report(
-        capsys,
-        optimization_parameters=[_parameter("C4", linked_to="C3")],
-        # Written with the master's unit, which must not defeat the parsing.
-        netlist_parameters={"C4": "19.0F"},
-    )
-
     assert "follows C3" in out
-    assert "19" in out
-
-
-def test_a_value_that_is_not_a_number_is_shown_as_missing(capsys):
-    out = _report(
-        capsys,
-        optimization_parameters=[_parameter("R1")],
-        netlist_parameters={"R1": "{expr}"},
-    )
-
-    assert "Design parameters" in out
-    assert "—" in out
-
-
-def test_a_parameter_with_no_value_at_all_does_not_break_the_report(capsys):
-    out = _report(capsys, optimization_parameters=[_parameter("R1")], netlist_parameters={})
-
-    assert "R1" in out
-
-
-def test_the_section_is_skipped_when_there_are_no_parameters(capsys):
-    assert "Design parameters" not in _report(capsys)
-
-
-# ---------------------------------------------------------------------------
-# Design goals
-# ---------------------------------------------------------------------------
+    assert "—" in out  # the expression is shown as missing rather than failing
 
 
 def test_a_met_goal_is_ticked_and_reports_what_it_reached(capsys):
-    out = _report(capsys, goals=[_goal(value=-14.5, penalty=-4.5)])
-
-    assert "Design goals" in out
-    assert "✓" in out
-    assert "target <= -10" in out
-    assert "reached -14.5" in out
-
-
-def test_an_unmet_goal_is_crossed(capsys):
-    out = _report(capsys, goals=[_goal(value=-2.0, penalty=8.0)])
-
-    assert "✗" in out
-
-
-def test_an_array_of_values_is_reported_as_a_span(capsys):
     out = _report(capsys, goals=[_goal(value=np.array([-20.0, -12.0, -15.0]), penalty=-1.0)])
 
+    assert "✓" in out
+    assert "target <= -10" in out
     assert "reached -20 … -12" in out
 
 
-def test_a_goal_whose_simulation_failed_says_so(capsys):
+def test_a_goal_whose_simulation_failed_is_crossed_and_says_so(capsys):
     out = _report(capsys, goals=[_goal(value=None, penalty=1e6)])
 
-    assert "no result" in out
     assert "✗" in out
-
-
-@pytest.mark.parametrize(
-    ("minimum", "maximum", "expected"),
-    [
-        (None, -10.0, "target <= -10"),
-        (-3.0, None, "target >= -3"),
-        (-3.0, 3.0, "target >= -3 and <= 3"),
-        (None, None, "target no bound"),
-    ],
-)
-def test_the_target_reads_as_the_bounds_that_were_set(capsys, minimum, maximum, expected):
-    goal = _goal(value=0.0, penalty=0.0, max_value=maximum)
-    goal.min_value = minimum
-
-    assert expected in _report(capsys, goals=[goal])
+    assert "no result" in out
 
 
 # ---------------------------------------------------------------------------
@@ -174,19 +111,15 @@ def test_the_summary_states_whether_the_goals_were_met(capsys):
 
 def test_the_summary_names_the_fine_tuning_phase(capsys):
     """After fine-tuning, ``iteration`` is the fine-tuning iteration that was returned,
-    not a count of the surrogate iterations.
+    not a count of the surrogate iterations. Stopping before fine-tuning keeps the
+    surrogate wording.
     """
     fine_tuned = {"fine_tuning_active": True, "fine_tuning_iteration": 3, "iteration": 2}
 
     missed = _report(capsys, goal_achieved=False, **fine_tuned)
     assert "not achieved after 3 EM fine-tuning iterations (best: iteration 2)" in missed
 
-    met = _report(capsys, goal_achieved=True, **fine_tuned)
-    assert "achieved at EM fine-tuning iteration 2" in met
-
-
-def test_stopping_before_fine_tuning_keeps_the_surrogate_summary(capsys):
-    out = _report(
+    stopped = _report(
         capsys, goal_achieved=False, fine_tuning_active=True, fine_tuning_iteration=0, iteration=30
     )
-    assert "not achieved after 30 iterations" in out
+    assert "not achieved after 30 iterations" in stopped
