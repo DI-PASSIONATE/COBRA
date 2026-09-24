@@ -5,7 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-# 1.9.0 - 2026-09-15
+## Unreleased
+
+### Fixed
+- EM fine-tuning works with the current ORCA release: Palace is started with
+  ORCA's `run_palace(..., cmd=...)` signature, and the result is read for the
+  geometry's actual port count instead of always `.s6p`. A failed Palace run
+  now stops with an error naming the component.
+- EM fine-tuning no longer imports the IHP gdsfactory PDK (`ihp`), which ORCA
+  dropped; ORCA's geometry cells select their PDK themselves.
+- EM fine-tuning works with sweeps that do not start at or below 1 GHz: ORCA
+  only writes the DC-extrapolated result for those, so COBRA now falls back to
+  the de-embedded one instead of failing with `FileNotFoundError`.
+- EM fine-tuning with the default `"reuse"` optimizer no longer fails on its
+  second iteration because the same Optuna trial was reported twice.
+- Netlist parameters suggested during fine-tuning are now written into the
+  simulated netlist; before, only geometry parameters changed.
+- Stopping at the fine-tuning prompt still writes
+  `cobra_optimization_context.json`.
+
+### Changed
+- Each fine-tuning iteration runs in its own folder,
+  `fine_tuning/iteration_NN/`, inside the results folder.
+
+# 1.8.2 - 2026-09-15
 ### Fixed
 - Descriptions, PyPI README and installation instructions updated to reflect the new `cobra-rfic` release
 

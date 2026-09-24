@@ -26,17 +26,24 @@ class OptimizerStage(COBRABaseStage):
         self.optimizer.step(context, model_input_parameters, netlist_variable_parameters)
         return context
 
-    def tell(self, context: "OptimizationContext"):
-        goals = context.goals
-        loss_values = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in goals]
+    @staticmethod
+    def losses(context: "OptimizationContext") -> list[float]:
+        """The per-goal losses of the evaluated iteration in *context*."""
+        return [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in context.goals]
+
+    def record(self, context: "OptimizationContext"):
+        """Log the evaluated iteration in *context* without telling the optimizer about it."""
         status = "finetuning" if context.fine_tuning_active else "optimization"
         context.iterations.append({
             "iteration": context.iteration,
             "status": status,
             "model_parameters": context.model_parameters,
             "netlist_parameters": context.netlist_parameters,
-            "losses": loss_values
+            "losses": self.losses(context)
         })
+
+    def tell(self, context: "OptimizationContext"):
+        self.record(context)
         # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False
-        self.optimizer._tell(context, loss_values)  # noqa: SLF001 - documented entry point for stages
+        self.optimizer._tell(context, self.losses(context))  # noqa: SLF001 - documented entry point for stages
 

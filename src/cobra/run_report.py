@@ -180,7 +180,18 @@ def _write_goals(context: OptimizationContext, palette: Palette) -> None:
 
 def _write_summary(context: OptimizationContext, palette: Palette) -> None:
     iteration = context.iteration
-    if context.goal_achieved:
+    if context.fine_tuning_active and context.fine_tuning_iteration > 0:
+        # After fine-tuning, iteration is the fine-tuning iteration that was returned.
+        if context.goal_achieved:
+            status = palette.green(
+                f"design goals achieved at EM fine-tuning iteration {iteration}"
+            )
+        else:
+            status = palette.yellow(
+                f"design goals not achieved after {context.fine_tuning_iteration} "
+                f"EM fine-tuning iterations (best: iteration {iteration})"
+            )
+    elif context.goal_achieved:
         status = palette.green(f"design goals achieved at iteration {iteration}")
     else:
         status = palette.yellow(f"design goals not achieved after {iteration} iterations")
