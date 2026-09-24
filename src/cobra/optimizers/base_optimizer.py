@@ -161,11 +161,16 @@ class BaseOptimizer(ABC):
         """
         if self.multi_objective:
             return self.tell(context, loss)
+        return self.tell(context, aggregate_penalty(loss))
 
-        # All values are above or all below zero -> sum them up for a single loss value
-        # If some values are above and some below zero, sum the positive values and disregard the negative values
-        if all(value >= 0 for value in loss) or all(value <= 0 for value in loss):
-            penalty = sum(loss)
-        else:
-            penalty = sum(value for value in loss if value > 0)
-        return self.tell(context, penalty)
+
+def aggregate_penalty(loss: list[float]) -> float:
+    """Combine per-goal losses into the single penalty a single-objective optimizer minimises.
+
+    A result that meets every goal therefore always scores lower than one that does not.
+    """
+    # All values are above or all below zero -> sum them up for a single loss value
+    # If some values are above and some below zero, sum the positive values and disregard the negative values
+    if all(value >= 0 for value in loss) or all(value <= 0 for value in loss):
+        return sum(loss)
+    return sum(value for value in loss if value > 0)

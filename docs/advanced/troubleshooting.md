@@ -95,6 +95,9 @@ without that metadata is rejected: re-export it with `input_parameter_ranges`
 
 - Verify Palace command is valid and executable.
 - Confirm geometry/mesh prerequisites are available.
+- "The Palace simulation for X1 failed": ORCA logs Palace's last output lines just above
+  this message. The Palace model is in `fine_tuning/iteration_NN/palace_sims/` inside
+  the results folder.
 
 ## Large Runtime or Slow Progress
 

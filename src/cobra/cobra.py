@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import shutil
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -20,6 +21,7 @@ from cobra.optimizers.base_optimizer import (
     BaseOptimizer,
     OptimizationProperty,
     OptimizationType,
+    aggregate_penalty,
     netlist_unit,
 )
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
@@ -403,14 +405,10 @@ class COBRA:
             if context.goal_achieved:
                 context.fine_tuning_start_iteration = context.iteration
 
-            if callback:
-                should_continue = callback(context)
-                if should_continue is False:
-                    logger.info("EM fine-tuning stopped by the callback before it started")
-                    context.wall_time = time.monotonic() - run_started
-                    return context
-
-            context = self.fine_tuning(context, callback)
+            if callback and callback(context) is False:
+                logger.info("EM fine-tuning stopped by the callback before it started")
+            else:
+                context = self.fine_tuning(context, callback)
 
         context.wall_time = time.monotonic() - run_started
 
@@ -436,10 +434,7 @@ class COBRA:
         stages themselves hold no per-iteration state.
         """
         t1 = time.time()
-        parser = type(self.netlist_parser)().from_lines(netlist_template)
-        parser.update_parameters(context.netlist_parameters)
-        Path(context.results_dir).mkdir(parents=True, exist_ok=True)
-        parser.save(context.netlist)  # The circuit simulator reads the netlist from disk
+        self._render_netlist(context, netlist_template)
 
         # Perform EM simulations / s parameter prediction using surrogate model from ORCA
         t2 = time.time()
@@ -462,6 +457,16 @@ class COBRA:
         context.times["design_goal_checking"] += t5 - t4
         context.times["total_time"] += t5 - t1
         return context
+
+    def _render_netlist(self, context: OptimizationContext, netlist_template: list[str]) -> None:
+        """Write *context*'s netlist, with its parameters applied, into its own directory.
+
+        Builds its own parser from *netlist_template*, so it is safe on a worker thread.
+        """
+        parser = type(self.netlist_parser)().from_lines(netlist_template)
+        parser.update_parameters(context.netlist_parameters)
+        Path(context.results_dir).mkdir(parents=True, exist_ok=True)
+        parser.save(context.netlist)  # The circuit simulator reads the netlist from disk
 
     def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, netlist_parser, context: OptimizationContext) -> OptimizationContext:
         logger.info("Maximum iterations reached without achieving the design goals")
@@ -532,76 +537,84 @@ class COBRA:
                 "Cannot perform EM fine-tuning without geometry information."
             )
 
-        design_goal_checker: DesignGoalChecker = context.design_goal_checker
+        fine_tuning_stage = self.em_fine_tuning_stage
         fine_tuning_optimizer_stage = self._build_fine_tuning_optimizer_stage()
 
         if fine_tuning_optimizer_stage is not self.optimizer_stage:
-            fine_tuning_optimizer_stage.optimizer.initialize(len(design_goal_checker.design_goals))
+            num_goals = sum(len(goals) for goals in context.design_goal_checker.design_goals.values())
+            fine_tuning_optimizer_stage.optimizer.initialize(num_goals)
+
+        # .snp components keep the network the surrogate stage loaded for them.
+        touchstone_networks = {ntwk.name: ntwk for ntwk in context.predicted_networks if ntwk.name}
+        # The run's netlist holds the subcircuit models and the parameters to verify.
+        netlist_template = self.netlist_parser.lines
+        fine_tuning_dir = Path(context.results_dir) / "fine_tuning"
+
+        # Like the surrogate loop, every iteration is evaluated in its own directory
+        # with its own copy of the goals, so the best one can be reinstated at the end.
+        # The first iteration verifies the parameters the surrogate loop ended with;
+        # the optimizer has already been told about those, so only the iterations it
+        # suggests itself are told to it.
+        trial = self._next_fine_tuning_trial(context, fine_tuning_dir, 1)
+        suggested = False
+        best: OptimizationContext | None = None
+        best_penalty = math.inf
 
         for iteration in tqdm.tqdm(
-            range(self.fine_tuning_iterations),
+            range(1, self.fine_tuning_iterations + 1),
             desc="COBRA EM fine-tuning",
             disable=not logger.isEnabledFor(logging.INFO),
         ):
-            context.iteration = iteration + 1
-            context.fine_tuning_active = True
-            context.fine_tuning_iteration = iteration + 1
-            context.fine_tuning_total = self.fine_tuning_iterations
+            trial.iteration = iteration
+            trial.fine_tuning_iteration = iteration
+            self._evaluate_fine_tuning_trial(
+                trial, netlist_template, fine_tuning_stage, surrogate_stage, touchstone_networks
+            )
+            context.absorb_trial(trial)
+            context.fine_tuning_iteration = iteration
 
-            # Build a name→network map from the previous iteration for .snp components
-            prior_networks_by_comp = {
-                ntwk.name: ntwk
-                for ntwk in context.predicted_networks
-                if ntwk.name
-            }
+            if suggested:
+                fine_tuning_optimizer_stage.tell(context)
+            else:
+                fine_tuning_optimizer_stage.record(context)
 
-            # Run Palace for every ONNX component; carry forward .snp networks unchanged
-            assembled_networks = []
-            for comp_name, is_ts in zip(
-                surrogate_stage.component_names, surrogate_stage.is_touchstone, strict=True
-            ):
-                if is_ts:
-                    ntwk = prior_networks_by_comp.get(comp_name)
-                    if ntwk is not None:
-                        assembled_networks.append(ntwk)
-                else:
-                    context = self.em_fine_tuning_stage.run(
-                        context,
-                        orca_geometry=orca_geometries[comp_name],
-                        comp_name=comp_name,
-                    )
-                    assembled_networks.append(context.predicted_networks[0])
+            penalty = aggregate_penalty(OptimizerStage.losses(context))
+            if best is None or penalty < best_penalty:
+                best = trial
+                best_penalty = penalty if math.isfinite(penalty) else math.inf
 
-            context.predicted_networks = assembled_networks
+            if callback and callback(context) is False:
+                logger.info("EM fine-tuning stopped by the callback")
+                break
 
-            # Perform circuit-level simulation
-            context = self.circuit_simulation_stage.run(context)
-
-            # Check design goals
-            context = design_goal_checker.check_goals(context)
-
-            if callback:
-                should_continue = callback(context)
-                if should_continue is False:
-                    logger.info("EM fine-tuning stopped by the callback")
-                    break
-
-            # If design goals are achieved, break the loop
             if context.goal_achieved:
-                logger.info("Design goals achieved after EM fine-tuning iteration %d", iteration + 1)
+                logger.info("Design goals achieved after EM fine-tuning iteration %d", iteration)
+                break
+            if iteration == self.fine_tuning_iterations:
                 break
             logger.info(
                 "Design goals not achieved after EM fine-tuning iteration %d; continuing",
-                iteration + 1,
+                iteration,
             )
 
-            fine_tuning_optimizer_stage.tell(context)
-            context = fine_tuning_optimizer_stage.run(context)
+            trial = self._next_fine_tuning_trial(context, fine_tuning_dir, iteration + 1)
+            fine_tuning_optimizer_stage.run(trial)
+            suggested = True
+
+        # A later iteration may have done worse than an earlier one, so return the
+        # best one evaluated. Its time was already counted.
+        if best is not None:
+            context.absorb_trial(best, include_times=False)
+
+        # Put the returned parameters into the run's own netlist.
+        self.netlist_parser.update_parameters(context.netlist_parameters)
+        self.netlist_parser.save(context.netlist)
 
         if not context.goal_achieved:
             logger.info(
                 "EM fine-tuning finished without achieving the design goals; "
-                "returning the best parameters found"
+                "returning the best parameters found (iteration %d)",
+                context.iteration,
             )
         else:
             logger.info(
@@ -609,6 +622,52 @@ class COBRA:
             )
 
         return context
+
+    @staticmethod
+    def _next_fine_tuning_trial(
+        context: OptimizationContext, fine_tuning_dir: Path, iteration: int
+    ) -> OptimizationContext:
+        """A trial for fine-tuning *iteration*, starting from the parameters in *context*.
+
+        The first iteration evaluates these parameters as they are. Later ones pass
+        them to the optimizer, which a local optimizer such as gradient descent
+        starts from.
+        """
+        trial = context.for_trial(fine_tuning_dir / f"iteration_{iteration:02d}")
+        trial.model_parameters = dict(context.model_parameters)
+        trial.netlist_parameters = dict(context.netlist_parameters)
+        return trial
+
+    def _evaluate_fine_tuning_trial(
+        self,
+        trial: OptimizationContext,
+        netlist_template: list[str],
+        fine_tuning_stage: EMFineTuningStage,
+        surrogate_stage: EMSurrogateStage,
+        touchstone_networks: dict[str, "rf.Network"],
+    ) -> None:
+        """Simulate every ONNX component with Palace, then the circuit, and score *trial*."""
+        self._render_netlist(trial, netlist_template)
+
+        networks = []
+        for comp_name, is_ts in zip(
+            surrogate_stage.component_names, surrogate_stage.is_touchstone, strict=True
+        ):
+            if is_ts:
+                ntwk = touchstone_networks.get(comp_name)
+                if ntwk is not None:
+                    networks.append(ntwk)
+            else:
+                fine_tuning_stage.run(
+                    trial,
+                    orca_geometry=trial.orca_geometries[comp_name],
+                    comp_name=comp_name,
+                )
+                networks.append(trial.predicted_networks[0])
+        trial.predicted_networks = networks
+
+        self.circuit_simulation_stage.run(trial)
+        trial.design_goal_checker.check_goals(trial)
 
     def log_stage_times(self, context: OptimizationContext) -> None:
         """Log how the work of the run was distributed over the stages.

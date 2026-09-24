@@ -170,3 +170,23 @@ def test_the_summary_reports_elapsed_time_not_accumulated_stage_time(capsys):
 def test_the_summary_states_whether_the_goals_were_met(capsys):
     assert "achieved at iteration 7" in _report(capsys, goal_achieved=True, iteration=7)
     assert "not achieved after 7" in _report(capsys, goal_achieved=False, iteration=7)
+
+
+def test_the_summary_names_the_fine_tuning_phase(capsys):
+    """After fine-tuning, ``iteration`` is the fine-tuning iteration that was returned,
+    not a count of the surrogate iterations.
+    """
+    fine_tuned = {"fine_tuning_active": True, "fine_tuning_iteration": 3, "iteration": 2}
+
+    missed = _report(capsys, goal_achieved=False, **fine_tuned)
+    assert "not achieved after 3 EM fine-tuning iterations (best: iteration 2)" in missed
+
+    met = _report(capsys, goal_achieved=True, **fine_tuned)
+    assert "achieved at EM fine-tuning iteration 2" in met
+
+
+def test_stopping_before_fine_tuning_keeps_the_surrogate_summary(capsys):
+    out = _report(
+        capsys, goal_achieved=False, fine_tuning_active=True, fine_tuning_iteration=0, iteration=30
+    )
+    assert "not achieved after 30 iterations" in out

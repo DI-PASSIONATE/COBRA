@@ -1,4 +1,5 @@
 import importlib
+import logging
 import multiprocessing as mp
 import os
 from concurrent.futures import ProcessPoolExecutor
@@ -10,10 +11,20 @@ from cobra.configuration.configuration import (
     DEFAULT_PALACE_PROCESSES,
     ConfigurationError,
 )
+from cobra.spice_sim.base_simulator import SimulatorError
 from cobra.stages.base_stage import COBRABaseStage
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
+
+logger = logging.getLogger(__name__)
+
+#: Ask ORCA to write every Touchstone variant it can after a Palace run.
+TOUCHSTONE_TYPE = "all"
+
+#: The variants to read back, most corrected first. ORCA only adds the DC-extrapolated
+#: ones when the sweep starts at or below 1 GHz and has more than 20 points.
+RESULT_PREFERENCE = ("dc_deembedded", "deembedded", "dc", "normal")
 
 
 def _mesh_gds_and_run_palace(
@@ -26,17 +37,18 @@ def _mesh_gds_and_run_palace(
     simconfig_filename: str,
     palace_executable: str,
     num_processes: int,
-) -> None:
-    """Run gmsh-dependent model creation and Palace simulation in a child process."""
-    PDK = importlib.import_module("ihp").PDK
+) -> bool:
+    """Run gmsh-dependent model creation and Palace simulation in a child process.
 
+    Returns whether Palace succeeded; ORCA logs the reason when it did not.
+    """
     create_palace_model_from_gds = importlib.import_module(
         "orca.simulation.gds_converter"
     ).create_palace_model_from_gds
     run_palace = importlib.import_module("orca.simulation.simulate").run_palace
+    LocalLauncher = importlib.import_module("orca.simulation.launchers").LocalLauncher
 
-    PDK.activate()
-    create_palace_model_from_gds(
+    _, _, config_name, sim_path, data_dir = create_palace_model_from_gds(
         geometry_name=name,
         params=parameters,
         output_dir=base_dir,
@@ -45,16 +57,15 @@ def _mesh_gds_and_run_palace(
         simconfig_filename=simconfig_filename,
         show_mesh_results=False,
     )
-    sim_path = os.path.join(base_dir, "palace_sims", f"{name}_data")
-    run_palace(
+    launcher = LocalLauncher()
+    return run_palace(
         sim_path=sim_path,
-        data_dir=os.path.join(sim_path, "output", name),
-        result_dir=os.path.join(base_dir),
-        config_name=os.path.join(sim_path, "config.json"),
-        palace_executable=palace_executable,
-        num_processes=num_processes,
-        touchstone_type="all",
+        data_dir=data_dir,
+        result_dir=base_dir,
+        cmd=launcher.command(launcher.slots[0], palace_executable, num_processes, config_name),
+        touchstone_type=TOUCHSTONE_TYPE,
     )
+
 
 class EMFineTuningStage(COBRABaseStage):
     """
@@ -76,10 +87,7 @@ class EMFineTuningStage(COBRABaseStage):
         Creates a GDS file based on the current parameters, meshes it.
         If comp_name is provided, only parameters for that component are forwarded.
         """
-        PDK = importlib.import_module("ihp").PDK
         BaseGeometry = importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-
-        PDK.activate()
         if not isinstance(orca_geometry, BaseGeometry):
             raise TypeError("orca_geometry must be an instance of BaseGeometry")
         geometry = cast("Any", orca_geometry)
@@ -121,10 +129,41 @@ class EMFineTuningStage(COBRABaseStage):
                 palace_executable=self.palace_executable,
                 num_processes=self.num_processes,
             )
-            future.result()
+            succeeded = future.result()
+        if not succeeded:
+            raise SimulatorError(
+                f"The Palace simulation for {comp_name or name} failed in {base_dir}; "
+                "see ORCA's log output above for the reason."
+            )
 
-        ntwk = rf.Network(os.path.join(base_dir, f"{name}_dc_deembedded.s6p"))
+        ntwk = rf.Network(self._result_file(base_dir, name, geometry.n_ports, comp_name or name))
         if comp_name:
             ntwk.name = comp_name
         context.predicted_networks = [ntwk]
         return context
+
+    @staticmethod
+    def _result_file(base_dir: str, name: str, n_ports: int, label: str) -> str:
+        """The most corrected Touchstone file ORCA wrote for *name*."""
+        touchstone_filename = importlib.import_module(
+            "orca.simulation.combine_snp_results"
+        ).touchstone_filename
+        candidates = [
+            os.path.join(base_dir, touchstone_filename(name, n_ports, variant))
+            for variant in RESULT_PREFERENCE
+        ]
+        for variant, path in zip(RESULT_PREFERENCE, candidates, strict=True):
+            if os.path.isfile(path):
+                if variant != RESULT_PREFERENCE[0]:
+                    logger.info(
+                        "Using the %s Palace result for %s: ORCA only extrapolates to DC when "
+                        "the sweep starts at or below 1 GHz with more than 20 points",
+                        variant,
+                        label,
+                    )
+                return path
+        raise SimulatorError(
+            f"Palace finished for {label}, but ORCA wrote no Touchstone file; looked for "
+            + ", ".join(os.path.basename(path) for path in candidates)
+            + f" in {base_dir}."
+        )
