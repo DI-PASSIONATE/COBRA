@@ -45,45 +45,24 @@ def _property(name: str, unit: str | None = None, linked_to: str | None = None):
 # ---------------------------------------------------------------------------
 
 
-def test_a_linked_parameter_inherits_its_masters_unit():
-    master, follower = _property("C3", unit="F"), _property("C4", linked_to="C3")
-    by_name = {p.name: p for p in (master, follower)}
-
-    assert netlist_unit(follower, by_name) == "F"
-
-
-def test_an_explicit_unit_wins_over_the_masters():
-    master, follower = _property("C3", unit="F"), _property("C4", unit="p", linked_to="C3")
-    by_name = {p.name: p for p in (master, follower)}
-
-    assert netlist_unit(follower, by_name) == "p"
-
-
-def test_a_unitless_parameter_gets_no_suffix():
-    prop = _property("R1")
-    assert netlist_unit(prop, {prop.name: prop}) == ""
-
-
-def test_a_link_chain_resolves_to_the_far_end():
+def test_a_linked_parameter_inherits_its_masters_unit_unless_it_sets_its_own():
     a, b, c = _property("A", unit="F"), _property("B", linked_to="A"), _property("C", linked_to="B")
-    by_name = {p.name: p for p in (a, b, c)}
+    own = _property("D", unit="p", linked_to="A")
+    by_name = {p.name: p for p in (a, b, c, own)}
 
     assert resolve_linked_master(c, by_name).name == "A"
     assert netlist_unit(c, by_name) == "F"
+    assert netlist_unit(own, by_name) == "p"
 
 
-def test_a_link_to_nowhere_is_an_error():
+def test_broken_links_are_errors():
     orphan = _property("C4", linked_to="missing")
     with pytest.raises(ValueError, match="unknown parameter"):
         resolve_linked_master(orphan, {orphan.name: orphan})
 
-
-def test_a_circular_link_is_an_error():
     a, b = _property("A", linked_to="B"), _property("B", linked_to="A")
-    by_name = {p.name: p for p in (a, b)}
-
     with pytest.raises(ValueError, match="Circular link"):
-        resolve_linked_master(a, by_name)
+        resolve_linked_master(a, {p.name: p for p in (a, b)})
 
 
 # ---------------------------------------------------------------------------

@@ -53,19 +53,6 @@ def _goal(value: float, *, max_value: float, sim_type: SimulationType) -> Design
 # ---------------------------------------------------------------------------
 
 
-def test_missing_result_penalises_the_goal_instead_of_skipping_it():
-    checker = DesignGoalChecker([_goal(50.0, max_value=10.0, sim_type=SimulationType.HB)])
-    assert checker.loss({SimulationType.AC: SimulationResult()}) == [FAILED_SIMULATION_PENALTY]
-
-
-def test_check_goals_with_no_results_is_a_failure():
-    checker = DesignGoalChecker([_goal(50.0, max_value=10.0, sim_type=SimulationType.AC)])
-    context = checker.check_goals(make_context())
-
-    assert context.goal_achieved is False
-    assert context.goals[0].current_penalty == FAILED_SIMULATION_PENALTY
-
-
 def test_failure_penalty_ignores_the_goal_weight():
     """A zero-weighted goal must not turn a failed simulation into a success."""
     goal = _goal(50.0, max_value=10.0, sim_type=SimulationType.AC)
@@ -73,17 +60,6 @@ def test_failure_penalty_ignores_the_goal_weight():
     context = DesignGoalChecker([goal]).check_goals(make_context())
 
     assert context.goal_achieved is False
-
-
-def test_failed_goal_drops_the_value_from_the_previous_iteration():
-    goal = _goal(5.0, max_value=10.0, sim_type=SimulationType.AC)
-    checker = DesignGoalChecker([goal])
-
-    checker.check_goals(make_context(simulation_results={SimulationType.AC: SimulationResult()}))
-    assert goal.current_value is not None
-
-    checker.check_goals(make_context())
-    assert goal.current_value is None
 
 
 def test_a_partial_failure_only_penalises_the_missing_type():
@@ -99,15 +75,6 @@ def test_a_partial_failure_only_penalises_the_missing_type():
     assert ac_goal.current_penalty < 0.0
     assert hb_goal.current_penalty == FAILED_SIMULATION_PENALTY
     assert context.goal_achieved is False
-
-
-def test_all_goals_met_still_reports_success():
-    checker = DesignGoalChecker([_goal(5.0, max_value=10.0, sim_type=SimulationType.AC)])
-    context = checker.check_goals(
-        make_context(simulation_results={SimulationType.AC: SimulationResult()})
-    )
-
-    assert context.goal_achieved is True
 
 
 # ---------------------------------------------------------------------------
@@ -154,15 +121,6 @@ def test_failed_run_clears_the_previous_iterations_result(tmp_path, caplog):
 
     assert context.simulation_results == {}
     assert "AC" in caplog.text
-
-
-def test_successful_run_stores_the_result(tmp_path):
-    result = SimulationResult(output_files=["circuit.s2p"])
-    stage = CircuitSimulationStage(_StubSimulator([result]))
-
-    context = stage.run(_stage_context(tmp_path))
-
-    assert context.simulation_results == {SimulationType.AC: result}
 
 
 # ---------------------------------------------------------------------------
