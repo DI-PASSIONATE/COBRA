@@ -163,6 +163,50 @@ def test_run_failure_is_logged_rather_than_printed(stubbed_run, capsys, caplog):
 
 
 # ---------------------------------------------------------------------------
+# cobra init
+# ---------------------------------------------------------------------------
+
+
+def test_init_writes_a_starter_that_parse_rejects_until_completed(config_dir: Path, capsys):
+    output = config_dir / "starter.json"
+    netlist = str(config_dir / "circuit.cir")
+
+    assert cli.main(["init", netlist, "-o", str(output)]) == EXIT_OK
+    captured = capsys.readouterr()
+    assert captured.out.strip() == str(output.resolve())
+    assert "No model for X1" in captured.err
+    assert "S21_dB" in captured.err
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["netlist"] == "circuit.cir"
+    assert payload["design_goals"] == []
+    assert cli.main(["parse", str(output), "--no-model-check"]) == EXIT_CONFIG
+
+    assert cli.main(["init", netlist, "-o", str(output), "--model", f"X1={config_dir / 'model.s2p'}"]) == EXIT_CONFIG
+    assert cli.main(["init", netlist, "-o", str(output), "--model", "X1=model.s2p", "--force"]) == EXIT_CONFIG
+    assert cli.main(
+        ["init", netlist, "-o", str(output), "--model", f"X1={config_dir / 'model.s2p'}", "--force"]
+    ) == EXIT_OK
+    assert json.loads(output.read_text(encoding="utf-8"))["component_models"] == {"X1": "model.s2p"}
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["no/such/file.cir"],
+        ["{netlist}", "--model", "X1"],
+        ["{netlist}", "--model", "Y1={model}"],
+    ],
+)
+def test_init_exits_two_on_invalid_input(config_dir: Path, arguments):
+    values = {"netlist": config_dir / "circuit.cir", "model": config_dir / "model.s2p"}
+    arguments = [argument.format(**values) for argument in arguments]
+
+    assert cli.main(["init", *arguments, "-o", str(config_dir / "out.json")]) == EXIT_CONFIG
+    assert not (config_dir / "out.json").exists()
+
+
+# ---------------------------------------------------------------------------
 # cobra doctor and global flags
 # ---------------------------------------------------------------------------
 

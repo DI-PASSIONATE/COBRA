@@ -22,6 +22,20 @@ as `cobra_config.json` in the new timestamped results directory. The snapshot is
 created before optimization starts, so it remains available if a run fails or is
 stopped.
 
+## Start from a Netlist
+
+`cobra init` writes a starter configuration for a netlist, with its analysis
+parameters, default optimizer and simulator settings, and the component models
+you name:
+
+```bash
+cobra init path/to/design.cir --model X1=path/to/model.onnx -o cobra_config.json
+```
+
+Add `design_goals` and `optimization_parameters` before running; a
+configuration without either is rejected by `cobra parse` and `cobra run`. See
+[Command Line](cli.md#starting-a-configuration) for the options.
+
 ## Run from the Command Line
 
 ```bash
@@ -58,6 +72,7 @@ netlist it references:
   model declares in its metadata (the surrogate is evaluated over that band);
 - every `netlist_variable` resolves to an element (or an `instance:parameter`)
   that exists, and every `model_input` matches an input of the mapped ONNX model;
+- at least one design goal and one optimization parameter are defined;
 - every design goal is buildable, its frequency range parses, and the analysis it
   needs is present or will be injected;
 - `simulation_parameters` name directives and `.options` categories the netlist
