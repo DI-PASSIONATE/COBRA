@@ -1,6 +1,6 @@
 ---
 name: cobra
-description: "Use when answering COBRA RFIC optimizer questions, reading its docs, creating or validating JSON configs, running COBRA from Python or the CLI, or checking a long-running optimization."
+description: "Use when answering COBRA RFIC optimizer questions, reading its docs, creating or validating JSON configs, running COBRA from Python or the CLI, checking a long-running optimization, or designing and optimizing a circuit end to end with surrogate models."
 argument-hint: "Ask about COBRA or describe an optimization target and netlist."
 user-invocable: true
 ---
@@ -19,11 +19,13 @@ optimization.
   nodes, goal parameters, and tunable variables.
 - Do not invent paths, component names, ports, HB nodes, bounds, frequencies, or
   simulator settings.
-- Ask for missing inputs before writing or running anything.
+- Ask for missing inputs before writing or running anything, all in one batch.
+  For end-to-end design tasks, follow the step order in
+  [design-workflow.md](./references/design-workflow.md).
 - Use the repository `.venv/` environment (preferably with uv); do not silently
   use a global install.
 - Never run simulations or optimizations in the foreground. Capture output and
-  report PID, log path, config/script path, and results location.
+  report the PID or task id, log path, config/script path, and results location.
 - Do not restart an interrupted job automatically. Preserve unrelated changes.
 
 ## CLI Surface
@@ -31,54 +33,39 @@ optimization.
 | Command | Purpose | Exit codes |
 | --- | --- | --- |
 | `cobra` | Launch the GUI | `0` |
+| `cobra doctor` | Check packages, Xyce, and Palace | `0` ok, `1` required dependency missing |
+| `cobra init NETLIST` | Write a starter config from a netlist | `0` written, `2` bad netlist, model, or existing output |
 | `cobra run CONFIG` | Run a saved JSON configuration | `0` done, `2` bad config, `1` run failed, `130` interrupted |
 | `cobra parse TARGET` | Report a config or netlist without running it | `0` no error, `2` at least one error |
+
+`cobra init` accepts `-o PATH`, repeated `--model NAME=PATH`, and `--force`. It
+fills in the analysis parameters, default backend settings, and models, and
+leaves `design_goals` and `optimization_parameters` empty. `parse` and `run`
+reject a config until both have at least one entry.
 
 `cobra parse` accepts `--json`, `--kind {auto,config,netlist}`, `--full`, and
 `--no-model-check`. `auto` treats `.json` files and JSON objects as
 configurations and everything else as a netlist.
 
-Only `parse` keeps stdout clean: the report is the sole thing on stdout while
-parser and model-loader chatter goes to stderr, so `--json` can be piped
-straight into a JSON reader. `run` and the GUI print a dependency and version
-banner first.
+Stdout carries only the requested output: the `parse` report, the `run`
+header and summary, the `doctor` table, or the path `init` wrote. Progress and
+diagnostics go to stderr, so `parse --json` can be piped straight into a JSON
+reader.
 
 ## Inspect Before Writing or Running
 
-`cobra parse` is the ground truth for everything the netlist decides. Run it
-before writing a config, and again to gate a run:
-
-```bash
-.venv/bin/cobra parse /absolute/path/design.cir
-.venv/bin/cobra parse /absolute/path/config.json && .venv/bin/cobra run /absolute/path/config.json
-```
-
-A **netlist** report gives the primary analysis, ports with `z0` and source
-amplitude, HB probe nodes, surrogate components needing a `component_models`
-entry, included and library files, the design-goal parameters the netlist
-supports (split into available now, with `.AC`, and with `.HB`), and every
-tunable netlist variable with its current value.
-
-A **config** report adds the cross-checks against the netlist it references:
-model files exist, load, and have as many ports as the instance has nodes;
-`model_input` names match the mapped ONNX inputs; `netlist_variable` names
-resolve to an element or `instance:parameter`; goals are buildable and their
-frequency ranges parse; `simulation_parameters` name real directives and
-`.options` categories; fine-tuning geometries resolve and cover every ONNX
-component.
-
-Read the `Issues` block, which is grouped by severity. Fix every ERROR; review
-WARNINGs before running. Long lists are truncated — pass `--full` when a name
-you need may have been cut off. JSON syntax alone is not validation.
-
-The same reports are available in Python from `cobra.configuration.inspection`:
-`inspect_path`, `inspect_netlist`, `inspect_configuration`, `render_report`,
-`has_errors`, and `count_issues`.
+`cobra parse` is the ground truth for everything the netlist decides. Run it on
+the netlist before writing a config, and on the config to gate every run
+(`cobra parse config.json && cobra run config.json`). Fix every ERROR and review
+every WARNING. What the reports contain and check is in
+[configuration.md](./references/configuration.md).
 
 ## Choose a Workflow
 
 Load only the relevant reference:
 
+- End-to-end design or optimization (spec → validated config → runs →
+  refinement → optional EM verification): [design-workflow.md](./references/design-workflow.md)
 - Documentation questions: [documentation.md](./references/documentation.md)
 - JSON creation or validation: [configuration.md](./references/configuration.md)
 - Python script runs: [python-runs.md](./references/python-runs.md)
@@ -90,11 +77,12 @@ coding style, and general implementation practices.
 ## Shared Request Rules
 
 For optimization requests, extract the netlist path, target and direction,
-signed value, frequency/range, variables and bounds, component model mapping,
-iteration count, analysis type, and optional fine-tuning settings. Ask only for
-unknown values. A goal does not say what may change.
+signed value, frequency/range, variables with bounds, step, and unit, component
+model mapping, iteration count, analysis type, and optional fine-tuning settings
+(Palace command and ORCA geometries). Ask only for unknown values. A goal does
+not say what may change.
 
-Use COBRA names such as `S11_dB`, `MODEL_INPUT`, `NETLIST_VARIABLE`, `.AC`,
+Use COBRA names such as `S11_dB`, `model_input`, `netlist_variable`, `.AC`,
 `.HB`, `OptunaOptimizer`, and `XyceSimulator`. Resolve “S11 less than 10 dB”
 with the user: it usually means `S11_dB <= -10`, but the signed convention must
 be confirmed. Do not silently choose a frequency or full sweep.

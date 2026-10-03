@@ -194,15 +194,42 @@ apply to a run may use empty objects or arrays.
 }
 ```
 
-Optimization parameter types are `model_input` and `netlist_variable`. Dynamic
-spectrum goals use `power_dbm`, `gain_db` or `isolation_db` as their `kind` and
-name the analysis they read in `analysis`: `"HB"` (the default) or `"TRAN"`, in
-which case the parameter name carries a `TRAN:` prefix, e.g.
-`TRAN:Power_dBm[Out]`. Gain goals additionally store the input port, source
-amplitude, and impedance required to reconstruct their power reference. An `isolation_db` goal needs a
-`frequency_range` naming the wanted line — its value is the margin in dB down to
-the strongest other line in the spectrum, DC excluded — and is rejected without
-one.
+### Optimization Parameters
+
+| Field | Meaning |
+| --- | --- |
+| `type` | `model_input` (a geometry input of an ONNX surrogate) or `netlist_variable` (an element value or instance parameter in the netlist) |
+| `name` | `<component>:<onnx input>` for `model_input`, e.g. `X1:width`; an element (`C1`) or `<instance>:<parameter>` (`Xq1:Nx`) for `netlist_variable`. `cobra parse` lists both |
+| `min_value`, `max_value` | Search bounds. Keep `model_input` bounds inside the range the model was trained on (its `input_parameter_ranges` metadata); the surrogate is not valid outside it |
+| `step` | Grid the values snap to; `null` for continuous |
+| `unit` | SPICE scale suffix appended to `netlist_variable` values: `"p"` writes `1.5` as `1.5p`. `null` for `model_input` |
+| `linked_to` | Name of another parameter this one mirrors, e.g. for symmetric windings. Links must not form a cycle |
+
+### Design Goals
+
+Every goal needs a `parameter`, a `kind`, and at least one of `min_value` and
+`max_value`. `weight` (default `1.0`, must be positive) sets its share of the
+penalty. `frequency_range` is a single frequency (`"130GHz"`, the nearest point
+or spectral line) or a band (`"125-135GHz"`, every point or line inside counts);
+`null` uses the whole sweep.
+
+| `kind` | `parameter` | Also required |
+| --- | --- | --- |
+| `catalogue` | An `.AC` parameter such as `S21_dB`, `Qp`, `k` or `K` | — |
+| `power_dbm` | `Power_dBm[<node>]` | `node` |
+| `gain_db` | `Gain_dB[<port>@<node>]` | `node`; `port`, a driven port; `source_amplitude`, its SIN amplitude in volts; `impedance`, its `z0` |
+| `isolation_db` | `Isolation_dB[<node>]` | `node`; `frequency_range`, naming the wanted line |
+
+`node` must be a probe node and `port` a port of the netlist, spelled exactly as
+`cobra parse` lists them: names are case-sensitive, so `OUT` and `Out` differ.
+
+The spectrum goals (`power_dbm`, `gain_db`, `isolation_db`) name the analysis
+they read in `analysis`: `"HB"` (the default) or `"TRAN"`, in which case the
+parameter name carries a `TRAN:` prefix, e.g. `TRAN:Power_dBm[Out]`. Gain goals
+store the drive level so their power reference can be reconstructed. An
+isolation goal's value is the margin in dB down to the strongest other line in
+the spectrum, DC excluded. See [Harmonic Balance](../advanced/harmonic-balance.md)
+and [Transient](../advanced/transient.md).
 
 `fine_tuning.palace_processes` is the number of MPI ranks Palace uses per EM
 simulation; the Xyce simulator takes the equivalent `parallel_xyce_processes`
