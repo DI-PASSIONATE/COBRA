@@ -1068,7 +1068,7 @@ def _check_optimization_parameters(
     if not configuration.optimization_parameters:
         report.issues.append(
             Issue(
-                Severity.WARNING,
+                Severity.ERROR,
                 "optimization_parameters",
                 "No optimization parameters defined; every iteration would simulate the same design.",
             )
@@ -1141,7 +1141,7 @@ def _check_design_goals(
 
     if not configuration.design_goals:
         report.issues.append(
-            Issue(Severity.WARNING, "design_goals", "No design goals defined; nothing to optimize for.")
+            Issue(Severity.ERROR, "design_goals", "No design goals defined; nothing to optimize for.")
         )
 
 
