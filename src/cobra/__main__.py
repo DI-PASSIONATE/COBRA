@@ -1,7 +1,8 @@
 """Command-line entry point for COBRA.
 
 Output contract: stdout carries only what was asked for -- the ``parse``
-report, the ``run`` summary, the ``doctor`` table -- so ``cobra parse --json``
+report, the ``run`` summary, the ``doctor`` table, the path ``init`` wrote --
+so ``cobra parse --json``
 stays pipeable.  Progress and diagnostics go to stderr through
 :mod:`cobra.console`, which owns the formatting primitives.
 
@@ -33,6 +34,8 @@ EXIT_INTERRUPTED = 130
 _EPILOG = """\
 examples:
   cobra                              open the graphical interface
+  cobra init design.cir --model X1=coil.onnx
+                                     write a starter configuration for a netlist
   cobra parse design.cir             report what COBRA reads from a netlist
   cobra parse config.json --json     the same report as JSON, on stdout
   cobra parse config.json && cobra run config.json
@@ -103,6 +106,35 @@ def _parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("config", metavar="CONFIG", help="Path to a COBRA JSON configuration")
     _add_output_arguments(run_parser, inherit=True)
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Write a starter JSON configuration for a netlist",
+        description=(
+            "Write a configuration filled in from a netlist: its analysis parameters and "
+            "the component models given with --model. Design goals and optimization "
+            "parameters are left empty to be added before `cobra run`."
+        ),
+    )
+    init_parser.add_argument("netlist", metavar="NETLIST", help="Path to a Xyce netlist")
+    init_parser.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        default=None,
+        help="Where to write the configuration (default: NETLIST_STEM_config.json here)",
+    )
+    init_parser.add_argument(
+        "--model",
+        metavar="NAME=PATH",
+        action="append",
+        default=[],
+        help="ONNX or Touchstone model for component NAME; repeat for each component",
+    )
+    init_parser.add_argument(
+        "--force", action="store_true", help="Overwrite the output file if it exists"
+    )
+    _add_output_arguments(init_parser, inherit=True)
 
     parse_parser = subparsers.add_parser(
         "parse",
@@ -191,6 +223,55 @@ def _run_config(path: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# cobra init
+# ---------------------------------------------------------------------------
+
+
+def _model_mapping(entries: list[str]) -> dict[str, str]:
+    """Turn repeated ``--model NAME=PATH`` arguments into a component-to-model mapping."""
+    from cobra.configuration import ConfigurationError
+
+    models = {}
+    for entry in entries:
+        name, separator, path = entry.partition("=")
+        if not separator or not name or not path:
+            raise ConfigurationError(f"--model expects NAME=PATH, got '{entry}'")
+        models[name] = path
+    return models
+
+
+def _init_config(args: argparse.Namespace) -> int:
+    """Write a starter configuration for a netlist; return the process exit code."""
+    from pathlib import Path
+
+    from cobra.configuration import ConfigurationError
+    from cobra.configuration.initialization import initial_configuration
+
+    output = Path(args.output or f"{Path(args.netlist).stem}_config.json")
+    if output.exists() and not args.force:
+        logger.error("%s already exists; pass --force to overwrite it", output)
+        return EXIT_INVALID
+    try:
+        initial = initial_configuration(args.netlist, _model_mapping(args.model))
+        written = initial.configuration.save(output)
+    except (ConfigurationError, OSError) as exc:
+        logger.error("%s", exc)  # noqa: TRY400 - a bad netlist or path is user input, not a crash
+        logger.debug("Traceback for the failure above", exc_info=exc)
+        return EXIT_INVALID
+
+    write(str(written))
+    if initial.unmapped_components:
+        logger.warning(
+            "No model for %s; add them under component_models or pass --model NAME=PATH",
+            ", ".join(initial.unmapped_components),
+        )
+    goals = ", ".join(initial.goal_parameters) or "none detected"
+    logger.info("Add design_goals (available: %s) and optimization_parameters", goals)
+    logger.info("Then check the configuration with `cobra parse %s`", output)
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # cobra parse
 # ---------------------------------------------------------------------------
 
@@ -258,7 +339,7 @@ def _launch_gui() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Launch the GUI, execute a saved configuration, or report on an input file."""
+    """Launch the GUI, execute or write a configuration, or report on an input file."""
     args = _parser().parse_args(argv)
     configure_logging(
         verbose=getattr(args, "verbose", 0),
@@ -267,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
         color=False if getattr(args, "no_color", False) else None,
     )
 
+    if args.command == "init":
+        return _init_config(args)
     if args.command == "parse":
         return _parse_target(args)
     if args.command == "run":

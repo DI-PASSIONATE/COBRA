@@ -1,16 +1,17 @@
 ---
-title: Command Line – cobra run, parse and doctor
+title: Command Line – cobra init, run, parse and doctor
 description: >-
-  Reference for the cobra command line: run a JSON configuration, parse a netlist, check the environment with cobra doctor, output options, and exit codes.
+  Reference for the cobra command line: start a configuration from a netlist, run a JSON configuration, parse a netlist, check the environment with cobra doctor, output options, and exit codes.
 ---
 
 # Command Line
 
-The `cobra` command runs a saved configuration, inspects an input file, checks
-the environment, or opens the GUI.
+The `cobra` command starts a configuration from a netlist, runs a saved
+configuration, inspects an input file, checks the environment, or opens the GUI.
 
 ```bash
 cobra                              # open the graphical interface
+cobra init design.cir              # write a starter configuration for a netlist
 cobra run config.json              # run a saved configuration headlessly
 cobra parse design.cir             # report what COBRA reads from an input file
 cobra doctor                       # check simulators and optional packages
@@ -22,6 +23,7 @@ cobra <command> --help
 
 | Command | Purpose |
 | --- | --- |
+| `init NETLIST` | Write a starter JSON configuration for a netlist |
 | `run CONFIG` | Execute a saved JSON configuration without the GUI |
 | `parse TARGET` | Report a configuration or netlist without running it |
 | `doctor` | Report the Python packages and simulators COBRA found |
@@ -49,12 +51,40 @@ cobra run config.json --quiet --log-file results/run.log
 ## What Goes Where
 
 Requested output — the `parse` report, the `run` header and summary, the
-`doctor` table — is written to **stdout**. Progress and diagnostics are written
-to **stderr**. Piping a report therefore stays safe:
+`doctor` table, the path `init` wrote — is written to **stdout**. Progress and
+diagnostics are written to **stderr**. Piping a report therefore stays safe:
 
 ```bash
 cobra parse config.json --json > report.json
 ```
+
+## Starting a Configuration
+
+`cobra init` writes a configuration filled in from a netlist, to be completed
+and checked before a run:
+
+```bash
+cobra init design.cir --model X1=models/coil.onnx -o design_config.json
+# add design_goals and optimization_parameters, then:
+cobra parse design_config.json && cobra run design_config.json
+```
+
+| Option | Effect |
+| --- | --- |
+| `-o`, `--output PATH` | Where to write the file (default: `<netlist stem>_config.json` in the current directory) |
+| `--model NAME=PATH` | ONNX or Touchstone model for component `NAME`; repeat for each component |
+| `--force` | Overwrite an existing output file |
+
+The file contains the netlist, the parameters of its analysis directives (`.AC`,
+`.HB`, `.TRAN`, `.DC`), the default optimizer and simulator settings, and a
+model for every component given with `--model` or whose netlist `TSTONEFILE`
+exists. Paths are written relative to the output file. Components still without
+a model are listed on stderr, together with the design-goal parameters the
+netlist supports.
+
+`design_goals` and `optimization_parameters` are left empty: they are design
+decisions COBRA cannot infer. `cobra parse` and `cobra run` reject a
+configuration until both have at least one entry.
 
 ## Running a Configuration
 

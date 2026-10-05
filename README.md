@@ -178,6 +178,13 @@ saved configuration restores the netlist, component models, simulation settings,
 optimizer and simulator options, optimization parameters, goals, and optional
 fine-tuning settings.
 
+Or start a configuration from a netlist on the command line, then add its
+design goals and optimization parameters:
+
+```bash
+cobra init design.cir --model X1=models/coil.onnx -o cobra_config.json
+```
+
 Run the same configuration without opening the GUI:
 
 ```bash

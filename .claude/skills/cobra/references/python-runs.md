@@ -32,9 +32,10 @@ path. Use the same Spack setup in the child shell when required:
 
 ```bash
 log="$PWD/cobra-python-$(date +%Y%m%d-%H%M%S).log"
-nohup bash -lc 'source "$HOME/path/to/spack/share/spack/setup-env.sh" && spack load xyce && command -v Xyce && Xyce --version && exec "/absolute/repo/.venv/bin/python" "/absolute/script.py"' >"$log" 2>&1 &
+nohup bash -lc 'source "/absolute/path/to/spack/share/spack/setup-env.sh" && spack load xyce && command -v Xyce && Xyce --version && "/absolute/repo/.venv/bin/python" "/absolute/script.py"; echo "COBRA_EXIT=$?"' >"$log" 2>&1 &
 echo "PID=$! LOG=$log RESULTS=$PWD/results"
 ```
 
-Without Spack, remove the `source` and `spack load` commands. Do not claim
-success before the process exits.
+Without Spack, remove the `source` and `spack load` commands. Starting, waiting,
+and monitoring follow [cli-runs.md](./cli-runs.md#background-execution). Do not
+claim success before `COBRA_EXIT=0` appears in the log.

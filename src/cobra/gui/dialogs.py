@@ -3,6 +3,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QLocale
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QComboBox,
@@ -36,6 +37,22 @@ _FREQUENCY_UNITS = {"hz": "Hz", "khz": "kHz", "mhz": "MHz", "ghz": "GHz"}
 _FREQ_ANY = "Whole sweep / spectrum"
 _FREQ_POINT = "Single frequency"
 _FREQ_RANGE = "Frequency range"
+
+
+def _number_validator(bottom: float, top: float, parent: QDialog,
+                      notation: QDoubleValidator.Notation) -> QDoubleValidator:
+    """A validator for dot-decimal numbers, independent of the system locale.
+
+    The default locale would accept ``-10,5`` (which ``float()`` cannot parse)
+    and reject ``-10.0`` (which ``str(float)`` writes back on a comma-decimal
+    system such as ``de_DE``).
+    """
+    locale = QLocale.c()
+    locale.setNumberOptions(QLocale.NumberOption.RejectGroupSeparator)
+    validator = QDoubleValidator(bottom, top, 15, parent)
+    validator.setNotation(notation)
+    validator.setLocale(locale)
+    return validator
 
 
 def _ok_cancel_buttons(dialog: QDialog) -> QDialogButtonBox:
@@ -82,16 +99,16 @@ class DesignGoalDialog(QDialog):
         self.weight_edit = QLineEdit()
         self.weight_edit.setPlaceholderText("Default: 1.0")
         self.weight_edit.setText("1.0")
-        weight_validator = QDoubleValidator(0.0, 1e15, 15, self)
-        weight_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
-        self.weight_edit.setValidator(weight_validator)
+        # Scientific notation, as str(float) writes small values like 1e-05.
+        self.weight_edit.setValidator(
+            _number_validator(0.0, 1e15, self, QDoubleValidator.Notation.ScientificNotation)
+        )
 
         self.min_edit = QLineEdit()
         self.max_edit = QLineEdit()
         self.min_edit.setPlaceholderText("Optional")
         self.max_edit.setPlaceholderText("Optional")
-        value_validator = QDoubleValidator(-1e15, 1e15, 15, self)
-        value_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        value_validator = _number_validator(-1e15, 1e15, self, QDoubleValidator.Notation.ScientificNotation)
         self.min_edit.setValidator(value_validator)
         self.max_edit.setValidator(value_validator)
 
@@ -100,8 +117,8 @@ class DesignGoalDialog(QDialog):
         self.freq_min_label = QLabel("Frequency")
         self.freq_min_edit = QLineEdit()
         self.freq_max_edit = QLineEdit()
-        freq_validator = QDoubleValidator(0.0, 1e15, 15, self)
-        freq_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        # Standard notation: _FREQUENCY_RE does not parse exponents.
+        freq_validator = _number_validator(0.0, 1e15, self, QDoubleValidator.Notation.StandardNotation)
         self.freq_min_edit.setValidator(freq_validator)
         self.freq_max_edit.setValidator(freq_validator)
         self.freq_unit_combo = QComboBox()

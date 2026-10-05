@@ -162,6 +162,13 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
             f"{', '.join(SIMULATOR_REGISTRY)}"
         ) from exc
 
+    if not configuration.design_goals:
+        raise ConfigurationError("No design goals defined; add at least one to design_goals")
+    if not configuration.optimization_parameters:
+        raise ConfigurationError(
+            "No optimization parameters defined; add at least one to optimization_parameters"
+        )
+
     parser = XyceNetlistParser().from_file(configuration.netlist)
     components = set(parser.components)
     configured_components = set(configuration.component_models)
