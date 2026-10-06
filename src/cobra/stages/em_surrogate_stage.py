@@ -155,7 +155,15 @@ class EMSurrogateStage(COBRABaseStage):
         self,
         s_param_dict: dict, frequencies: np.ndarray
     ) -> tuple[int, rf.Network, dict]:
-        N = int(np.sqrt(len(s_param_dict) // 2))  # number of ports
+        """
+        Build a network from the model's ``S<i><j>_real``/``_imag`` outputs.
+
+        Accepts the full N x N matrix and the upper triangle only (ORCA's
+        ``UpperTriangleReImCodec``), whose missing lower triangle is filled from its
+        transpose. The port count is the highest index in the names, as the number of
+        outputs is ambiguous between the two (72 is a full 6-port or an 8-port triangle).
+        """
+        N = max(max(int(name[1]), int(name[2])) for name in s_param_dict)  # number of ports
 
         num_freq = len(frequencies)
 
@@ -169,8 +177,9 @@ class EMSurrogateStage(COBRABaseStage):
         # Fill S-matrix
         for i in range(N):
             for j in range(N):
-                real = np.array(s_param_dict[f"S{i + 1}{j + 1}_real"]).squeeze()
-                imag = np.array(s_param_dict[f"S{i + 1}{j + 1}_imag"]).squeeze()
+                name = f"S{i + 1}{j + 1}" if f"S{i + 1}{j + 1}_real" in s_param_dict else f"S{j + 1}{i + 1}"
+                real = np.array(s_param_dict[f"{name}_real"]).squeeze()
+                imag = np.array(s_param_dict[f"{name}_imag"]).squeeze()
 
                 if real.shape[0] != num_freq or imag.shape[0] != num_freq:
                     raise ValueError(
