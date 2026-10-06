@@ -33,7 +33,7 @@ OPTIONAL_MODULES = (
     ("pyqtgraph", "live plots in the GUI"),
     ("matplotlib", "result plots"),
     ("onnxruntime", "ONNX surrogate models"),
-    ("gmsh", "geometry meshing for EM fine-tuning"),
+    ("gmsh", "geometry meshing for EM fine-tuning, installed with ORCA"),
     ("huggingface_hub", "the model browser"),
     ("orca", "EM fine-tuning geometries"),
 )

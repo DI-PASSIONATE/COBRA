@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import gmsh
 import numpy as np
 import onnxruntime
 import pyqtgraph as pg
@@ -108,7 +107,6 @@ _ACTION_STATES: dict[str, tuple[str, str]] = {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        gmsh.initialize()
 
         self._theme = theme_manager()
         self._theme.theme_changed.connect(self._on_theme_changed)
