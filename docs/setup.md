@@ -14,11 +14,12 @@ description: >-
 
 Optional:
 
-- ORCA installed/importable if you use ORCA geometry presets/classes
+- ORCA, for EM fine-tuning and its geometry presets: `pip install "cobra-rfic[orca]"`
+  (`uv sync` installs it for development)
 - Palace if you want EM fine-tuning
 
 !!! note
-	COBRA supports Python 3.11 to 3.13; 3.14 has no PySide6, gmsh or onnxruntime wheels yet.
+	COBRA supports Python 3.11 to 3.13; 3.14 has no PySide6 or onnxruntime wheels yet, nor gmsh wheels for EM fine-tuning.
 
 ## Install COBRA
 

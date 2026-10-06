@@ -130,7 +130,7 @@
       "X1": {
         "source": "preset",
         "class_name": "TransformerOcta",
-        "module": "orca.geometry.presets.tf_octa_c_ports",
+        "module": "orca.geometry.presets",
         "file": null
       }
     }

@@ -58,7 +58,7 @@ In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA 
 Optional:
 
 - [AWS Palace](https://awslabs.github.io/palace/stable/), if you want EM fine-tuning
-- [ORCA](https://github.com/DI-PASSIONATE/ORCA) installed/importable in your Python environment if you use ORCA geometry presets/classes in scripts or GUI fine-tuning
+- [ORCA](https://github.com/DI-PASSIONATE/ORCA), if you want EM fine-tuning or its geometry presets: `pip install "cobra-rfic[orca]"`
 
 ### For users: install from PyPI
 
@@ -479,7 +479,7 @@ This two-phase approach (fast surrogate loop + occasional EM verification) gives
 ## Troubleshooting
 
 - If `cobra` command is not found, ensure your virtual environment is activated and reinstall with `pip install -e .`.
-- If geometry presets fail to load, verify ORCA is installed and importable in the same environment.
+- If geometry presets fail to load, verify ORCA is installed in the same environment (`pip install "cobra-rfic[orca]"`).
 - If circuit simulation fails, verify Xyce is installed and available in your `PATH`.
 - If `AutoSampler` fails to initialize, install its optional dependencies: `pip install optunahub cmaes scipy torch`.
 

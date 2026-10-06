@@ -1,10 +1,9 @@
 """Example COBRA workflow using mixed component sources and linked netlist values."""
 import os
 
-# ORCA is an optional dependency; this example only runs with it installed.
-from orca.geometry.presets.tf_octa_c_ports import (  # ty: ignore[unresolved-import]
-    TransformerOcta,
-)
+# ORCA is an optional dependency (`pip install "cobra-rfic[orca]"`); this example only
+# runs with it installed.
+from orca.geometry.presets import TransformerOcta
 
 from cobra import (
     COBRA,

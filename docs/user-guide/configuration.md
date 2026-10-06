@@ -259,7 +259,8 @@ done rather than time elapsed and therefore add up to more than `wall time` when
 trials ran concurrently — the log line names both numbers so they cannot be
 confused.
 
-Fine-tuning presets store their Python module and class name. Custom geometries
+Fine-tuning presets store their class name and the module ORCA exports its presets
+from, `orca.geometry.presets`. Custom geometries
 store a JSON-relative Python file and class name. ORCA is imported only when an
 enabled configuration requires a geometry.
 
