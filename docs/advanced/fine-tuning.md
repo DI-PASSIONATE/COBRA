@@ -15,7 +15,8 @@ Surrogate optimization is fast. Fine-tuning adds higher-fidelity EM verification
 ## Requirements
 
 - Palace installed and callable.
-- ORCA geometry object available in Python workflow.
+- ORCA 2.1 or newer, installed with `pip install "cobra-rfic[orca]"`, and an ORCA geometry
+  for every ONNX component.
 
 ## Enabling Fine-Tuning
 
@@ -35,8 +36,9 @@ Key options:
 ## High-Level Loop
 
 1. The first iteration verifies the parameters the surrogate optimization ended with.
-2. For each ONNX component, build the geometry from the current parameters, mesh it,
-   and run Palace. Touchstone (`.snp`) components keep their file.
+2. For each ONNX component, ORCA's `simulate_geometry` draws the geometry from the current
+   parameters, meshes it with that sample's own ports and runs Palace, exactly as for the
+   model's training data. Touchstone (`.snp`) components keep their file.
 3. Simulate the circuit with the Palace results and check the design goals.
 4. Stop when the goals are met or the iteration budget is exhausted. Otherwise the
    fine-tuning optimizer suggests the next parameters, geometry and netlist values alike.
@@ -47,20 +49,25 @@ and writes its parameters into the run's netlist.
 Each iteration runs in its own folder, `fine_tuning/iteration_NN/` inside the results
 folder, holding its netlist, GDS file, Palace model and Touchstone results.
 
-If a Palace run fails, fine-tuning stops with an error that names the component. ORCA
-logs the reason just above it.
+An iteration whose parameters violate a feasibility constraint of a component's ONNX model
+is not sent to Palace; it is scored like a failed simulation and the optimizer moves on.
+If a component cannot be simulated otherwise, fine-tuning stops with an error that names the
+component and the reason: parameters the geometry rejects as infeasible (when the model
+declares no constraints), a degenerate mesh that Palace could not solve, or a failed Palace
+run, whose log ORCA prints just above.
 
 ## Frequency Range
 
 Palace simulates the band set in the geometry's simconfig file (`fstart`, `fstop`,
-`fstep`, in GHz), not the circuit's `.AC` sweep. ORCA's `TransformerOcta` preset, for
-example, sweeps 1–500 GHz in 1 GHz steps, which is slow. To shorten fine-tuning, subclass
+`fstep`, in GHz, plus the single frequencies in `fpoint`), not the circuit's `.AC` sweep.
+ORCA's presets, for example, sweep 0–500 GHz in 1 GHz steps plus extra points below 10 GHz,
+which is slow. To shorten fine-tuning, subclass
 the geometry with a narrower simconfig and select it as a custom geometry:
 
 ```python
 from dataclasses import dataclass
 
-from orca.geometry.presets.tf_octa_c_ports import TransformerOcta
+from orca.geometry.presets import TransformerOcta
 
 
 @dataclass

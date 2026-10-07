@@ -11,8 +11,8 @@ authors:
 - family-names: "Franchi"
   given-names: "Norman"
   orcid: "https://orcid.org/0000-0002-2777-4722"
-version: 1.5.0
-date-released: 2026
+version: 2.0.0
+date-released: 2026-10-06
 url: "https://github.com/DI-PASSIONATE/COBRA"
 preferred-citation:
   type: conference-paper
@@ -43,10 +43,16 @@ preferred-citation:
       given-names: "Norman"
       orcid: "https://orcid.org/0000-0002-2777-4722"
   title: "COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design"
-  collection-title: "2026 39nd SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)"
+  collection-title: "2026 39th SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)"
   conference:
-    name: "Symposium on Integrated Circuits and System Design"
+    name: "Symposium on Integrated Circuits and Systems Design"
+    date-start: 2026-08-24
+    date-end: 2026-08-28
   year: 2026
+  month: 8
+  start: 1
+  end: 5
   publisher:
     name: "IEEE"
-  url: "https://github.com/DI-PASSIONATE/COBRA"
+  doi: "10.1109/SBCCI69725.2026.11706804"
+  url: "https://ieeexplore.ieee.org/document/11706804"

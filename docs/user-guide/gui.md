@@ -15,7 +15,8 @@ cobra
 ## What You Can Configure
 
 - Netlist source
-- Component-to-model mapping (`.onnx` or `.sNp`)
+- Component-to-model mapping (`.onnx` or `.sNp`). Hover over the model field to see what
+  an ONNX model declares: its band, trained ranges, feasibility constraints and guarantees
 - Design goals (S-parameter and RF metrics)
 - Analysis point, when the run includes a Harmonic Balance or transient analysis
 - Optimization parameters and ranges

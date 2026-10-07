@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from cobra.configuration import ConfigurationError, GeometryConfig
 from cobra.configuration.geometry_loader import (
+    PRESETS_MODULE,
     discover_custom_geometries,
     discover_preset_geometries,
 )
@@ -171,7 +172,7 @@ class GeometrySelectorWidget(QGroupBox):
         return GeometryConfig(
             source="preset",
             class_name=cls.__name__,
-            module=cls.__module__,
+            module=PRESETS_MODULE,
         )
 
     def apply_configuration(self, config: GeometryConfig) -> None:
@@ -197,7 +198,11 @@ class GeometrySelectorWidget(QGroupBox):
         self.reload_presets(show_errors=False)
         for index in range(self._preset_combo.count()):
             cls = self._preset_combo.itemData(index)
-            if cls and cls.__name__ == config.class_name and cls.__module__ == config.module:
+            # Configs saved before ORCA exported its presets name the defining module
+            if cls and cls.__name__ == config.class_name and config.module in (
+                PRESETS_MODULE,
+                cls.__module__,
+            ):
                 self._preset_combo.setCurrentIndex(index)
                 return
         raise ConfigurationError(

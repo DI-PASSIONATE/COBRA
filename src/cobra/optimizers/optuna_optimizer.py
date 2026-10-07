@@ -82,7 +82,6 @@ class OptunaOptimizer(BaseOptimizer):
         self.sampler_kwargs = sampler_kwargs or {}
         self.pruner_kwargs = pruner_kwargs or {}
         self.study: optuna.study.Study | None = None
-        self.parallel_trials = 1
         self._param_to_trial_name: dict[str, str] = {}
 
     @staticmethod
@@ -125,13 +124,7 @@ class OptunaOptimizer(BaseOptimizer):
             raise TypeError("sampler must be a string, an Optuna sampler instance, or None.")
 
         if sampler_name in {"tpe", "tpesampler"}:
-            # With several trials in flight, TPE would keep suggesting the same
-            # point until the first result arrives; the constant liar penalises
-            # running trials so concurrent asks explore different regions.
-            kwargs = dict(self.sampler_kwargs)
-            if self.parallel_trials > 1:
-                kwargs.setdefault("constant_liar", True)
-            return optuna.samplers.TPESampler(**kwargs)
+            return optuna.samplers.TPESampler(**self.sampler_kwargs)
         if sampler_name in {"random", "randomsampler"}:
             return optuna.samplers.RandomSampler(**self.sampler_kwargs)
         if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
@@ -170,8 +163,7 @@ class OptunaOptimizer(BaseOptimizer):
             "Unsupported pruner. Choose one of: MedianPruner, SuccessiveHalvingPruner, HyperbandPruner."
         )
 
-    def initialize(self, num_goals: int, parallel_trials: int = 1):
-        self.parallel_trials = parallel_trials
+    def initialize(self, num_goals: int, parallel_trials: int = 1):  # noqa: ARG002 - part of the BaseOptimizer interface
         # Optuna installs its own handler and announces every trial; COBRA already
         # reports progress, so let its chatter follow COBRA's own verbosity.
         optuna.logging.set_verbosity(
@@ -189,6 +181,11 @@ class OptunaOptimizer(BaseOptimizer):
     def tell(self, context: "OptimizationContext", penalty: list[float] | float):
         trial = context.trial
         self._get_study().tell(trial, penalty)
+
+    def reject(self, context: "OptimizationContext", loss: list[float]):  # noqa: ARG002 - part of the BaseOptimizer interface
+        # Pruned rather than penalised: TPE ranks a pruned trial below every
+        # completed one without a made-up objective value distorting the study.
+        self._get_study().tell(context.trial, state=optuna.trial.TrialState.PRUNED)
 
     def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         trial = self._get_study().ask()

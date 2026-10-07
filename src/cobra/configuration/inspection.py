@@ -13,7 +13,6 @@ information can be rendered as text for humans or emitted as JSON for agents.
 from __future__ import annotations
 
 import json
-import math
 import re
 import shutil
 from dataclasses import asdict, dataclass, field
@@ -23,6 +22,7 @@ from typing import Any
 
 from cobra.configuration.configuration import (
     ConfigurationError,
+    OptimizationParameterConfig,
     RunConfiguration,
 )
 from cobra.optimizers.base_optimizer import OptimizationType
@@ -489,6 +489,12 @@ class ComponentModelReport:
     model_inputs: list[str] = field(default_factory=list)
     model_frequency_range: tuple[float, float] | None = None
     """Band (Hz) an ONNX model declares in its metadata; the surrogate is evaluated over it."""
+    model_input_ranges: dict[str, tuple[float, float]] = field(default_factory=dict)
+    """Range each geometry input of an ONNX model was trained on, from its metadata."""
+    model_constraints: list[str] = field(default_factory=list)
+    """Feasibility expressions an ONNX model declares; trials that violate one are skipped."""
+    model_guarantees: dict[str, bool] = field(default_factory=dict)
+    """Physical properties an ONNX model enforces by construction."""
     detail: str | None = None
 
 
@@ -719,29 +725,44 @@ def _inspect_touchstone(path: Path) -> tuple[int | None, str | None]:
         return None, f"Touchstone file could not be read: {exc}"
 
 
-def _inspect_onnx(
-    path: Path,
-) -> tuple[int | None, list[str], tuple[float, float] | None, str | None]:
-    """Return (ports, input names, frequency range, detail) for an ONNX surrogate model."""
+def _inspect_onnx(path: Path, entry: ComponentModelReport) -> str | None:
+    """Fill *entry* from the ONNX surrogate at *path*; return why it could not be read, if so.
+
+    Raises:
+        ConfigurationError: If the model's ``input_constraints`` are malformed, which
+            makes the run refuse the model.
+    """
     try:
         from onnxruntime import InferenceSession
 
-        from cobra.stages.em_surrogate_stage import surrogate_frequency_range
+        from cobra.stages.surrogate_metadata import (
+            FeasibilityConstraints,
+            SurrogateMetadata,
+            surrogate_port_count,
+        )
     except ImportError as exc:
-        return None, [], None, f"onnxruntime is unavailable ({exc})"
+        return f"onnxruntime is unavailable ({exc})"
     try:
         session = InferenceSession(str(path), providers=["CPUExecutionProvider"])
     except Exception as exc:  # noqa: BLE001 - onnxruntime errors derive from Exception
-        return None, [], None, f"ONNX model could not be loaded: {exc}"
-    inputs = [node.name for node in session.get_inputs()]
+        return f"ONNX model could not be loaded: {exc}"
+    entry.model_inputs = [node.name for node in session.get_inputs()]
+    metadata = SurrogateMetadata.from_session(session)
+    entry.model_frequency_range = metadata.frequency_range
+    geometry_inputs = [name for name in entry.model_inputs if name not in _IMPLICIT_MODEL_INPUTS]
+    entry.model_input_ranges = {
+        name: bounds for name, bounds in metadata.input_ranges.items() if name in geometry_inputs
+    }
+    entry.model_guarantees = metadata.guarantees
+    entry.model_constraints = FeasibilityConstraints(metadata.constraints, geometry_inputs).expressions
     outputs = [node.name for node in session.get_outputs()]
-    frequency_range = surrogate_frequency_range(session)
-    ports = math.isqrt(len(outputs) // 2)
-    # Every port pair contributes an Sij real and imaginary output.
-    if 2 * ports * ports != len(outputs):
-        detail = f"Model has {len(outputs)} outputs, which is not 2*N*N S-parameters"
-        return None, inputs, frequency_range, detail
-    return ports, inputs, frequency_range, None
+    entry.model_ports = surrogate_port_count(outputs)
+    if entry.model_ports is None:
+        return (
+            f"Model outputs ({len(outputs)}) are not the S<i><j>_real/_imag entries of a full "
+            "or upper-triangle S-matrix"
+        )
+    return None
 
 
 def _check_component_models(
@@ -801,19 +822,21 @@ def _check_component_models(
             if entry.kind == "touchstone":
                 entry.model_ports, entry.detail = _inspect_touchstone(model_path)
             else:
-                (
-                    entry.model_ports,
-                    entry.model_inputs,
-                    entry.model_frequency_range,
-                    entry.detail,
-                ) = _inspect_onnx(model_path)
-                if entry.detail is None and entry.model_frequency_range is None:
+                refused = False
+                try:
+                    entry.detail = _inspect_onnx(model_path, entry)
+                except ConfigurationError as exc:
+                    refused = True
+                    report.issues.append(
+                        Issue(Severity.ERROR, location, f"The run would refuse this model: {exc}")
+                    )
+                if not refused and entry.detail is None and entry.model_frequency_range is None:
                     report.issues.append(
                         Issue(
                             Severity.ERROR,
                             location,
-                            "Model declares no frequency range: the run needs "
-                            "input_parameter_ranges.frequency (min and max in Hz) in the ONNX "
+                            "Model declares no usable frequency range: the run needs "
+                            "input_parameter_ranges.frequency (0 <= min < max, in Hz) in the ONNX "
                             "metadata to know the band the surrogate is valid over.",
                         )
                     )
@@ -935,6 +958,12 @@ def _check_optimization_parameters(
         if entry.kind == "onnx"
     }
     used_inputs: dict[str, set[str]] = {component: set() for component in model_inputs}
+    model_ranges = {
+        entry.component: entry.model_input_ranges
+        for entry in report.component_models
+        if entry.kind == "onnx"
+    }
+    by_name = {parameter.name: parameter for parameter in configuration.optimization_parameters}
 
     for parameter in configuration.optimization_parameters:
         entry = OptimizationParameterReport(
@@ -1048,6 +1077,10 @@ def _check_optimization_parameters(
                             f"{', '.join(names) or 'none'}",
                         )
                     )
+                elif input_name in model_ranges[component]:
+                    _check_trained_range(
+                        parameter, by_name, component, input_name, model_ranges[component][input_name], location, report
+                    )
         report.optimization_parameters.append(entry)
 
     for component, names in model_inputs.items():
@@ -1073,6 +1106,37 @@ def _check_optimization_parameters(
                 "No optimization parameters defined; every iteration would simulate the same design.",
             )
         )
+
+
+def _check_trained_range(
+    parameter: OptimizationParameterConfig,
+    by_name: dict[str, OptimizationParameterConfig],
+    component: str,
+    input_name: str,
+    trained: tuple[float, float],
+    location: str,
+    report: ConfigurationReport,
+) -> None:
+    """Warn when *parameter* can take values outside the range its model input was trained on.
+
+    A linked parameter takes its values from its master, so the master's bounds count.
+    """
+    master = parameter
+    while master.linked_to and master.linked_to in by_name:  # links were checked for cycles on load
+        master = by_name[master.linked_to]
+    low, high = trained
+    if master.min_value >= low and master.max_value <= high:
+        return
+    bounds = f"[{master.min_value:g}, {master.max_value:g}]"
+    source = f" (from '{master.name}')" if master is not parameter else ""
+    report.issues.append(
+        Issue(
+            Severity.WARNING,
+            location,
+            f"Bounds {bounds}{source} reach beyond [{low:g}, {high:g}], the range the model for "
+            f"'{component}' was trained on for '{input_name}'; the surrogate extrapolates there.",
+        )
+    )
 
 
 def _check_design_goals(
@@ -1587,6 +1651,20 @@ def render_netlist_report(report: NetlistReport, *, full: bool = False, issues: 
     return "\n".join(lines)
 
 
+def _model_metadata_text(entry: ComponentModelReport) -> str:
+    """The trained ranges, constraints and guarantees of an ONNX model, one indented line each."""
+    if entry.kind != "onnx" or not entry.model_inputs:
+        return ""
+    indent = "\n               "
+    ranges = "  ".join(f"{name}=[{low:g}, {high:g}]" for name, (low, high) in entry.model_input_ranges.items())
+    guarantees = [name for name, held in entry.model_guarantees.items() if held]
+    return (
+        f"{indent}trained ranges: {ranges or 'not declared'}"
+        f"{indent}constraints: {'; '.join(entry.model_constraints) or 'none'}"
+        f"{indent}guarantees: {', '.join(guarantees) or 'none'}"
+    )
+
+
 def render_configuration_report(report: ConfigurationReport, *, full: bool = False) -> str:
     """Render a configuration report as plain text."""
     counts = count_issues(report)
@@ -1627,6 +1705,7 @@ def render_configuration_report(report: ConfigurationReport, *, full: bool = Fal
                     if entry.model_frequency_range
                     else ""
                 )
+                + _model_metadata_text(entry)
                 for entry in report.component_models
             ],
             full=full,

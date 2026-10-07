@@ -1,19 +1,17 @@
 """Tests for EM fine-tuning: the loop in :meth:`COBRA.fine_tuning` and the
 Palace integration in :class:`EMFineTuningStage`.
 
-Neither Palace nor ORCA is needed: the loop tests replace the fine-tuning
-stage with one that returns a fixed network, and the stage tests install
-stand-ins for the ORCA modules the stage imports.
+Palace is not needed: the loop tests replace the fine-tuning stage with one
+that returns a fixed network, and the stage tests replace ORCA's
+``simulate_geometry`` with a stub that keeps its real signature.
 """
 
 from __future__ import annotations
 
 import json
-import sys
-import types
-from concurrent.futures import Future
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import create_autospec
 
 import numpy as np
 import optuna
@@ -22,14 +20,19 @@ import skrf as rf
 
 from cobra.cobra import COBRA
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from cobra.optimizers.design_goal import (
+    FAILED_SIMULATION_PENALTY,
+    DesignGoal,
+    DesignGoalChecker,
+    DesignParameter,
+)
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult, SimulatorError
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
-from cobra.stages import em_finetuning_stage
 from cobra.stages.em_finetuning_stage import EMFineTuningStage
+from cobra.stages.surrogate_metadata import FeasibilityConstraints
 from tests.conftest import MINIMAL_S2P, make_context, netlist_path
 
 if TYPE_CHECKING:
@@ -225,196 +228,112 @@ def test_stopping_before_fine_tuning_still_saves_the_context(tmp_path, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def _module(monkeypatch: pytest.MonkeyPatch, name: str, **attributes: Any) -> types.ModuleType:
-    module = types.ModuleType(name)
-    for key, value in attributes.items():
-        setattr(module, key, value)
-    monkeypatch.setitem(sys.modules, name, module)
-    return module
-
-
-class _FakeLauncher:
-    """Mirrors ``orca.simulation.launchers.LocalLauncher`` for an unpinned machine."""
-
-    slots: tuple[str, ...] = ("slot0",)
-
-    def command(self, slot: str, palace_executable: str, num_processes: int, config_name: str) -> str:
-        assert slot in self.slots
-        return f"{palace_executable} -np {num_processes} {config_name}"
-
-
-#: Mirrors ``orca.simulation.combine_snp_results.TOUCHSTONE_SUFFIXES``.
-_TOUCHSTONE_SUFFIXES = {
-    "normal": "",
-    "dc": "_dc",
-    "deembedded": "_deembedded",
-    "dc_deembedded": "_dc_deembedded",
-    "all": "_dc_deembedded",
-}
-
-
-def _fake_touchstone_filename(base_name: str, n_ports: int, touchstone_type: str) -> str:
-    """Mirrors ``orca.simulation.combine_snp_results.touchstone_filename``."""
-    return f"{base_name}{_TOUCHSTONE_SUFFIXES[touchstone_type]}.s{n_ports}p"
-
-
-class _FakeBaseGeometry:
-    pass
-
-
-class _TwoPortGeometry(_FakeBaseGeometry):
-    n_ports = 2
-    stackup_xml = "stackup.xml"
-    simconfig_filename = "simconfig.json"
-
-    def __init__(self):
-        self.created: list[dict[str, Any]] = []
-
-    def create_gds_file(self, name: str, output_path: str, params: dict[str, Any]) -> str:
-        self.created.append({"name": name, "output_path": output_path, "params": params})
-        return output_path
-
-
-class _InlineExecutor:
-    """A ``ProcessPoolExecutor`` stand-in that runs the job in this process."""
-
-    def __init__(self, *_args, **_kwargs):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc):
-        return False
-
-    def submit(self, fn, /, *args, **kwargs) -> Future:
-        future: Future = Future()
-        future.set_result(fn(*args, **kwargs))
-        return future
-
-
 @pytest.fixture
-def fake_orca(monkeypatch):
-    """Install stand-ins for the ORCA modules the stage imports.
-
-    ``ihp`` is made unimportable: ORCA no longer depends on the IHP gdsfactory PDK,
-    so the stage must not need it either.
-    """
-    monkeypatch.setitem(sys.modules, "ihp", None)
-    _module(monkeypatch, "orca")
-    _module(monkeypatch, "orca.geometry")
-    _module(monkeypatch, "orca.geometry.base_geometry", BaseGeometry=_FakeBaseGeometry)
-    _module(monkeypatch, "orca.simulation")
-    _module(
-        monkeypatch,
-        "orca.simulation.combine_snp_results",
-        touchstone_filename=_fake_touchstone_filename,
-    )
-    _module(monkeypatch, "orca.simulation.launchers", LocalLauncher=_FakeLauncher)
-    calls: dict[str, Any] = {}
-
-    def _create_palace_model_from_gds(**kwargs):
-        calls["create_palace_model_from_gds"] = kwargs
-        name = kwargs["geometry_name"]
-        return name, kwargs["params"], "config.json", f"/sims/{name}", f"output/{name}"
-
-    def _run_palace(**kwargs):
-        calls["run_palace"] = kwargs
-        return calls.get("palace_succeeds", True)
-
-    _module(
-        monkeypatch,
-        "orca.simulation.gds_converter",
-        create_palace_model_from_gds=_create_palace_model_from_gds,
-    )
-    _module(monkeypatch, "orca.simulation.simulate", run_palace=_run_palace)
-    return calls
+def fake_simulate_geometry(monkeypatch):
+    """Replace ``orca.simulate_geometry`` with a stub that keeps ORCA's real signature."""
+    orca = pytest.importorskip("orca")
+    network = rf.Network(frequency=rf.Frequency.from_f(np.array([1e9, 2e9]), unit="Hz"), s=np.zeros((2, 3, 3)))
+    stub = create_autospec(orca.simulate_geometry, return_value=network)
+    monkeypatch.setattr(orca, "simulate_geometry", stub)
+    return stub
 
 
-def test_palace_is_run_with_orcas_current_signature(fake_orca, tmp_path):
-    """Regression: COBRA passed config_name/palace_executable/num_processes, which
-    ORCA's run_palace no longer accepts.
-    """
-    succeeded = em_finetuning_stage._mesh_gds_and_run_palace(
-        name="ft",
-        parameters={"width": 2.0},
-        base_dir=str(tmp_path),
-        gds_output_path=str(tmp_path / "ft.gds"),
-        stackup_xml="stackup.xml",
-        simconfig_filename="simconfig.json",
-        palace_executable="palace",
-        num_processes=4,
-    )
+def _run_stage(geometry: Any = None) -> OptimizationContext:
+    from orca.geometry.presets import InductorOcta
 
-    assert succeeded is True
-    assert fake_orca["run_palace"] == {
-        "sim_path": "/sims/ft",
-        "data_dir": "output/ft",
-        "result_dir": str(tmp_path),
-        "cmd": "palace -np 4 config.json",
-        "touchstone_type": "all",
-    }
-
-
-#: What ORCA writes for a sweep from 1 GHz up with more than 20 points.
-ALL_VARIANTS = ("", "_dc", "_deembedded", "_dc_deembedded")
-#: What ORCA writes otherwise: it skips the DC extrapolation.
-NO_DC_VARIANTS = ("", "_deembedded")
-
-
-def _run_stage(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    palace_succeeds: bool = True,
-    written: tuple[str, ...] = ALL_VARIANTS,
-) -> OptimizationContext:
-    """Run the stage with a fake Palace that writes the Touchstone variants in *written*.
-
-    Each file is tagged with its variant in a comment, so a test can tell which one
-    the stage loaded.
-    """
-    monkeypatch.setattr(em_finetuning_stage, "ProcessPoolExecutor", _InlineExecutor)
-
-    def _fake_palace(**kwargs) -> bool:
-        if palace_succeeds:
-            for suffix in written:
-                path = Path(kwargs["base_dir"]) / f"{kwargs['name']}{suffix}.s2p"
-                path.write_text(f"! variant={suffix or 'normal'}\n{MINIMAL_S2P}", encoding="utf-8")
-        return palace_succeeds
-
-    monkeypatch.setattr(em_finetuning_stage, "_mesh_gds_and_run_palace", _fake_palace)
     context = make_context(
-        results_dir=str(tmp_path),
-        model_parameters={"X1:width": 2.0, "X2:width": 3.0},
+        results_dir="results",
+        model_parameters={"X1:turns": 2, "X1:width": 6.0, "X2:width": 3.0, "space": 3.0},
         fine_tuning_iteration=1,
-        iteration=1,
+        iteration=2,
     )
-    return EMFineTuningStage("palace", 1).run(
-        context, orca_geometry=_TwoPortGeometry(), comp_name="X1"
+    return EMFineTuningStage("palace", 4).run(
+        context, orca_geometry=geometry or InductorOcta(), comp_name="X1"
     )
 
 
-def test_stage_loads_the_most_corrected_result_for_the_geometrys_port_count(
-    fake_orca, monkeypatch, tmp_path
-):
-    """Regression: the stage always read a ``_dc_deembedded.s6p`` file, so only 6-port
-    geometries worked, and a narrow sweep (e.g. 120-150 GHz), for which ORCA skips
-    the DC extrapolation, failed although Palace had succeeded.
-    """
-    (tmp_path / "full").mkdir()
-    (tmp_path / "narrow").mkdir()
-    full = _run_stage(monkeypatch, tmp_path / "full", written=ALL_VARIANTS)
-    narrow = _run_stage(monkeypatch, tmp_path / "narrow", written=NO_DC_VARIANTS)
+def test_stage_simulates_the_components_parameters_through_orca(fake_simulate_geometry):
+    context = _run_stage()
 
-    [network] = full.predicted_networks
-    assert network.nports == 2
+    fake_simulate_geometry.assert_called_once()
+    geometry, parameters, output_dir, name = fake_simulate_geometry.call_args.args
+    assert type(geometry).__name__ == "InductorOcta"
+    # X2's parameters are left out, the X1: prefix is stripped, unscoped ones are shared
+    assert parameters == {"turns": 2, "width": 6.0, "space": 3.0}
+    assert output_dir == str(Path("results").resolve())
+    assert name == "cobra_result_ft_1_2_X1"
+    assert fake_simulate_geometry.call_args.kwargs == {"palace_executable": "palace", "num_processes": 4}
+    [network] = context.predicted_networks
     assert network.name == "X1"
-    assert "variant=_dc_deembedded" in network.comments
-    assert "variant=_deembedded" in narrow.predicted_networks[0].comments
 
 
-def test_stage_raises_when_palace_fails_or_writes_no_result(fake_orca, monkeypatch, tmp_path):
-    with pytest.raises(SimulatorError, match="X1"):
-        _run_stage(monkeypatch, tmp_path, palace_succeeds=False)
-    with pytest.raises(SimulatorError, match="X1"):
-        _run_stage(monkeypatch, tmp_path, written=())
+def test_stage_reports_orcas_simulation_error_for_the_component(fake_simulate_geometry):
+    from orca import SimulationError
+
+    fake_simulate_geometry.side_effect = SimulationError("Palace failed")
+
+    with pytest.raises(SimulatorError, match=r"X1.*Palace failed"):
+        _run_stage()
+
+
+def test_stage_rejects_a_geometry_that_is_not_an_orca_geometry(fake_simulate_geometry):
+    with pytest.raises(TypeError, match="BaseGeometry"):
+        _run_stage(geometry=object())
+    fake_simulate_geometry.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Infeasible geometries — skipped, and penalised like a failed simulation
+# ---------------------------------------------------------------------------
+
+
+def _cobra_with_constraint(tmp_path: Path) -> tuple[COBRA, _RecordingSimulator, _FakePalaceStage, list[str]]:
+    """A COBRA whose X1 model only accepts ``width <= 2``, and the netlist template."""
+    model = tmp_path / "model.s2p"
+    model.write_text(MINIMAL_S2P, encoding="utf-8")
+    netlist = tmp_path / "circuit.cir"
+    netlist.write_text(netlist_path("minimal_ac").read_text(encoding="utf-8"), encoding="utf-8")
+    simulator = _RecordingSimulator()
+    parser = XyceNetlistParser().from_file(netlist)
+    cobra = COBRA(
+        netlist_parser=parser,
+        component_onnx_mapping={"X1": str(model)},
+        circuit_simulator=simulator,
+    )
+    assert cobra.em_surrogate_stage is not None
+    cobra.em_surrogate_stage.constraints = [FeasibilityConstraints(["width <= 2"], ["width"])]
+    palace = _FakePalaceStage(model)
+    return cobra, simulator, palace, parser.lines
+
+
+def _trial(tmp_path: Path, width: float) -> OptimizationContext:
+    return make_context(
+        netlist=str(tmp_path / "trial" / "circuit.cir"),
+        results_dir=str(tmp_path / "trial"),
+        design_goal_checker=DesignGoalChecker([_r1_goal()]),
+        model_parameters={"X1:width": width},
+    )
+
+
+@pytest.mark.parametrize(("width", "simulated"), [(1.5, True), (3.0, False)])
+def test_infeasible_trial_is_penalised_without_simulating(tmp_path, width, simulated):
+    cobra, simulator, _, template = _cobra_with_constraint(tmp_path)
+    trial = _trial(tmp_path, width)
+
+    cobra._evaluate_trial(trial, template)
+
+    assert bool(simulator.simulated) is simulated
+    penalties = [goal.current_penalty for goal in trial.goals]
+    assert (penalties == [FAILED_SIMULATION_PENALTY]) is not simulated
+
+
+def test_infeasible_fine_tuning_trial_never_reaches_palace(tmp_path):
+    cobra, simulator, palace, template = _cobra_with_constraint(tmp_path)
+    assert cobra.em_surrogate_stage is not None
+    trial = _trial(tmp_path, 3.0)
+
+    cobra._evaluate_fine_tuning_trial(trial, template, palace, cobra.em_surrogate_stage, {})
+
+    assert palace.calls == []
+    assert simulator.simulated == []
+    assert [goal.current_penalty for goal in trial.goals] == [FAILED_SIMULATION_PENALTY]

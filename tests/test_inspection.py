@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from cobra.configuration.inspection import (
+    ComponentModelReport,
     ConfigurationReport,
     all_issues,
     has_errors,
@@ -130,19 +131,34 @@ def test_configured_numfreq_widens_the_hb_grid(config_dir: Path):
 # ---------------------------------------------------------------------------
 
 
-def _onnx_config(config_dir: Path, netlist: str, band: tuple[float, float] | None, monkeypatch) -> Path:
+def _onnx_config(
+    config_dir: Path,
+    netlist: str,
+    band: tuple[float, float] | None,
+    monkeypatch,
+    *,
+    trained_w: tuple[float, float] | None = None,
+    constraints: list[str] | None = None,
+    bounds: tuple[float, float] = (1.0, 2.0),
+) -> Path:
     """A configuration whose X1 is an ONNX model declaring *band*, on *netlist*.
 
     Loading a real ONNX file needs a model asset the suite does not ship, so the
-    model inspection is stubbed with the band under test.
+    model inspection is stubbed with the metadata under test.
     """
     from cobra.configuration import inspection
 
+    def inspect_onnx(_path: Path, entry: ComponentModelReport) -> None:
+        entry.model_ports = 2
+        entry.model_inputs = ["w", "frequency"]
+        entry.model_frequency_range = band
+        entry.model_input_ranges = {"w": trained_w} if trained_w else {}
+        entry.model_constraints = constraints or []
+        entry.model_guarantees = {"passive": False, "reciprocal": True}
+
     shutil.copy(netlist_path(netlist), config_dir / "circuit.cir")
     (config_dir / "model.onnx").write_bytes(b"")
-    monkeypatch.setattr(
-        inspection, "_inspect_onnx", lambda _path: (2, ["w", "frequency"], band, None)
-    )
+    monkeypatch.setattr(inspection, "_inspect_onnx", inspect_onnx)
     data = make_config_data(
         component_models={"X1": "model.onnx"},
         simulation_parameters={},
@@ -150,8 +166,8 @@ def _onnx_config(config_dir: Path, netlist: str, band: tuple[float, float] | Non
             {
                 "name": "X1:w",
                 "type": "model_input",
-                "min_value": 1.0,
-                "max_value": 2.0,
+                "min_value": bounds[0],
+                "max_value": bounds[1],
                 "step": 0.1,
                 "unit": None,
                 "linked_to": None,
@@ -193,4 +209,58 @@ def test_model_without_a_declared_band_is_an_error(config_dir: Path, monkeypatch
     report = inspect_path(_onnx_config(config_dir, "minimal_ac", None, monkeypatch), check_models=True)
 
     assert has_errors(report)
-    assert any("declares no frequency range" in issue.message for issue in all_issues(report))
+    assert any("declares no usable frequency range" in issue.message for issue in all_issues(report))
+
+
+def _range_warnings(path: Path) -> list[str]:
+    return [
+        issue.message
+        for issue in all_issues(inspect_path(path, check_models=True))
+        if "was trained on" in issue.message
+    ]
+
+
+def test_bounds_outside_the_trained_range_are_a_warning(config_dir: Path, monkeypatch):
+    inside = _onnx_config(config_dir, "minimal_ac", (1e9, 10e9), monkeypatch, trained_w=(1.0, 2.0))
+    assert _range_warnings(inside) == []
+
+    beyond = _onnx_config(
+        config_dir, "minimal_ac", (1e9, 10e9), monkeypatch, trained_w=(1.0, 2.0), bounds=(0.5, 2.0)
+    )
+    report = inspect_path(beyond, check_models=True)
+    [message] = _range_warnings(beyond)
+    assert "[0.5, 2] reach beyond [1, 2]" in message
+    assert "'w'" in message
+    assert not has_errors(report)
+
+
+def test_report_lists_the_model_metadata(config_dir: Path, monkeypatch):
+    path = _onnx_config(
+        config_dir, "minimal_ac", (1e9, 10e9), monkeypatch, trained_w=(1.0, 2.0), constraints=["w <= 2"]
+    )
+    report = inspect_path(path, check_models=True)
+    text = render_report(report, full=True)
+
+    assert "trained ranges: w=[1, 2]" in text
+    assert "constraints: w <= 2" in text
+    assert "guarantees: reciprocal" in text
+    [entry] = report.to_dict()["component_models"]
+    assert entry["model_constraints"] == ["w <= 2"]
+
+
+def test_malformed_constraints_are_an_error(config_dir: Path, monkeypatch):
+    from cobra.configuration import inspection
+    from cobra.configuration.configuration import ConfigurationError
+
+    path = _onnx_config(config_dir, "minimal_ac", (1e9, 10e9), monkeypatch)
+
+    def refuse(_path: Path, _entry: ComponentModelReport) -> None:
+        raise ConfigurationError("Constraint '__import__(\"os\")' contains unsupported syntax (Call).")
+
+    monkeypatch.setattr(inspection, "_inspect_onnx", refuse)
+    report = inspect_path(path, check_models=True)
+
+    messages = [issue.message for issue in all_issues(report)]
+    assert has_errors(report)
+    assert any(message.startswith("The run would refuse this model") for message in messages)
+    assert not any("declares no usable frequency range" in message for message in messages)

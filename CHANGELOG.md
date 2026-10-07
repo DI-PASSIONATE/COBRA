@@ -5,28 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 2.0.0 - 2026-10-07
+
+### Added
+- `cobra init NETLIST` writes a starter configuration from a netlist: its
+  analysis parameters, default settings and the models given with `--model`.
+- COBRA reads ORCA's model metadata:
+  - The surrogate is evaluated over the band the model declares instead of a
+    fixed 1–200 GHz sweep; `cobra parse` warns when `.AC` or `.HB` reach beyond it.
+  - Trials whose geometry violates the model's `input_constraints` are skipped
+    without simulation and do not count as iterations (Optuna marks them
+    pruned). A model with malformed constraints is refused before the run.
+  - `cobra parse` and the GUI's model-field tooltip show each model's trained
+    ranges, constraints and guarantees; `cobra parse` warns when a
+    `model_input`'s bounds exceed the trained range.
+- ONNX surrogates that output only the upper triangle of the S-matrix (ORCA's
+  `UpperTriangleReImCodec`) are accepted.
+- GUI: light and dark themes that follow the system, a single *Parallelism*
+  selector (independent trials or MPI), and a design-goal dialog with a tab per
+  analysis and whole-sweep, single-frequency or range goals.
+
+### Changed
+- **Breaking:** ONNX models without a frequency range in their
+  `input_parameter_ranges` metadata are rejected before the run starts.
+- **Breaking:** COBRA requires Optuna 5.0. Single-objective TPE is now
+  multivariate; pass `{"multivariate": false}` in `sampler_kwargs` to turn it off.
+- **Breaking:** EM fine-tuning requires ORCA 2.1 or newer (`pip install
+  "cobra-rfic[orca]"`) and runs each component through ORCA's
+  `simulate_geometry`. Presets load from `orca.geometry.presets`; configurations
+  saved with an older preset module must be updated.
+- Each fine-tuning iteration runs in its own folder, `fine_tuning/iteration_NN/`.
+- The Hugging Face browser lists models tagged `orca-rfic` instead of
+  `orca-surrogate`.
+- `gmsh` is no longer a COBRA dependency, and the other dependencies have
+  minimum versions.
+- The citation points to the published SBCCI 2026 paper
+  ([10.1109/SBCCI69725.2026.11706804](https://doi.org/10.1109/SBCCI69725.2026.11706804)).
 
 ### Fixed
-- EM fine-tuning works with the current ORCA release: Palace is started with
-  ORCA's `run_palace(..., cmd=...)` signature, and the result is read for the
-  geometry's actual port count instead of always `.s6p`. A failed Palace run
-  now stops with an error naming the component.
-- EM fine-tuning no longer imports the IHP gdsfactory PDK (`ihp`), which ORCA
-  dropped; ORCA's geometry cells select their PDK themselves.
-- EM fine-tuning works with sweeps that do not start at or below 1 GHz: ORCA
-  only writes the DC-extrapolated result for those, so COBRA now falls back to
-  the de-embedded one instead of failing with `FileNotFoundError`.
-- EM fine-tuning with the default `"reuse"` optimizer no longer fails on its
-  second iteration because the same Optuna trial was reported twice.
-- Netlist parameters suggested during fine-tuning are now written into the
+- EM fine-tuning works with current ORCA: it no longer imports the dropped
+  `ihp` PDK, reads results for the geometry's actual port count, handles sweeps
+  starting above 1 GHz, and no longer fails on the second iteration of the
+  `"reuse"` optimizer. A failed Palace run stops with an error naming the
+  component.
+- Netlist parameters suggested during fine-tuning are written into the
   simulated netlist; before, only geometry parameters changed.
 - Stopping at the fine-tuning prompt still writes
   `cobra_optimization_context.json`.
-
-### Changed
-- Each fine-tuning iteration runs in its own folder,
-  `fine_tuning/iteration_NN/`, inside the results folder.
+- The gradient-descent optimizer's gradient had the wrong sign and scale.
+- GUI number fields accept dot decimals on systems with a comma-decimal locale.
+- `cobra --version`, `cobra doctor` and the run report showed the version as
+  `unknown`.
 
 # 1.8.2 - 2026-09-15
 ### Fixed

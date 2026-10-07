@@ -37,7 +37,7 @@ description: >-
 	</div>
 	<div>
 		<p style="margin:0 0 .35rem 0; font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; opacity:.8;">Published</p>
-		<p style="margin:0;">SBCCI 2026 (conference contribution)</p>
+		<p style="margin:0;"><a href="https://doi.org/10.1109/SBCCI69725.2026.11706804">SBCCI 2026</a> (conference contribution)</p>
 	</div>
 </div>
 

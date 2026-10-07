@@ -1,4 +1,3 @@
-import json
 import os
 from typing import TYPE_CHECKING
 
@@ -8,33 +7,17 @@ from onnxruntime import InferenceSession
 
 from cobra.configuration.configuration import ConfigurationError
 from cobra.stages.base_stage import COBRABaseStage
+from cobra.stages.surrogate_metadata import (
+    FeasibilityConstraints,
+    SurrogateMetadata,
+    surrogate_port_count,
+)
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
 
 #: Spacing of the inference grid, in Hz.
 FREQUENCY_STEP = 1e9
-
-
-def surrogate_frequency_range(session: InferenceSession) -> tuple[float, float] | None:
-    """The band an ONNX surrogate was trained on, ``(min_hz, max_hz)``.
-
-    ORCA records every input's range in the ``input_parameter_ranges`` metadata
-    entry; the ``frequency`` input is the model's validity band. Returns ``None``
-    when the model does not declare a usable one; COBRA refuses to run such a
-    model rather than guess a band for it.
-    """
-    raw = session.get_modelmeta().custom_metadata_map.get("input_parameter_ranges")
-    if raw is None:
-        return None
-    try:
-        bounds = json.loads(raw)["frequency"]
-        low, high = float(bounds["min"]), float(bounds["max"])
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        return None
-    if not 0 < low < high:
-        return None
-    return low, high
 
 
 def inference_frequencies(frequency_range: tuple[float, float]) -> np.ndarray:
@@ -58,25 +41,73 @@ class EMSurrogateStage(COBRABaseStage):
         self.is_touchstone: list[bool] = []
         # Band each ONNX model is evaluated over; None for Touchstone components.
         self.frequency_ranges: list[tuple[float, float] | None] = []
+        # Geometries each ONNX model was trained on; None for Touchstone components.
+        self.constraints: list[FeasibilityConstraints | None] = []
         for model_path in em_surrogate_model:
             if str(model_path).lower().endswith((*tuple(f".s{i}p" for i in range(1, 10)), ".snp")):
                 self.session.append(model_path)
                 self.is_touchstone.append(True)
                 self.frequency_ranges.append(None)
+                self.constraints.append(None)
             else:
                 session = InferenceSession(model_path)
-                frequency_range = surrogate_frequency_range(session)
+                geometry_inputs = [node.name for node in session.get_inputs() if node.name != "frequency"]
+                try:
+                    metadata = SurrogateMetadata.from_session(session)
+                    constraints = FeasibilityConstraints(metadata.constraints, geometry_inputs)
+                except ConfigurationError as exc:
+                    raise ConfigurationError(f"{model_path}: {exc}") from exc
+                frequency_range = metadata.frequency_range
                 if frequency_range is None:
                     raise ConfigurationError(
-                        f"{model_path} declares no frequency range in its metadata; COBRA needs "
-                        "input_parameter_ranges.frequency (min and max in Hz, as written by ORCA) "
+                        f"{model_path} declares no usable frequency range in its metadata; COBRA needs "
+                        "input_parameter_ranges.frequency (0 <= min < max, in Hz, as written by ORCA) "
                         "to know the band the surrogate is valid over."
                     )
                 self.session.append(session)
                 self.is_touchstone.append(False)
                 self.frequency_ranges.append(frequency_range)
+                self.constraints.append(constraints)
 
         self.component_names = component_names or []
+
+    def infeasible_components(self, model_parameters: dict) -> dict[str, list[str]]:
+        """The violated ``input_constraints`` of every ONNX component, by component name.
+
+        Empty when every component's geometry lies in the region its model was
+        trained on.
+        """
+        infeasible = {}
+        for constraints, comp_name in zip(self.constraints, self.component_names, strict=True):
+            if constraints is None:
+                continue
+            violated = constraints.violated(self._component_parameters(model_parameters, comp_name))
+            if violated:
+                infeasible[comp_name] = violated
+        return infeasible
+
+    def touchstone_networks(self) -> dict[str, rf.Network]:
+        """The fixed network of every Touchstone component, by component name."""
+        return {
+            comp_name: rf.Network(str(session), name=comp_name)
+            for session, is_ts, comp_name in zip(
+                self.session, self.is_touchstone, self.component_names, strict=True
+            )
+            if is_ts
+        }
+
+    @staticmethod
+    def _component_parameters(params: dict, comp_name: str) -> dict:
+        """The model inputs of *comp_name*: its ``comp:name`` entries and the unscoped ones."""
+        comp_params = {}
+        for k, v in params.items():
+            if ":" in k:
+                comp, p_name = k.split(":", 1)
+                if comp == comp_name:
+                    comp_params[p_name] = v
+            else:
+                comp_params[k] = v
+        return comp_params
 
     def run(self, context: "OptimizationContext") -> "OptimizationContext":
         params = context.model_parameters
@@ -88,14 +119,7 @@ class EMSurrogateStage(COBRABaseStage):
             if is_ts or frequency_range is None:  # both mean a Touchstone component
                 ntwk = rf.Network(str(session))
             else:
-                comp_params = {}
-                for k, v in params.items():
-                    if ":" in k:
-                        comp, p_name = k.split(":", 1)
-                        if comp == comp_name:
-                            comp_params[p_name] = v
-                    else:
-                        comp_params[k] = v
+                comp_params = self._component_parameters(params, comp_name)
                 ntwk = self.inference_snp(session, comp_params, frequency_range)
 
             ntwk.name = comp_name
@@ -155,7 +179,19 @@ class EMSurrogateStage(COBRABaseStage):
         self,
         s_param_dict: dict, frequencies: np.ndarray
     ) -> tuple[int, rf.Network, dict]:
-        N = int(np.sqrt(len(s_param_dict) // 2))  # number of ports
+        """
+        Build a network from the model's ``S<i><j>_real``/``_imag`` outputs.
+
+        Accepts the full N x N matrix and the upper triangle only (ORCA's
+        ``UpperTriangleReImCodec``), whose missing lower triangle is filled from its
+        transpose. See :func:`surrogate_port_count` for how the port count is found.
+        """
+        N = surrogate_port_count(s_param_dict)  # number of ports
+        if N is None:
+            raise ValueError(
+                f"Model outputs {', '.join(s_param_dict)} are not the S<i><j>_real/_imag entries "
+                "of a full or upper-triangle S-matrix."
+            )
 
         num_freq = len(frequencies)
 
@@ -169,8 +205,9 @@ class EMSurrogateStage(COBRABaseStage):
         # Fill S-matrix
         for i in range(N):
             for j in range(N):
-                real = np.array(s_param_dict[f"S{i + 1}{j + 1}_real"]).squeeze()
-                imag = np.array(s_param_dict[f"S{i + 1}{j + 1}_imag"]).squeeze()
+                name = f"S{i + 1}{j + 1}" if f"S{i + 1}{j + 1}_real" in s_param_dict else f"S{j + 1}{i + 1}"
+                real = np.array(s_param_dict[f"{name}_real"]).squeeze()
+                imag = np.array(s_param_dict[f"{name}_imag"]).squeeze()
 
                 if real.shape[0] != num_freq or imag.shape[0] != num_freq:
                     raise ValueError(

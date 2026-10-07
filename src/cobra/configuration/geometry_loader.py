@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
-import pkgutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,14 +11,21 @@ from cobra.configuration.configuration import ConfigurationError, GeometryConfig
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from orca import BaseGeometry
 
-def _base_geometry_class() -> type:
+#: The module that exports ORCA's preset geometries, independent of where ORCA keeps them.
+PRESETS_MODULE = "orca.geometry.presets"
+
+
+def _base_geometry_class() -> type[BaseGeometry]:
+    # ORCA is optional: only EM fine-tuning needs it
     try:
-        return importlib.import_module("orca.geometry.base_geometry").BaseGeometry
-    except (ImportError, AttributeError) as exc:
+        from orca import BaseGeometry
+    except ImportError as exc:
         raise ConfigurationError(
             "ORCA must be installed to use EM fine-tuning geometries"
         ) from exc
+    return BaseGeometry
 
 
 def _load_custom_module(file_path: str) -> ModuleType:
@@ -49,23 +55,19 @@ def _geometry_classes(module: ModuleType, base_geometry: type) -> list[tuple[str
 
 
 def discover_preset_geometries() -> list[tuple[str, type]]:
-    """Return available ORCA preset geometry classes and display labels."""
+    """Return the preset geometry classes ORCA exports from ``PRESETS_MODULE``, by class name."""
     base_geometry = _base_geometry_class()
     try:
-        presets = importlib.import_module("orca.geometry.presets")
-        discovered: list[tuple[str, type]] = []
-        labels: set[str] = set()
-        for _, module_name, _ in pkgutil.iter_modules(presets.__path__):
-            module = importlib.import_module(f"orca.geometry.presets.{module_name}")
-            for class_name, geometry_class in _geometry_classes(module, base_geometry):
-                label = class_name
-                if label in labels:
-                    label = f"{class_name} ({module_name})"
-                labels.add(label)
-                discovered.append((label, geometry_class))
-        return sorted(discovered, key=lambda item: item[0].lower())
-    except (ImportError, AttributeError) as exc:
+        presets = importlib.import_module(PRESETS_MODULE)
+    except ImportError as exc:
         raise ConfigurationError("Failed to discover ORCA preset geometries") from exc
+    discovered = [
+        (name, member)
+        for name in getattr(presets, "__all__", [])
+        if inspect.isclass(member := getattr(presets, name, None))
+        and issubclass(member, base_geometry)
+    ]
+    return sorted(discovered, key=lambda item: item[0].lower())
 
 
 def discover_custom_geometries(file_path: str) -> list[tuple[str, type]]:
@@ -92,8 +94,13 @@ def resolve_geometry_class(config: GeometryConfig) -> type:
         geometry_class = getattr(module, config.class_name)
     except (ImportError, AttributeError) as exc:
         location = config.module if config.source == "preset" else config.file
+        hint = (
+            f"; ORCA exports its presets from '{PRESETS_MODULE}'"
+            if config.source == "preset" and config.module != PRESETS_MODULE
+            else ""
+        )
         raise ConfigurationError(
-            f"Geometry class '{config.class_name}' was not found in '{location}'"
+            f"Geometry class '{config.class_name}' was not found in '{location}'{hint}"
         ) from exc
     if not inspect.isclass(geometry_class) or not issubclass(geometry_class, base_geometry):
         raise ConfigurationError(

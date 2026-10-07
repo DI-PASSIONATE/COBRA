@@ -42,6 +42,10 @@ class OptimizerStage(COBRABaseStage):
             "losses": self.losses(context)
         })
 
+    def reject(self, context: "OptimizationContext"):
+        """Tell the optimizer that *context*'s parameters could not be evaluated, without logging an iteration."""
+        self.optimizer.reject(context, self.losses(context))
+
     def tell(self, context: "OptimizationContext"):
         self.record(context)
         # Use _tell to possibly convert the list of loss values into a single penalty value if multi_objective is False

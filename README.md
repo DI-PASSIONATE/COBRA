@@ -10,11 +10,11 @@
 
 Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loose\*, Sascha Breun\*, Manuel Koch\*, Robert Weigel\*, Norman Franchi\*
 
-\* Institute for Intelligent Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany
+\* Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany
 
 ° Chair of Integrated Electronic Systems, Otto-von-Guericke-University Magdeburg, Germany
 
-[Paper (Coming Soon)](#cite-this-work) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
+[Paper](https://doi.org/10.1109/SBCCI69725.2026.11706804) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
 
 **COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design: a circuit-level optimizer that consumes surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA). It combines:
 
@@ -58,7 +58,7 @@ In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA 
 Optional:
 
 - [AWS Palace](https://awslabs.github.io/palace/stable/), if you want EM fine-tuning
-- [ORCA](https://github.com/DI-PASSIONATE/ORCA) installed/importable in your Python environment if you use ORCA geometry presets/classes in scripts or GUI fine-tuning
+- [ORCA](https://github.com/DI-PASSIONATE/ORCA), if you want EM fine-tuning or its geometry presets: `pip install "cobra-rfic[orca]"`
 
 ### For users: install from PyPI
 
@@ -438,6 +438,8 @@ Before each simulation the netlist is updated in two ways:
 
 The ONNX model (produced by ORCA) receives the current geometry parameters and a frequency sweep as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
 
+Before inference, the geometry is checked against the feasibility constraints the model declares in its `input_constraints` metadata (written by ORCA). A trial that violates one is not simulated at all, since the surrogate was never trained on that geometry, and it does not count as an iteration: Optuna records it as pruned and suggests a replacement (optimizers without a pruned state get the failed-simulation penalty instead).
+
 The sweep covers the whole band the model declares in its `input_parameter_ranges` metadata (the `frequency` entry, written by ORCA), in 1 GHz steps; a model without that metadata is rejected before the run starts, since COBRA will not guess a band. The full band is used deliberately rather than just the design goals' range: the vector fit of the next stage extrapolates freely outside the frequencies it was given, and Xyce evaluates the fitted subcircuit at the DC operating point and at every harmonic of an `.HB` or `.TRAN` analysis. `cobra parse` warns when the netlist's `.AC` sweep or `.HB` harmonics reach beyond the model's band.
 
 ONNX was chosen because it is a portable, framework-agnostic format: the model runs with `onnxruntime` at inference time without requiring the full training environment (PyTorch, TensorFlow, …), keeping COBRA's dependency footprint small and deployment straightforward.
@@ -479,25 +481,23 @@ This two-phase approach (fast surrogate loop + occasional EM verification) gives
 ## Troubleshooting
 
 - If `cobra` command is not found, ensure your virtual environment is activated and reinstall with `pip install -e .`.
-- If geometry presets fail to load, verify ORCA is installed and importable in the same environment.
+- If geometry presets fail to load, verify ORCA is installed in the same environment (`pip install "cobra-rfic[orca]"`).
 - If circuit simulation fails, verify Xyce is installed and available in your `PATH`.
 - If `AutoSampler` fails to initialize, install its optional dependencies: `pip install optunahub cmaes scipy torch`.
 
 ## Cite This Work
-If you use COBRA in your research, please cite our upcoming SBCCI 2026 paper:
+If you use COBRA in your research, please cite our [SBCCI 2026 paper](https://doi.org/10.1109/SBCCI69725.2026.11706804):
 
 ```
 @INPROCEEDINGS{2026_COBRA,
   author={Simone, Gianluca and Lurz, David and Grund, Martin and Schneider, Fabian and Loose, Michael and Breun, Sascha and Koch, Manuel and Weigel, Robert and Franchi, Norman},
-  doi={},
-  booktitle={
-2026 39nd SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)},
-  number={},
-  pages={},
+  booktitle={2026 39th SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)},
   title={{COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design}},
-  volume={},
   year={2026},
+  month={aug},
+  pages={1--5},
   organization={IEEE},
+  doi={10.1109/SBCCI69725.2026.11706804},
   keywords={artificial intelligence, design automation, EDA, neural network, open-source, optimization, Palace, Qucs-S, radio frequency integrated circuit, surrogate model, Xyce}
 }
 ```

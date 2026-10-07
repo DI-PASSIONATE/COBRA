@@ -70,8 +70,11 @@ netlist it references:
   every mapped model file exists, loads, and has as many ports as the instance
   has nodes; the `.AC` sweep and `.HB` harmonics stay inside the band an ONNX
   model declares in its metadata (the surrogate is evaluated over that band);
+  the model's feasibility constraints are well-formed (see below);
 - every `netlist_variable` resolves to an element (or an `instance:parameter`)
   that exists, and every `model_input` matches an input of the mapped ONNX model;
+  a warning is raised when a `model_input`'s bounds (its master's, if linked) reach
+  beyond the range the model was trained on;
 - at least one design goal and one optimization parameter are defined;
 - every design goal is buildable, its frequency range parses, and the analysis it
   needs is present or will be injected;
@@ -200,7 +203,7 @@ apply to a run may use empty objects or arrays.
 | --- | --- |
 | `type` | `model_input` (a geometry input of an ONNX surrogate) or `netlist_variable` (an element value or instance parameter in the netlist) |
 | `name` | `<component>:<onnx input>` for `model_input`, e.g. `X1:width`; an element (`C1`) or `<instance>:<parameter>` (`Xq1:Nx`) for `netlist_variable`. `cobra parse` lists both |
-| `min_value`, `max_value` | Search bounds. Keep `model_input` bounds inside the range the model was trained on (its `input_parameter_ranges` metadata); the surrogate is not valid outside it |
+| `min_value`, `max_value` | Search bounds. Keep `model_input` bounds inside the range the model was trained on (its `input_parameter_ranges` metadata); the surrogate extrapolates outside it, and `cobra parse` warns |
 | `step` | Grid the values snap to; `null` for continuous |
 | `unit` | SPICE scale suffix appended to `netlist_variable` values: `"p"` writes `1.5` as `1.5p`. `null` for `model_input` |
 | `linked_to` | Name of another parameter this one mirrors, e.g. for symmetric windings. Links must not form a cycle |
@@ -259,7 +262,8 @@ done rather than time elapsed and therefore add up to more than `wall time` when
 trials ran concurrently — the log line names both numbers so they cannot be
 confused.
 
-Fine-tuning presets store their Python module and class name. Custom geometries
+Fine-tuning presets store their class name and the module ORCA exports its presets
+from, `orca.geometry.presets`. Custom geometries
 store a JSON-relative Python file and class name. ORCA is imported only when an
 enabled configuration requires a geometry.
 
