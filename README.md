@@ -438,6 +438,8 @@ Before each simulation the netlist is updated in two ways:
 
 The ONNX model (produced by ORCA) receives the current geometry parameters and a frequency sweep as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
 
+Before inference, the geometry is checked against the feasibility constraints the model declares in its `input_constraints` metadata (written by ORCA). A trial that violates one is not simulated at all, since the surrogate was never trained on that geometry, and it does not count as an iteration: Optuna records it as pruned and suggests a replacement (optimizers without a pruned state get the failed-simulation penalty instead).
+
 The sweep covers the whole band the model declares in its `input_parameter_ranges` metadata (the `frequency` entry, written by ORCA), in 1 GHz steps; a model without that metadata is rejected before the run starts, since COBRA will not guess a band. The full band is used deliberately rather than just the design goals' range: the vector fit of the next stage extrapolates freely outside the frequencies it was given, and Xyce evaluates the fitted subcircuit at the DC operating point and at every harmonic of an `.HB` or `.TRAN` analysis. `cobra parse` warns when the netlist's `.AC` sweep or `.HB` harmonics reach beyond the model's band.
 
 ONNX was chosen because it is a portable, framework-agnostic format: the model runs with `onnxruntime` at inference time without requiring the full training environment (PyTorch, TensorFlow, …), keeping COBRA's dependency footprint small and deployment straightforward.

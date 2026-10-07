@@ -49,9 +49,12 @@ and writes its parameters into the run's netlist.
 Each iteration runs in its own folder, `fine_tuning/iteration_NN/` inside the results
 folder, holding its netlist, GDS file, Palace model and Touchstone results.
 
-If a component cannot be simulated, fine-tuning stops with an error that names the
-component and the reason: parameters the geometry rejects as infeasible, a degenerate mesh
-that Palace could not solve, or a failed Palace run, whose log ORCA prints just above.
+An iteration whose parameters violate a feasibility constraint of a component's ONNX model
+is not sent to Palace; it is scored like a failed simulation and the optimizer moves on.
+If a component cannot be simulated otherwise, fine-tuning stops with an error that names the
+component and the reason: parameters the geometry rejects as infeasible (when the model
+declares no constraints), a degenerate mesh that Palace could not solve, or a failed Palace
+run, whose log ORCA prints just above.
 
 ## Frequency Range
 

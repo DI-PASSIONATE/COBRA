@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Each fine-tuning iteration runs in its own folder,
   `fine_tuning/iteration_NN/`, inside the results folder.
+- COBRA now requires Optuna 5.0. TPE then models the parameters of a
+  single-objective run jointly (multivariate TPE), so correlated geometry inputs
+  are learned together
+- COBRA now read's the model metadata to check if proposed parameters are within the valid range.
+- A trial whose geometry violates the surrogate's `input_constraints` is skipped
 
 # 1.8.2 - 2026-09-15
 ### Fixed

@@ -86,6 +86,29 @@ ONNX metadata; beyond it the vector-fitted subcircuit extrapolates. Narrow the
 without that metadata is rejected: re-export it with `input_parameter_ranges`
 (ORCA writes it) so the band is known.
 
+## Trained Ranges and Infeasible Geometries
+
+ORCA records, in each ONNX model's metadata, the range every geometry input was
+trained on and the feasibility constraints a buildable geometry satisfies (for
+example `bottom_linewidth <= bottom_winding_diameter / 3`). `cobra parse` lists
+both for each component, together with the physical properties the model
+guarantees.
+
+- If `cobra parse` warns that a parameter's bounds reach beyond the trained
+  range, the surrogate extrapolates there. Narrow the bounds unless you mean to.
+- During a run, a trial whose parameters violate a constraint is not simulated
+  and does not count as an iteration: Optuna records it as pruned and suggests
+  another one, and the progress display, plots and run log never see it.
+  Optimizers without a pruned state, such as gradient descent, get the same
+  penalty as a failed simulation instead. Run with `--verbose` to see which
+  constraint each skipped trial violated; the number skipped is logged at the
+  end of the optimization. After 1000 skipped trials in a row the run stops,
+  because the bounds cover mostly unbuildable geometries; narrow them.
+- A model whose constraints are not valid JSON, or use anything beyond ORCA's
+  expression grammar, is refused before the run starts. COBRA parses the
+  expressions itself and never executes them as Python code, so a model from an
+  untrusted source cannot run code through them.
+
 ## ORCA Geometry Import Errors
 
 - Ensure ORCA is installed in the same Python environment.
