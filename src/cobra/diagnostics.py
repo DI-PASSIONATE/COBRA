@@ -47,7 +47,7 @@ OPTIONAL_EXECUTABLES = (
 def cobra_version() -> str:
     """The installed COBRA version, or ``"unknown"`` outside an installation."""
     try:
-        return importlib.metadata.version("cobra")
+        return importlib.metadata.version("cobra-rfic")
     except importlib.metadata.PackageNotFoundError:  # running from a source tree
         return "unknown"
 

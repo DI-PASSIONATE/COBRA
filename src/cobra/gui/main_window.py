@@ -66,6 +66,7 @@ from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
+from cobra.stages.surrogate_metadata import FeasibilityConstraints, SurrogateMetadata
 
 from .dialogs import DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
@@ -1600,6 +1601,7 @@ class MainWindow(QMainWindow):
         # Insert ONNX/Touchstone selectors for each component
         for comp_name, comp_data in sorted(components.items()):
             comp_edit = QLineEdit()
+            comp_edit.setToolTip(tooltip("onnx_edit"))
 
             # Check for a static TSTONEFILE parameter from the netlist
             tstone_file = comp_data.params.get("TSTONEFILE")
@@ -1669,6 +1671,10 @@ class MainWindow(QMainWindow):
         # Always refresh geometry selector visibility when file selection changes
         self._update_geometry_selectors_visibility()
 
+        comp_edit = self.component_onnx_edits.get(comp_name)
+        if comp_edit is not None:
+            comp_edit.setToolTip(tooltip("onnx_edit"))
+
         if not path or not os.path.exists(path):
             return
 
@@ -1676,6 +1682,8 @@ class MainWindow(QMainWindow):
             sess = onnxruntime.InferenceSession(path)
             all_inputs = [i.name for i in sess.get_inputs()]
             metadata = sess.get_modelmeta().custom_metadata_map
+            if comp_edit is not None:
+                comp_edit.setToolTip(f"{tooltip('onnx_edit')}\n\n{self._surrogate_summary(sess)}")
 
             # Filter out 'frequency' from inputs
             filtered_inputs = [p for p in all_inputs if p.lower() != "frequency"]
@@ -1699,6 +1707,17 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - the file is simply not a usable ONNX model
             # Not an ONNX file or failed to parse, simply return
             return
+
+    @staticmethod
+    def _surrogate_summary(session: onnxruntime.InferenceSession) -> str:
+        """What the ONNX model in *session* declares, or why the run would refuse it."""
+        try:
+            metadata = SurrogateMetadata.from_session(session)
+            geometry_inputs = [node.name for node in session.get_inputs() if node.name != "frequency"]
+            FeasibilityConstraints(metadata.constraints, geometry_inputs)  # refused as the run would
+            return metadata.summary()
+        except ConfigurationError as exc:
+            return f"The run would refuse this model: {exc}"
 
     def param_context_menu(self, pos):
         row = self.param_table.rowAt(pos.y())

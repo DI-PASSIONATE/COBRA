@@ -151,6 +151,17 @@ class BaseOptimizer(ABC):
             A dictionary containing the best parameters found by the optimizer, where the keys are parameter names and the values are the optimized parameter values.
         """
 
+    def reject(self, context: "OptimizationContext", loss: list[float]):
+        """
+        Tell the optimizer that the parameters in *context* could not be evaluated.
+
+        COBRA calls this instead of :meth:`tell` for a geometry the surrogate cannot
+        build, and does not count the trial as an iteration. The default reports
+        *loss* (the failed-simulation penalty) like an ordinary result, so an
+        optimizer that needs an answer to every step moves on from it.
+        """
+        self._tell(context, loss)
+
     def _tell(self, context: "OptimizationContext", loss: list[float]):
         """
         Internal method that converts the list of loss values into a single penalty value if multi_objective is False, and then calls the tell method with the appropriate penalty.

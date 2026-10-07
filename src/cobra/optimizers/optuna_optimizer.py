@@ -182,6 +182,11 @@ class OptunaOptimizer(BaseOptimizer):
         trial = context.trial
         self._get_study().tell(trial, penalty)
 
+    def reject(self, context: "OptimizationContext", loss: list[float]):  # noqa: ARG002 - part of the BaseOptimizer interface
+        # Pruned rather than penalised: TPE ranks a pruned trial below every
+        # completed one without a made-up objective value distorting the study.
+        self._get_study().tell(context.trial, state=optuna.trial.TrialState.PRUNED)
+
     def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         trial = self._get_study().ask()
         context.trial = trial

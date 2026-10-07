@@ -42,6 +42,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Unbuildable geometries in a row after which a run gives up on its parameter ranges.
+MAX_CONSECUTIVE_REJECTIONS = 1000
+
 
 class COBRA:
     """
@@ -300,14 +303,21 @@ class COBRA:
 
         asked = 0
         completed = 0
+        rejected = 0
+        consecutive_rejections = 0
         stop = False
         in_flight: dict[Future[OptimizationContext], OptimizationContext] = {}
 
         with ThreadPoolExecutor(max_workers=parallel_trials) as executor:
             while True:
                 # Keep the pool topped up. ask() and tell() stay on this thread, so
-                # the optimizer never sees concurrent calls.
-                while not stop and len(in_flight) < parallel_trials and asked < context.max_iterations:
+                # the optimizer never sees concurrent calls. Rejected trials do not
+                # count, so they are replaced until max_iterations have been simulated.
+                while (
+                    not stop
+                    and len(in_flight) < parallel_trials
+                    and completed + len(in_flight) < context.max_iterations
+                ):
                     asked += 1
                     trial_context = context.for_trial(trials_dir / f"trial_{asked:04d}")
                     t0 = time.time()
@@ -326,6 +336,23 @@ class COBRA:
                 for future in done:
                     trial_context = in_flight.pop(future)
                     future.result()  # re-raise whatever the worker thread hit
+
+                    # An unbuildable geometry was never simulated: tell the optimizer,
+                    # but keep it out of the iteration count, the callback and the log.
+                    if trial_context.infeasible:
+                        self.optimizer_stage.reject(trial_context)
+                        shutil.rmtree(trial_context.results_dir, ignore_errors=True)
+                        rejected += 1
+                        consecutive_rejections += 1
+                        if consecutive_rejections >= MAX_CONSECUTIVE_REJECTIONS:
+                            raise ConfigurationError(
+                                f"{consecutive_rejections} trials in a row were unbuildable geometries "
+                                f"(the last one: {_describe_infeasible(trial_context.infeasible)}). "
+                                "Narrow the model_input ranges to the region the model's "
+                                "input_constraints allow."
+                            )
+                        continue
+                    consecutive_rejections = 0
                     completed += 1
                     # Number iterations by completion order so progress never goes backwards.
                     trial_context.iteration = completed
@@ -375,6 +402,8 @@ class COBRA:
                     stop = True
 
         pbar.close()
+        if rejected:
+            logger.info("Skipped %d unbuildable geometries without simulating them", rejected)
 
         # A trial drained after the successful one leaves its own (failing) result
         # in the context, so reinstate the winner. Its time was already counted.
@@ -438,6 +467,10 @@ class COBRA:
 
         # Perform EM simulations / s parameter prediction using surrogate model from ORCA
         t2 = time.time()
+        if self._penalise_infeasible(context):
+            context.times["optimizer"] += t2 - t1
+            context.times["total_time"] += time.time() - t1
+            return context
         if self.em_surrogate_stage is not None:
             self.em_surrogate_stage.run(context)
 
@@ -457,6 +490,25 @@ class COBRA:
         context.times["design_goal_checking"] += t5 - t4
         context.times["total_time"] += t5 - t1
         return context
+
+    def _penalise_infeasible(self, context: OptimizationContext) -> bool:
+        """Score *context* as a failed simulation, without simulating, if a geometry cannot be built.
+
+        A surrogate is only trained inside its ``input_constraints``; outside them
+        it still returns a confident prediction, and EM fine-tuning cannot draw the
+        geometry at all. Returns whether *context* was penalised.
+        """
+        if self.em_surrogate_stage is None:
+            return False
+        infeasible = self.em_surrogate_stage.infeasible_components(context.model_parameters)
+        if not infeasible:
+            return False
+        logger.debug("Skipping infeasible geometry: %s", _describe_infeasible(infeasible))
+        context.infeasible = infeasible
+        context.predicted_networks = []
+        context.simulation_results = {}
+        context.design_goal_checker.check_goals(context)
+        return True
 
     def _render_netlist(self, context: OptimizationContext, netlist_template: list[str]) -> None:
         """Write *context*'s netlist, with its parameters applied, into its own directory.
@@ -544,8 +596,8 @@ class COBRA:
             num_goals = sum(len(goals) for goals in context.design_goal_checker.design_goals.values())
             fine_tuning_optimizer_stage.optimizer.initialize(num_goals)
 
-        # .snp components keep the network the surrogate stage loaded for them.
-        touchstone_networks = {ntwk.name: ntwk for ntwk in context.predicted_networks if ntwk.name}
+        # .snp components keep their fixed network.
+        touchstone_networks = surrogate_stage.touchstone_networks()
         # The run's netlist holds the subcircuit models and the parameters to verify.
         netlist_template = self.netlist_parser.lines
         fine_tuning_dir = Path(context.results_dir) / "fine_tuning"
@@ -648,6 +700,8 @@ class COBRA:
     ) -> None:
         """Simulate every ONNX component with Palace, then the circuit, and score *trial*."""
         self._render_netlist(trial, netlist_template)
+        if self._penalise_infeasible(trial):
+            return
 
         networks = []
         for comp_name, is_ts in zip(
@@ -702,3 +756,8 @@ class COBRA:
             )
         else:
             logger.info("Stage times over %.1f s: %s", total_time, breakdown)
+
+
+def _describe_infeasible(infeasible: dict[str, list[str]]) -> str:
+    """The violated constraints of every component, as one line."""
+    return "; ".join(f"{comp} violates {', '.join(violated)}" for comp, violated in infeasible.items())

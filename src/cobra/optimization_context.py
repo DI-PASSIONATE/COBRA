@@ -88,6 +88,10 @@ class OptimizationContext:
     need one.
     """
 
+    # --- Written by COBRA before the surrogate runs ------------------------
+    infeasible: dict[str, list[str]] = field(default_factory=dict)
+    """Violated ``input_constraints`` by component; non-empty means the trial was not simulated."""
+
     # --- Written by EMSurrogateStage / EMFineTuningStage -------------------
     predicted_networks: list[rf.Network] = field(default_factory=list)
 
@@ -147,6 +151,7 @@ class OptimizationContext:
             model_parameters={},
             netlist_parameters={},
             trial=None,
+            infeasible={},
             predicted_networks=[],
             simulation_results={},
             goals=[],
