@@ -20,13 +20,19 @@ import skrf as rf
 
 from cobra.cobra import COBRA
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from cobra.optimizers.design_goal import (
+    FAILED_SIMULATION_PENALTY,
+    DesignGoal,
+    DesignGoalChecker,
+    DesignParameter,
+)
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult, SimulatorError
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.stages.em_finetuning_stage import EMFineTuningStage
+from cobra.stages.surrogate_metadata import FeasibilityConstraints
 from tests.conftest import MINIMAL_S2P, make_context, netlist_path
 
 if TYPE_CHECKING:
@@ -274,3 +280,60 @@ def test_stage_rejects_a_geometry_that_is_not_an_orca_geometry(fake_simulate_geo
     with pytest.raises(TypeError, match="BaseGeometry"):
         _run_stage(geometry=object())
     fake_simulate_geometry.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Infeasible geometries — skipped, and penalised like a failed simulation
+# ---------------------------------------------------------------------------
+
+
+def _cobra_with_constraint(tmp_path: Path) -> tuple[COBRA, _RecordingSimulator, _FakePalaceStage, list[str]]:
+    """A COBRA whose X1 model only accepts ``width <= 2``, and the netlist template."""
+    model = tmp_path / "model.s2p"
+    model.write_text(MINIMAL_S2P, encoding="utf-8")
+    netlist = tmp_path / "circuit.cir"
+    netlist.write_text(netlist_path("minimal_ac").read_text(encoding="utf-8"), encoding="utf-8")
+    simulator = _RecordingSimulator()
+    parser = XyceNetlistParser().from_file(netlist)
+    cobra = COBRA(
+        netlist_parser=parser,
+        component_onnx_mapping={"X1": str(model)},
+        circuit_simulator=simulator,
+    )
+    assert cobra.em_surrogate_stage is not None
+    cobra.em_surrogate_stage.constraints = [FeasibilityConstraints(["width <= 2"], ["width"])]
+    palace = _FakePalaceStage(model)
+    return cobra, simulator, palace, parser.lines
+
+
+def _trial(tmp_path: Path, width: float) -> OptimizationContext:
+    return make_context(
+        netlist=str(tmp_path / "trial" / "circuit.cir"),
+        results_dir=str(tmp_path / "trial"),
+        design_goal_checker=DesignGoalChecker([_r1_goal()]),
+        model_parameters={"X1:width": width},
+    )
+
+
+@pytest.mark.parametrize(("width", "simulated"), [(1.5, True), (3.0, False)])
+def test_infeasible_trial_is_penalised_without_simulating(tmp_path, width, simulated):
+    cobra, simulator, _, template = _cobra_with_constraint(tmp_path)
+    trial = _trial(tmp_path, width)
+
+    cobra._evaluate_trial(trial, template)
+
+    assert bool(simulator.simulated) is simulated
+    penalties = [goal.current_penalty for goal in trial.goals]
+    assert (penalties == [FAILED_SIMULATION_PENALTY]) is not simulated
+
+
+def test_infeasible_fine_tuning_trial_never_reaches_palace(tmp_path):
+    cobra, simulator, palace, template = _cobra_with_constraint(tmp_path)
+    assert cobra.em_surrogate_stage is not None
+    trial = _trial(tmp_path, 3.0)
+
+    cobra._evaluate_fine_tuning_trial(trial, template, palace, cobra.em_surrogate_stage, {})
+
+    assert palace.calls == []
+    assert simulator.simulated == []
+    assert [goal.current_penalty for goal in trial.goals] == [FAILED_SIMULATION_PENALTY]
