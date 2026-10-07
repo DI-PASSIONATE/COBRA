@@ -10,11 +10,11 @@
 
 Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loose\*, Sascha Breun\*, Manuel Koch\*, Robert Weigel\*, Norman Franchi\*
 
-\* Institute for Intelligent Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany
+\* Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität (FAU), Erlangen-Nürnberg, Germany
 
 ° Chair of Integrated Electronic Systems, Otto-von-Guericke-University Magdeburg, Germany
 
-[Paper (Coming Soon)](#cite-this-work) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
+[Paper](https://doi.org/10.1109/SBCCI69725.2026.11706804) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
 
 **COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design: a circuit-level optimizer that consumes surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA). It combines:
 
@@ -484,20 +484,18 @@ This two-phase approach (fast surrogate loop + occasional EM verification) gives
 - If `AutoSampler` fails to initialize, install its optional dependencies: `pip install optunahub cmaes scipy torch`.
 
 ## Cite This Work
-If you use COBRA in your research, please cite our upcoming SBCCI 2026 paper:
+If you use COBRA in your research, please cite our [SBCCI 2026 paper](https://doi.org/10.1109/SBCCI69725.2026.11706804):
 
 ```
 @INPROCEEDINGS{2026_COBRA,
   author={Simone, Gianluca and Lurz, David and Grund, Martin and Schneider, Fabian and Loose, Michael and Breun, Sascha and Koch, Manuel and Weigel, Robert and Franchi, Norman},
-  doi={},
-  booktitle={
-2026 39nd SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)},
-  number={},
-  pages={},
+  booktitle={2026 39th SBC/SBMicro/IEEE Symposium on Integrated Circuits and Systems Design (SBCCI)},
   title={{COBRA: An AI-Assisted Circuit-Level Optimizer for Open Source Based RFIC Design}},
-  volume={},
   year={2026},
+  month={aug},
+  pages={1--5},
   organization={IEEE},
+  doi={10.1109/SBCCI69725.2026.11706804},
   keywords={artificial intelligence, design automation, EDA, neural network, open-source, optimization, Palace, Qucs-S, radio frequency integrated circuit, surrogate model, Xyce}
 }
 ```
