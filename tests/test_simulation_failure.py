@@ -24,11 +24,9 @@ from cobra.optimizers.design_goal import (
 )
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.spice_sim.base_simulator import (
-    BaseSimulator,
     SimulationResult,
     SimulatorError,
 )
-from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.circuit_sim_stage import CircuitSimulationStage
@@ -36,6 +34,7 @@ from tests.conftest import make_context, netlist_path
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 
 def _goal(value: float, *, max_value: float, sim_type: SimulationType) -> DesignGoal:
@@ -82,18 +81,16 @@ def test_a_partial_failure_only_penalises_the_missing_type():
 # ---------------------------------------------------------------------------
 
 
-class _StubSimulator(BaseSimulator):
+class _StubSimulator(XyceSimulator):
     """Simulator that returns a queued result (or ``None``) per invocation."""
-
-    netlist_parser = XyceNetlistParser()
 
     def __init__(self, results: list[SimulationResult | None]):
         self.results = list(results)
 
-    def preprocess_ntwk(self, ntwk, name: str) -> str:
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
         return name
 
-    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
+    def run_simulation(self, netlist_path: str, netlist: Netlist) -> SimulationResult | None:
         return self.results.pop(0)
 
 
@@ -134,7 +131,7 @@ def test_missing_xyce_executable_aborts_the_run(tmp_path):
     simulator = XyceSimulator(xyce_command="definitely-not-installed-xyce")
 
     with pytest.raises(SimulatorError, match="definitely-not-installed-xyce"):
-        simulator.run_simulation(str(netlist))
+        simulator.run_simulation(str(netlist), XyceSimulator.netlist_parser.parse_file(netlist))
 
 
 def test_non_zero_exit_code_is_a_simulation_failure(tmp_path, monkeypatch, caplog):
@@ -150,7 +147,7 @@ def test_non_zero_exit_code_is_a_simulation_failure(tmp_path, monkeypatch, caplo
     simulator = XyceSimulator()
 
     with caplog.at_level(logging.WARNING):
-        assert simulator.run_simulation(str(netlist)) is None
+        assert simulator.run_simulation(str(netlist), simulator.netlist_parser.parse_file(netlist)) is None
 
     assert "converge" in caplog.text
 
@@ -165,6 +162,7 @@ def test_missing_output_is_a_simulation_failure(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
     with caplog.at_level(logging.WARNING):
-        assert XyceSimulator().run_simulation(str(netlist)) is None
+        parsed = XyceSimulator.netlist_parser.parse_file(netlist)
+        assert XyceSimulator().run_simulation(str(netlist), parsed) is None
 
     assert "no output files" in caplog.text

@@ -34,7 +34,6 @@ from cobra.spice_sim.tran_spectrum import (
     to_frequency_domain,
 )
 from cobra.spice_sim.xyce_simulator import XyceSimulator
-from cobra.stages.circuit_sim_stage import CircuitSimulationStage
 from tests.conftest import make_config_data, netlist_path
 
 F0 = 130e9
@@ -144,15 +143,15 @@ def test_transient_goal_configuration():
         "node": "OUT",
         "analysis": "tran",  # case-insensitive
     }
-    parser = XyceNetlistParser().from_file(netlist_path("tran_single_tone"))
+    netlist = XyceNetlistParser().parse_file(netlist_path("tran_single_tone"))
 
-    [goal] = build_design_goals([DesignGoalConfig.from_dict(data)], parser)
+    [goal] = build_design_goals([DesignGoalConfig.from_dict(data)], netlist)
     assert goal.required_simulation_type is SimulationType.TRAN
 
     with pytest.raises(ConfigurationError, match="analysis"):
         DesignGoalConfig.from_dict({**data, "analysis": "dc"}).validate()
     with pytest.raises(ConfigurationError, match="expected 'TRAN:Power_dBm\\[OUT\\]'"):
-        build_design_goals([DesignGoalConfig.from_dict({**data, "parameter": "Power_dBm[OUT]"})], parser)
+        build_design_goals([DesignGoalConfig.from_dict({**data, "parameter": "Power_dBm[OUT]"})], netlist)
 
 
 # ---------------------------------------------------------------------------
@@ -160,19 +159,56 @@ def test_transient_goal_configuration():
 # ---------------------------------------------------------------------------
 
 
-def test_injected_tran_directive_prints_the_probes(tmp_path: Path):
-    prepared = CircuitSimulationStage._prepare_netlist_for_type(
-        str(netlist_path("hb_two_tone")),
+def test_injected_tran_directive_prints_the_probes():
+    netlist = XyceNetlistParser().parse_file(netlist_path("hb_two_tone"))
+    prepared = XyceSimulator().prepare_netlist(
+        netlist,
         SimulationType.TRAN,
         {"step": "1p", "stop_time": "1n", "start_time": "0", "max_step": "1p"},
-        str(tmp_path),
-        simulator=XyceSimulator(),
     )
-    text = Path(prepared).read_text(encoding="utf-8")
+    text = prepared.to_string()
 
     assert ".TRAN 1p 1n 0 1p" in text
     assert ".PRINT TRAN format=csv V(OUT) I(VOUT)" in text
     assert ".HB" not in text
+    assert text.rstrip().endswith(".END")
+    assert prepared.simulation_type is SimulationType.TRAN
+    assert netlist.simulation_type is SimulationType.HB  # the source netlist is untouched
+
+
+def test_injected_directives_go_before_an_end_with_a_comment():
+    netlist = XyceNetlistParser().parse("* end\nR1 a 0 50\n.end ; done\n")
+    text = XyceSimulator().prepare_netlist(netlist, SimulationType.AC, {}).to_string()
+
+    assert text.endswith(".LIN format=touchstone sparcalc=1\n.end ; done\n")
+
+
+def test_a_netlist_with_the_analysis_is_used_as_it_is():
+    netlist = XyceNetlistParser().parse_file(netlist_path("tran_single_tone"))
+    assert XyceSimulator().prepare_netlist(netlist, SimulationType.TRAN, {}) is netlist
+
+
+def test_removing_a_directive_takes_its_continuation_lines_along():
+    """Regression: dropping ``.print tran v(a)`` left ``+ v(b)`` behind, which then
+    continued the element line before it.
+    """
+    netlist = XyceNetlistParser().parse(
+        "* continuation\n"
+        "R1 a b 50\n"
+        "R2 b 0 50\n"
+        ".tran 1p 1n\n"
+        ".print tran v(a)\n"
+        "* a comment between the lines\n"
+        "+ v(b)\n"
+        ".END\n"
+    )
+    prepared = XyceSimulator().prepare_netlist(netlist, SimulationType.AC, {})
+    text = prepared.to_string()
+
+    assert "+ v(b)" not in text
+    reparsed = XyceNetlistParser().parse(text)
+    assert reparsed.get_element("R2").value == "50"
+    assert [d.directive for d in reparsed.simulation_directives] == [".AC", ".LIN"]
 
 
 def test_simulator_derives_the_spectrum_from_the_transient_csv(tmp_path: Path, monkeypatch):
@@ -185,7 +221,7 @@ def test_simulator_derives_the_spectrum_from_the_transient_csv(tmp_path: Path, m
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    result = XyceSimulator().run_simulation(str(netlist))
+    result = XyceSimulator().run_simulation(str(netlist), XyceSimulator.netlist_parser.parse_file(netlist))
 
     assert result is not None
     fd_path = str(tmp_path / "circuit.cir.TRAN.FD.csv")

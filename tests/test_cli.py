@@ -42,7 +42,7 @@ def stub_configured_run(run):
             parallel_trials=1,
             fine_tuning=SimpleNamespace(enabled=False, palace_command="palace", iterations=3),
         ),
-        parser=SimpleNamespace(simulation_type=SimulationType.AC),
+        netlist=SimpleNamespace(simulation_type=SimulationType.AC),
         design_goals=[object(), object()],
         optimization_parameters=[
             OptimizationProperty(

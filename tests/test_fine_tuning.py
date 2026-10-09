@@ -28,9 +28,10 @@ from cobra.optimizers.design_goal import (
 )
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
-from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult, SimulatorError
+from cobra.spice_sim.base_simulator import SimulationResult, SimulatorError
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.em_finetuning_stage import EMFineTuningStage
 from cobra.stages.surrogate_metadata import FeasibilityConstraints
 from tests.conftest import MINIMAL_S2P, make_context, netlist_path
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from cobra.optimization_context import OptimizationContext
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 FINE_TUNING_ITERATIONS = 3
 
@@ -49,20 +51,18 @@ def _r1(netlist_text: str) -> float:
     return float(line.split()[3])
 
 
-class _RecordingSimulator(BaseSimulator):
+class _RecordingSimulator(XyceSimulator):
     """Returns the simulated netlist as the result and remembers what it simulated."""
-
-    netlist_parser = XyceNetlistParser()
 
     def __init__(self):
         self.simulated: list[tuple[str, str]] = []
 
-    def preprocess_ntwk(self, ntwk, name: str) -> str:
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
         return name
 
-    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
-        self.simulated.append((netlist_name, Path(netlist_name).read_text(encoding="utf-8")))
-        return SimulationResult(output_files=[netlist_name])
+    def run_simulation(self, netlist_path: str, netlist: Netlist) -> SimulationResult | None:
+        self.simulated.append((netlist_path, Path(netlist_path).read_text(encoding="utf-8")))
+        return SimulationResult(output_files=[netlist_path])
 
 
 class _FakePalaceStage(EMFineTuningStage):
@@ -117,7 +117,7 @@ def _run_with_fine_tuning(
 
     simulator = _RecordingSimulator()
     cobra = COBRA(
-        netlist_parser=XyceNetlistParser().from_file(netlist),
+        netlist=XyceNetlistParser().parse_file(netlist),
         component_onnx_mapping={"X1": str(model)},
         optimizer=OptunaOptimizer(sampler=optuna.samplers.RandomSampler(seed=1)),
         circuit_simulator=simulator,
@@ -287,23 +287,23 @@ def test_stage_rejects_a_geometry_that_is_not_an_orca_geometry(fake_simulate_geo
 # ---------------------------------------------------------------------------
 
 
-def _cobra_with_constraint(tmp_path: Path) -> tuple[COBRA, _RecordingSimulator, _FakePalaceStage, list[str]]:
+def _cobra_with_constraint(tmp_path: Path) -> tuple[COBRA, _RecordingSimulator, _FakePalaceStage, Netlist]:
     """A COBRA whose X1 model only accepts ``width <= 2``, and the netlist template."""
     model = tmp_path / "model.s2p"
     model.write_text(MINIMAL_S2P, encoding="utf-8")
     netlist = tmp_path / "circuit.cir"
     netlist.write_text(netlist_path("minimal_ac").read_text(encoding="utf-8"), encoding="utf-8")
     simulator = _RecordingSimulator()
-    parser = XyceNetlistParser().from_file(netlist)
+    parsed = XyceNetlistParser().parse_file(netlist)
     cobra = COBRA(
-        netlist_parser=parser,
+        netlist=parsed,
         component_onnx_mapping={"X1": str(model)},
         circuit_simulator=simulator,
     )
     assert cobra.em_surrogate_stage is not None
     cobra.em_surrogate_stage.constraints = [FeasibilityConstraints(["width <= 2"], ["width"])]
     palace = _FakePalaceStage(model)
-    return cobra, simulator, palace, parser.lines
+    return cobra, simulator, palace, parsed.copy()
 
 
 def _trial(tmp_path: Path, width: float) -> OptimizationContext:
