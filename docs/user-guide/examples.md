@@ -56,6 +56,17 @@ It needs `vacask` on `PATH`; see [VACASK Simulator](../advanced/vacask.md).
 the IHP SG13G2 PDK converted for VACASK; see
 [PDK models](../advanced/vacask.md#pdk-models-ihp-sg13g2).
 
+`examples/configs/vacask_lna_inductor.json` is the
+[LNA with an inductor surrogate](#lna-with-an-inductor-surrogate) for VACASK
+(`examples/netlists/VACASK/lna_inductor.sim`): the same circuit, parameters and goals.
+It sets `vector_fit_max_order` to 40, because the inductor model spans 0 to 500 GHz
+and an order-12 fit misses it by up to 0.17 in |S| at 110 to 170 GHz.
+
+```bash
+cobra parse examples/configs/vacask_lna_inductor.json
+cobra run examples/configs/vacask_lna_inductor.json
+```
+
 ## Example Data Files
 
 You will find sample files such as:

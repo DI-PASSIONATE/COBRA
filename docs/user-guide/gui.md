@@ -17,6 +17,16 @@ cobra
 - Netlist source
 - Component-to-model mapping (`.onnx` or `.sNp`). Hover over the model field to see what
   an ONNX model declares: its band, trained ranges, feasibility constraints and guarantees
+- Simulator: `XyceSimulator` or `VacaskSimulator`. The netlist dialog accepts
+  `*.sim`, `*.scs` and `*.spectre` files besides SPICE netlists. Switching the
+  simulator re-reads the loaded netlist with that simulator's parser, and the goal
+  list offers only goals the selected simulator can run (e.g. `NF` for VACASK)
+- Subcircuit surrogate: the "Subcircuit surrogate" row lists the netlist's
+  subcircuits as "name (N pins)"; **Use as surrogate** adds a model row for the
+  selected one (its instances are replaced, see
+  [VACASK Simulator](../advanced/vacask.md#style-2-xschem-netlists)) and
+  **Clear** removes the selection. Loading a configuration restores subcircuit
+  surrogates
 - Design goals (S-parameter and RF metrics)
 - Analysis point, when the run includes a Harmonic Balance or transient analysis
 - Optimization parameters and ranges

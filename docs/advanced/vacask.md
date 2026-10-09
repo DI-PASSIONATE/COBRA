@@ -204,6 +204,15 @@ is too coarse, but at very high orders (e.g. 24 on a simple 2-port) poles land
 far out of band and VACASK solves the subcircuit inaccurately (|S| error about
 0.3 against the model).
 
+Broadband models need more. The octagonal-inductor model of the LNA preset spans
+0 to 500 GHz: at order 12 its fit is off by up to 0.17 in |S| at 110 to 170 GHz,
+at order 40 by 0.02, and orders 40 and 60 give the same circuit results, so
+`examples/configs/vacask_lna_inductor.json` sets 40. Check a new model by
+re-simulating one design at two orders.
+
+A fit that does not converge (scikit-rf's `auto_fit` can cycle at the order cap)
+stops after 1000 pole relocations; COBRA logs a warning and penalises that trial.
+
 ### PDK models (IHP SG13G2)
 
 Use the PDK converted for VACASK rather than a foreign include of its ngspice
