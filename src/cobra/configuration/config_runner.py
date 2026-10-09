@@ -19,7 +19,6 @@ from cobra.optimizers.design_goal_collection import (
     make_power_dbm,
 )
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
-from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 
@@ -28,24 +27,25 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cobra.optimization_context import OptimizationContext
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 OPTIMIZER_REGISTRY = {"OptunaOptimizer": OptunaOptimizer}
 SIMULATOR_REGISTRY = {"XyceSimulator": XyceSimulator}
 
 
-def _build_goal(config: DesignGoalConfig, parser: XyceNetlistParser) -> DesignGoal:
+def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
     if config.kind == "catalogue":
         parameter = find_parameter(config.parameter)
         if parameter is None:
             raise ConfigurationError(f"Unknown design parameter '{config.parameter}'")
-        if parameter.min_ports > parser.num_ports:
+        if parameter.min_ports > netlist.num_ports:
             raise ConfigurationError(
                 f"Design parameter '{config.parameter}' requires at least "
-                f"{parameter.min_ports} ports; netlist has {parser.num_ports}"
+                f"{parameter.min_ports} ports; netlist has {netlist.num_ports}"
             )
     elif config.kind in {"power_dbm", "isolation_db"}:
         analysis = config.analysis_type()
-        if config.node not in parser.probe_nodes:
+        if config.node not in netlist.probe_nodes:
             raise ConfigurationError(
                 f"{analysis.value} goal node '{config.node}' is not available in the netlist"
             )
@@ -61,8 +61,8 @@ def _build_goal(config: DesignGoalConfig, parser: XyceNetlistParser) -> DesignGo
         )
     else:
         analysis = config.analysis_type()
-        source = parser.port_sources.get(config.port or "")
-        if config.node not in parser.probe_nodes:
+        source = netlist.port_sources.get(config.port or "")
+        if config.node not in netlist.probe_nodes:
             raise ConfigurationError(
                 f"{analysis.value} goal node '{config.node}' is not available in the netlist"
             )
@@ -92,23 +92,24 @@ def _build_goal(config: DesignGoalConfig, parser: XyceNetlistParser) -> DesignGo
 
 
 def build_design_goals(
-    configurations: list[DesignGoalConfig], parser: XyceNetlistParser
+    configurations: list[DesignGoalConfig], netlist: Netlist
 ) -> list[DesignGoal]:
     """Reconstruct design goals using the same validation as a headless run."""
-    return [_build_goal(config, parser) for config in configurations]
+    return [_build_goal(config, netlist) for config in configurations]
 
 
 def _apply_simulation_parameters(
-    parser: XyceNetlistParser, parameters: dict[str, dict[str, str]]
+    netlist: Netlist, parameters: dict[str, dict[str, str]]
 ) -> dict[SimulationType, dict[str, str]]:
     existing = {
-        SimulationType.from_directive(directive.directive)
-        for directive in parser.simulation_directives
+        directive.simulation_type
+        for directive in netlist.simulation_directives
+        if directive.is_analysis
     }
     by_type: dict[SimulationType, dict[str, str]] = {}
     for key, values in parameters.items():
         if key.upper().startswith(".OPTIONS:"):
-            parser.update_options_directive(key.split(":", 1)[1], values)
+            netlist.update_options_directive(key.split(":", 1)[1], values)
             continue
         directive = key if key.startswith(".") else f".{key}"
         simulation_type = SimulationType.from_directive(directive)
@@ -116,7 +117,7 @@ def _apply_simulation_parameters(
             raise ConfigurationError(f"Unknown simulation directive '{key}'")
         by_type[simulation_type] = dict(values)
         if simulation_type in existing:
-            parser.update_simulation_directive(directive, values)
+            netlist.update_simulation_directive(simulation_type, values)
     return by_type
 
 
@@ -124,7 +125,7 @@ def _apply_simulation_parameters(
 class ConfiguredRun:
     configuration: RunConfiguration
     cobra: COBRA
-    parser: XyceNetlistParser
+    netlist: Netlist
     design_goals: list[DesignGoal]
     optimization_parameters: list[OptimizationProperty]
     orca_geometries: dict[str, Any]
@@ -169,8 +170,8 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
             "No optimization parameters defined; add at least one to optimization_parameters"
         )
 
-    parser = XyceNetlistParser().from_file(configuration.netlist)
-    components = set(parser.components)
+    netlist = simulator_class.netlist_parser.parse_file(configuration.netlist)
+    components = set(netlist.components)
     configured_components = set(configuration.component_models)
     if components != configured_components:
         missing = components - configured_components
@@ -183,9 +184,9 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         raise ConfigurationError("Component model mapping does not match netlist: " + "; ".join(details))
 
     simulation_parameters = _apply_simulation_parameters(
-        parser, configuration.simulation_parameters
+        netlist, configuration.simulation_parameters
     )
-    goals = build_design_goals(configuration.design_goals, parser)
+    goals = build_design_goals(configuration.design_goals, netlist)
     properties = [
         OptimizationProperty(
             name=item.name,
@@ -212,7 +213,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
 
     fine_tuning = configuration.fine_tuning
     cobra = COBRA(
-        netlist_parser=parser,
+        netlist=netlist,
         component_onnx_mapping=configuration.component_models,
         optimizer=optimizer_class(**configuration.optimizer.settings),
         circuit_simulator=simulator_class(**configuration.simulator.settings),
@@ -224,7 +225,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
     return ConfiguredRun(
         configuration=configuration,
         cobra=cobra,
-        parser=parser,
+        netlist=netlist,
         design_goals=goals,
         optimization_parameters=properties,
         orca_geometries=geometries,

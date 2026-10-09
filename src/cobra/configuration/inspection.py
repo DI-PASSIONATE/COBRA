@@ -18,7 +18,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cobra.configuration.configuration import (
     ConfigurationError,
@@ -29,7 +29,11 @@ from cobra.optimizers.base_optimizer import OptimizationType
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 
-# Elements whose positional value can be tuned via ``BaseNetlistParser.set_value``.
+if TYPE_CHECKING:
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist, NetlistElement
+    from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
+
+# Elements whose positional value can be tuned via ``Netlist.set_value``.
 VALUE_ELEMENT_TYPES: frozenset[str] = frozenset({"R", "C", "L", "V", "I"})
 
 # Touchstone suffixes recognised by ``EMSurrogateStage``; anything else is loaded
@@ -192,34 +196,37 @@ class NetlistReport:
         return _jsonable(asdict(self))
 
 
-def load_netlist_parser(path: str | Path) -> XyceNetlistParser:
-    """Parse *path* with the Xyce parser, raising ``ConfigurationError`` on failure."""
+def load_netlist(
+    path: str | Path, parser: NetlistParser | None = None, *, has_title: bool = True
+) -> Netlist:
+    """Parse *path* with *parser* (Xyce by default), raising ``ConfigurationError`` on failure.
+
+    An included file has no title line, so pass ``has_title=False`` for one.
+    """
     netlist_path = Path(path).expanduser()
     if not netlist_path.is_file():
         raise ConfigurationError(f"Netlist file not found: {netlist_path}")
-    parser = XyceNetlistParser()
     try:
-        parser.from_file(netlist_path)
+        return (parser or XyceNetlistParser()).parse_file(netlist_path, has_title=has_title)
     except (OSError, ValueError) as exc:
         raise ConfigurationError(f"Failed to parse netlist '{netlist_path}': {exc}") from exc
-    return parser
 
 
-def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> NetlistReport:
+def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
     """Summarise an already parsed netlist."""
     netlist_path = Path(path).expanduser()
     report = NetlistReport(path=str(netlist_path), exists=True, parsed=True)
-    report.lines = len(parser.to_string().splitlines())
-    report.simulation_type = parser.simulation_type.value
-    report.num_ports = parser.num_ports
-    report.inline_subcircuits = sorted(parser.inline_subckt_names)
-    report.probe_nodes = list(parser.probe_nodes)
-    report.available_goal_parameters = list(parser.available_design_parameters)
-    report.ac_goal_parameters = SimulationType.AC.available_parameters(parser.num_ports)
-    report.hb_goal_parameters = _large_signal_goal_parameters(parser, SimulationType.HB)
-    report.tran_goal_parameters = _large_signal_goal_parameters(parser, SimulationType.TRAN)
+    report.lines = len(netlist.to_string().splitlines())
+    report.simulation_type = netlist.simulation_type.value
+    report.num_ports = netlist.num_ports
+    report.inline_subcircuits = sorted(netlist.inline_subckt_names)
+    report.probe_nodes = list(netlist.probe_nodes)
+    report.available_goal_parameters = list(netlist.available_design_parameters)
+    report.ac_goal_parameters = SimulationType.AC.available_parameters(netlist.num_ports)
+    report.hb_goal_parameters = _large_signal_goal_parameters(netlist, SimulationType.HB)
+    report.tran_goal_parameters = _large_signal_goal_parameters(netlist, SimulationType.TRAN)
 
-    for element in parser.list_elements():
+    for element in netlist.list_elements():
         report.elements.append(
             ElementReport(
                 name=element.name,
@@ -233,7 +240,7 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
         )
         report.element_counts[element.etype] = report.element_counts.get(element.etype, 0) + 1
         if element.etype == "P":
-            source = parser.port_sources.get(element.name, {})
+            source = netlist.port_sources.get(element.name, {})
             report.ports.append(
                 PortReport(
                     name=element.name,
@@ -247,7 +254,7 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
 
     report.netlist_variables = _netlist_variables(report.elements)
 
-    for name, component in parser.components.items():
+    for name, component in netlist.components.items():
         params = dict(component.params)
         report.components.append(
             ComponentReport(
@@ -260,9 +267,9 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
         )
 
     base_directory = netlist_path.resolve().parent
-    for include in parser.includes:
+    for include in netlist.includes:
         candidate = _resolve_reference(include.file_path, base_directory)
-        generated_for = candidate.stem if candidate.stem in parser.components else None
+        generated_for = candidate.stem if candidate.stem in netlist.components else None
         entry = IncludeReport(
             file_path=include.file_path,
             resolved_path=str(candidate),
@@ -273,7 +280,7 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
         if entry.exists:
             entry.subcircuits = _included_subcircuits(candidate, report)
         report.includes.append(entry)
-    for library in parser.libraries:
+    for library in netlist.libraries:
         candidate = _resolve_reference(library.file_path, base_directory)
         report.libraries.append(
             LibraryReport(
@@ -285,18 +292,18 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
             )
         )
 
-    for directive in parser.simulation_directives:
+    for directive in netlist.simulation_directives:
         report.simulation_directives.append(
             {
                 "directive": directive.directive,
-                "simulation_type": SimulationType.from_directive(directive.directive).value,
+                "simulation_type": directive.simulation_type.value,
                 "positional": list(directive.positional),
                 "kv_params": dict(directive.kv_params),
                 "line": directive.line_index + 1,
             }
         )
-    report.options_directives = parser.options_directives
-    for directive in parser.print_directives:
+    report.options_directives = netlist.options_directives
+    for directive in netlist.print_directives:
         report.print_directives.append(
             {
                 "analysis": directive.analysis,
@@ -306,20 +313,20 @@ def build_netlist_report(parser: XyceNetlistParser, path: str | Path) -> Netlist
             }
         )
 
-    _check_netlist(report, parser)
+    _check_netlist(report, netlist)
     return report
 
 
 def inspect_netlist(path: str | Path) -> NetlistReport:
     """Parse *path* and return its report, recording load failures as issues."""
     try:
-        parser = load_netlist_parser(path)
+        netlist = load_netlist(path)
     except ConfigurationError as exc:
         report = NetlistReport(path=str(Path(path).expanduser()))
         report.exists = Path(path).expanduser().is_file()
         report.issues.append(Issue(Severity.ERROR, "netlist", str(exc)))
         return report
-    return build_netlist_report(parser, path)
+    return build_netlist_report(netlist, path)
 
 
 def _resolve_reference(file_path: str, base_directory: Path) -> Path:
@@ -331,27 +338,27 @@ def _resolve_reference(file_path: str, base_directory: Path) -> Path:
 def _included_subcircuits(path: Path, report: NetlistReport) -> list[str]:
     """Return the ``.SUBCKT`` names an included netlist defines."""
     try:
-        return sorted(load_netlist_parser(path).inline_subckt_names)
+        return sorted(load_netlist(path, has_title=False).inline_subckt_names)
     except ConfigurationError as exc:
         report.issues.append(Issue(Severity.WARNING, "netlist.include", str(exc)))
         return []
 
 
 def _large_signal_goal_parameters(
-    parser: XyceNetlistParser, simulation_type: SimulationType
+    netlist: Netlist, simulation_type: SimulationType
 ) -> list[str]:
     """List the HB or transient goal parameter names this netlist can support."""
     # Imported here: the goal collection pulls in numpy and scikit-rf.
     from cobra.optimizers.design_goal_collection import large_signal_name
 
-    names = [large_signal_name(f"Power_dBm[{node}]", simulation_type) for node in parser.probe_nodes]
+    names = [large_signal_name(f"Power_dBm[{node}]", simulation_type) for node in netlist.probe_nodes]
     names.extend(
         large_signal_name(f"Gain_dB[{port}@{node}]", simulation_type)
-        for port in sorted(parser.port_sources)
-        for node in parser.probe_nodes
+        for port in sorted(netlist.port_sources)
+        for node in netlist.probe_nodes
     )
     names.extend(
-        large_signal_name(f"Isolation_dB[{node}]", simulation_type) for node in parser.probe_nodes
+        large_signal_name(f"Isolation_dB[{node}]", simulation_type) for node in netlist.probe_nodes
     )
     return names
 
@@ -369,9 +376,9 @@ def _netlist_variables(elements: list[ElementReport]) -> dict[str, str]:
     return variables
 
 
-def _check_netlist(report: NetlistReport, parser: XyceNetlistParser) -> None:
+def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
     """Record netlist-only findings that block or degrade a run."""
-    if parser.simulation_type is SimulationType.UNKNOWN:
+    if netlist.simulation_type is SimulationType.UNKNOWN:
         report.issues.append(
             Issue(
                 Severity.WARNING,
@@ -380,7 +387,7 @@ def _check_netlist(report: NetlistReport, parser: XyceNetlistParser) -> None:
                 "analysis required by the design goals using default parameters.",
             )
         )
-    if not parser.num_ports:
+    if not netlist.num_ports:
         report.issues.append(
             Issue(
                 Severity.WARNING,
@@ -388,7 +395,7 @@ def _check_netlist(report: NetlistReport, parser: XyceNetlistParser) -> None:
                 "No P (port) elements found; S-parameter design goals are unavailable.",
             )
         )
-    if parser.simulation_type in (SimulationType.HB, SimulationType.TRAN) and not parser.probe_nodes:
+    if netlist.simulation_type in (SimulationType.HB, SimulationType.TRAN) and not netlist.probe_nodes:
         report.issues.append(
             Issue(
                 Severity.WARNING,
@@ -397,7 +404,7 @@ def _check_netlist(report: NetlistReport, parser: XyceNetlistParser) -> None:
                 "which requires a 0 V source named V<node>.",
             )
         )
-    for directive in parser.print_directives:
+    for directive in netlist.print_directives:
         output_format = next(
             (value for key, value in directive.kv_params.items() if key.lower() == "format"), ""
         )
@@ -609,19 +616,19 @@ def inspect_configuration(path: str | Path, *, check_models: bool = True) -> Con
 
     _check_backends(configuration, report)
 
-    parser: XyceNetlistParser | None = None
+    netlist: Netlist | None = None
     try:
-        parser = load_netlist_parser(configuration.netlist)
+        netlist = load_netlist(configuration.netlist, _netlist_parser(configuration))
     except ConfigurationError as exc:
         report.issues.append(Issue(Severity.ERROR, "netlist", str(exc)))
-    if parser is not None:
-        report.netlist = build_netlist_report(parser, configuration.netlist)
+    if netlist is not None:
+        report.netlist = build_netlist_report(netlist, configuration.netlist)
 
-    _check_component_models(configuration, parser, report, check_models=check_models)
-    _check_model_frequency_bands(configuration, parser, report)
-    _check_optimization_parameters(configuration, parser, report)
-    _check_design_goals(configuration, parser, report)
-    _check_simulation_parameters(configuration, parser, report)
+    _check_component_models(configuration, netlist, report, check_models=check_models)
+    _check_model_frequency_bands(configuration, netlist, report)
+    _check_optimization_parameters(configuration, netlist, report)
+    _check_design_goals(configuration, netlist, report)
+    _check_simulation_parameters(configuration, netlist, report)
     _check_fine_tuning(configuration, report)
     return report
 
@@ -666,6 +673,15 @@ def _inspect_raw_netlist(raw: dict[str, Any], config_path: Path, report: Configu
     candidate = candidate.resolve()
     report.netlist_path = str(candidate)
     report.netlist = inspect_netlist(candidate)
+
+
+def _netlist_parser(configuration: RunConfiguration) -> NetlistParser | None:
+    """The parser of the configured simulator, or ``None`` when the name is unknown."""
+    # Imported here: config_runner pulls in the full COBRA pipeline.
+    from cobra.configuration.config_runner import SIMULATOR_REGISTRY
+
+    simulator = SIMULATOR_REGISTRY.get(configuration.simulator.name)
+    return simulator.netlist_parser if simulator is not None else None
 
 
 def _check_backends(configuration: RunConfiguration, report: ConfigurationReport) -> None:
@@ -767,13 +783,13 @@ def _inspect_onnx(path: Path, entry: ComponentModelReport) -> str | None:
 
 def _check_component_models(
     configuration: RunConfiguration,
-    parser: XyceNetlistParser | None,
+    netlist: Netlist | None,
     report: ConfigurationReport,
     *,
     check_models: bool,
 ) -> None:
     """Cross-check every surrogate mapping against the netlist and the model file."""
-    components = parser.components if parser is not None else {}
+    components = netlist.components if netlist is not None else {}
     for name in sorted(set(components) - set(configuration.component_models)):
         report.issues.append(
             Issue(
@@ -791,7 +807,7 @@ def _check_component_models(
             kind=_model_kind(model_path),
         )
         location = f"component_models.{component}"
-        if parser is not None and component not in components:
+        if netlist is not None and component not in components:
             report.issues.append(
                 Issue(
                     Severity.ERROR,
@@ -800,7 +816,7 @@ def _check_component_models(
                     f"Available: {', '.join(sorted(components)) or 'none'}",
                 )
             )
-        elif parser is not None:
+        elif netlist is not None:
             entry.instance_nodes = len(components[component].nodes)
 
         if not entry.exists:
@@ -863,7 +879,7 @@ def _check_component_models(
 
 
 def _analysis_frequency_span(
-    configuration: RunConfiguration, parser: XyceNetlistParser
+    configuration: RunConfiguration, netlist: Netlist
 ) -> tuple[float, float, str] | None:
     """The lowest and highest frequency the netlist's analyses evaluate a surrogate at.
 
@@ -875,8 +891,8 @@ def _analysis_frequency_span(
     highs: list[float] = []
     names: list[str] = []
     seen: set[SimulationType] = set()
-    for directive in parser.simulation_directives:
-        simulation_type = SimulationType.from_directive(directive.directive)
+    for directive in netlist.simulation_directives:
+        simulation_type = directive.simulation_type
         # .AC and .LIN are the same analysis; only its first line carries the sweep.
         if simulation_type in seen:
             continue
@@ -895,7 +911,7 @@ def _analysis_frequency_span(
             lows.append(start)
             highs.append(stop)
         elif simulation_type is SimulationType.HB:
-            tones, orders = _hb_grid(configuration, parser, directive.positional)
+            tones, orders = _hb_grid(configuration, netlist, directive.positional)
             if not tones or not orders:
                 continue
             lows.append(min(tones))
@@ -915,7 +931,7 @@ def _analysis_frequency_span(
 
 def _check_model_frequency_bands(
     configuration: RunConfiguration,
-    parser: XyceNetlistParser | None,
+    netlist: Netlist | None,
     report: ConfigurationReport,
 ) -> None:
     """Warn when an analysis evaluates a surrogate outside the band its model declares.
@@ -923,9 +939,9 @@ def _check_model_frequency_bands(
     The surrogate is only predicted inside that band; the vector fit Xyce
     simulates extrapolates beyond it, so results there are not backed by the model.
     """
-    if parser is None:
+    if netlist is None:
         return
-    span = _analysis_frequency_span(configuration, parser)
+    span = _analysis_frequency_span(configuration, netlist)
     if span is None:
         return
     low, high, directives = span
@@ -946,12 +962,16 @@ def _check_model_frequency_bands(
 
 def _check_optimization_parameters(
     configuration: RunConfiguration,
-    parser: XyceNetlistParser | None,
+    netlist: Netlist | None,
     report: ConfigurationReport,
 ) -> None:
     """Resolve every optimization parameter against the netlist or a surrogate model."""
-    elements = {element.name: element for element in parser.list_elements()} if parser else {}
-    variables = _netlist_variables(report.netlist.elements) if report.netlist else {}
+    def find_element(name: str) -> NetlistElement | None:
+        # The lookup Netlist.update_parameters uses: case-insensitive for SPICE.
+        if netlist is None or not netlist.has_element(name):
+            return None
+        return netlist.get_element(name)
+
     model_inputs = {
         entry.component: entry.model_inputs
         for entry in report.component_models
@@ -978,10 +998,10 @@ def _check_optimization_parameters(
         location = f"optimization_parameters.{parameter.name}"
         instance, _, key = parameter.name.partition(":")
         if OptimizationType(parameter.type) is OptimizationType.NETLIST_VARIABLE:
-            if parser is None:
+            if netlist is None:
                 entry.target = "unknown (netlist unavailable)"
             elif key:
-                element = elements.get(instance)
+                element = find_element(instance)
                 if element is None:
                     report.issues.append(
                         Issue(
@@ -994,8 +1014,10 @@ def _check_optimization_parameters(
                 else:
                     entry.resolved = True
                     entry.target = f"{instance} ({element.etype}) parameter '{key}'"
-                    entry.current_value = element.params.get(key)
-                    if key not in element.params:
+                    fold = netlist.parser.fold
+                    existing = next((k for k in element.params if fold(k) == fold(key)), None)
+                    entry.current_value = element.params.get(existing) if existing else None
+                    if existing is None:
                         report.issues.append(
                             Issue(
                                 Severity.WARNING,
@@ -1005,7 +1027,7 @@ def _check_optimization_parameters(
                             )
                         )
             else:
-                element = elements.get(parameter.name)
+                element = find_element(parameter.name)
                 if element is None:
                     report.issues.append(
                         Issue(
@@ -1028,7 +1050,7 @@ def _check_optimization_parameters(
                 else:
                     entry.resolved = True
                     entry.target = f"{parameter.name} ({element.etype}) value"
-                    entry.current_value = variables.get(parameter.name)
+                    entry.current_value = element.value
         else:
             targets = [instance] if key else sorted(model_inputs)
             input_name = key or parameter.name
@@ -1141,7 +1163,7 @@ def _check_trained_range(
 
 def _check_design_goals(
     configuration: RunConfiguration,
-    parser: XyceNetlistParser | None,
+    netlist: Netlist | None,
     report: ConfigurationReport,
 ) -> None:
     """Rebuild every goal with the run-time validation and record what it needs."""
@@ -1150,8 +1172,8 @@ def _check_design_goals(
     from cobra.optimizers.design_goal import DesignGoal
 
     directives = (
-        {SimulationType.from_directive(item.directive) for item in parser.simulation_directives}
-        if parser is not None
+        {item.simulation_type for item in netlist.simulation_directives}
+        if netlist is not None
         else set()
     )
     for goal in configuration.design_goals:
@@ -1173,9 +1195,9 @@ def _check_design_goals(
         )
         entry.simulation_type = simulation_type.value
         entry.directive_in_netlist = simulation_type in directives
-        if parser is not None:
+        if netlist is not None:
             try:
-                build_design_goals([goal], parser)
+                build_design_goals([goal], netlist)
             except ConfigurationError as exc:
                 report.issues.append(Issue(Severity.ERROR, location, str(exc)))
             else:
@@ -1186,10 +1208,10 @@ def _check_design_goals(
             report.issues.append(Issue(Severity.ERROR, location, str(exc)))
         else:
             _check_goal_frequency(
-                goal.frequency_range, simulation_type, configuration, parser, location, report
+                goal.frequency_range, simulation_type, configuration, netlist, location, report
             )
         if (
-            parser is not None
+            netlist is not None
             and not entry.directive_in_netlist
             and simulation_type is not SimulationType.UNKNOWN
         ):
@@ -1238,7 +1260,7 @@ def _tran_window(
 
 def _hb_grid(
     configuration: RunConfiguration,
-    parser: XyceNetlistParser,
+    netlist: Netlist,
     positional: list[str],
 ) -> tuple[list[float], list[int]]:
     """The fundamentals and per-tone harmonic orders the run will actually use.
@@ -1255,7 +1277,7 @@ def _hb_grid(
     netlist_numfreq = next(
         (
             value
-            for key, value in parser.options_directives.get("hbint", {}).items()
+            for key, value in netlist.options_directives.get("hbint", {}).items()
             if key.lower() == "numfreq"
         ),
         None,
@@ -1273,7 +1295,7 @@ def _check_goal_frequency(
     frequency_range: str | None,
     simulation_type: SimulationType,
     configuration: RunConfiguration,
-    parser: XyceNetlistParser | None,
+    netlist: Netlist | None,
     location: str,
     report: ConfigurationReport,
 ) -> None:
@@ -1289,16 +1311,16 @@ def _check_goal_frequency(
     from cobra.optimizers.design_goal import DesignGoal
     from cobra.spice_sim import hb_spectrum, tran_spectrum
 
-    if parser is None or frequency_range is None:
+    if netlist is None or frequency_range is None:
         return
     low, high = DesignGoal.str_to_frequency_range(frequency_range)
     if low is None or high is None:
         return
-    for directive in parser.simulation_directives:
-        if SimulationType.from_directive(directive.directive) is not simulation_type:
+    for directive in netlist.simulation_directives:
+        if directive.simulation_type is not simulation_type:
             continue
         if simulation_type is SimulationType.HB:
-            tones, orders = _hb_grid(configuration, parser, directive.positional)
+            tones, orders = _hb_grid(configuration, netlist, directive.positional)
             if not hb_spectrum.covers_frequency(tones, orders, low, high):
                 report.issues.append(
                     Issue(
@@ -1345,7 +1367,7 @@ def _check_goal_frequency(
 
 def _check_simulation_parameters(
     configuration: RunConfiguration,
-    parser: XyceNetlistParser | None,
+    netlist: Netlist | None,
     report: ConfigurationReport,
 ) -> None:
     """Verify simulation-parameter keys against the netlist and Xyce metadata."""
@@ -1353,21 +1375,21 @@ def _check_simulation_parameters(
     from cobra.spice_sim.xyce_simulator import XyceSimulator
 
     directives = (
-        {SimulationType.from_directive(item.directive): item for item in parser.simulation_directives}
-        if parser is not None
+        {item.simulation_type: item for item in netlist.simulation_directives if item.is_analysis}
+        if netlist is not None
         else {}
     )
     for key, values in configuration.simulation_parameters.items():
         location = f"simulation_parameters[{key}]"
         if key.upper().startswith(".OPTIONS:"):
             category = key.split(":", 1)[1].lower()
-            if parser is not None and category not in parser.options_directives:
+            if netlist is not None and category not in netlist.options_directives:
                 report.issues.append(
                     Issue(
                         Severity.ERROR,
                         location,
                         f"Netlist has no '.options {category}' line to update. Available: "
-                        f"{', '.join(sorted(parser.options_directives)) or 'none'}",
+                        f"{', '.join(sorted(netlist.options_directives)) or 'none'}",
                     )
                 )
             continue
@@ -1377,7 +1399,7 @@ def _check_simulation_parameters(
             report.issues.append(Issue(Severity.ERROR, location, f"Unknown simulation directive '{key}'"))
             continue
         target = directives.get(simulation_type)
-        if parser is not None and target is None:
+        if netlist is not None and target is None:
             report.issues.append(
                 Issue(
                     Severity.INFO,

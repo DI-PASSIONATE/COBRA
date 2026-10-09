@@ -10,7 +10,7 @@ Script mode provides full automation and reproducibility.
 
 ## Minimal Flow
 
-1. Parse netlist using `XyceNetlistParser`.
+1. Parse the netlist with `XyceNetlistParser().parse_file(...)`, which returns a `Netlist`.
 2. Create `COBRA` with component mappings and optimizer/simulator.
 3. Define design goals.
 4. Define optimization properties.
@@ -36,10 +36,10 @@ from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParse
 ## Key Construction Pattern
 
 ```python
-parser = XyceNetlistParser().from_file("your_netlist.cir")
+netlist = XyceNetlistParser().parse_file("your_netlist.cir")
 
 cobra = COBRA(
-    netlist_parser=parser,
+    netlist=netlist,
     component_onnx_mapping={
         "X1": "model.onnx",
         "X2": "fixed_component.s6p",

@@ -9,6 +9,7 @@ which silently turns the reported best design into a different circuit.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -23,10 +24,14 @@ from cobra.optimizers.base_optimizer import (
 )
 from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
-from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
+from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.xyce_simulator import XyceSimulator
 from tests.conftest import netlist_path
+
+if TYPE_CHECKING:
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 
 def _property(name: str, unit: str | None = None, linked_to: str | None = None):
@@ -70,18 +75,18 @@ def test_broken_links_are_errors():
 # ---------------------------------------------------------------------------
 
 
-class _CapturingSimulator(BaseSimulator):
+class _CapturingSimulator(XyceSimulator):
     """Keeps the text of every netlist it is asked to simulate."""
 
     def __init__(self):
         self.netlists: list[str] = []
 
-    def preprocess_ntwk(self, ntwk, name: str) -> str:
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
         return name
 
-    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
-        self.netlists.append(Path(netlist_name).read_text(encoding="utf-8"))
-        return SimulationResult(output_files=[netlist_name])
+    def run_simulation(self, netlist_path: str, netlist: Netlist) -> SimulationResult | None:
+        self.netlists.append(Path(netlist_path).read_text(encoding="utf-8"))
+        return SimulationResult(output_files=[netlist_path])
 
 
 def _value_of(netlist: str, element: str) -> str:
@@ -106,7 +111,7 @@ def test_the_best_parameter_netlist_keeps_the_inherited_unit(
 
     simulator = _CapturingSimulator()
     cobra = COBRA(
-        netlist_parser=XyceNetlistParser().from_file(netlist_path("minimal_ac")),
+        netlist=XyceNetlistParser().parse_file(netlist_path("minimal_ac")),
         component_onnx_mapping={},
         optimizer=optimizer_factory(),
         circuit_simulator=simulator,

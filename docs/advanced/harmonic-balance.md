@@ -63,8 +63,8 @@ This produces the pair `V(Out)` and `I(VOut)`. COBRA reads the `.PRINT hb` line 
 ```python
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
-parser = XyceNetlistParser().from_file("examples/netlists/Mixer/mixer_hb.cir")
-parser.probe_nodes
+netlist = XyceNetlistParser().parse_file("examples/netlists/Mixer/mixer_hb.cir")
+netlist.probe_nodes
 # ['IF_neg', 'IF_pos', 'LO_CM', 'LO_in', 'LO_neg', 'LO_pos', 'Out',
 #  'RF_CM', 'RF_M_n', 'RF_M_p', 'RF_in', 'RF_neg', 'RF_pos']
 ```
@@ -148,9 +148,9 @@ from cobra.optimizers.design_goal_collection import (
 )
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
-parser = XyceNetlistParser().from_file("examples/netlists/Mixer/mixer_hb.cir")
+netlist = XyceNetlistParser().parse_file("examples/netlists/Mixer/mixer_hb.cir")
 node = "Out"
-port = parser.port_sources["P1"]          # {'z0': 100.0, 'sin_amplitude': 0.28284271, ...}
+port = netlist.port_sources["P1"]          # {'z0': 100.0, 'sin_amplitude': 0.28284271, ...}
 
 goals = [
     # IF output power at the 35 GHz difference frequency

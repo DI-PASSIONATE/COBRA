@@ -77,7 +77,7 @@ freqs, p_dbm = hb_spectrum.spectrum(spectrum, "OUT", "power", (35e9, 35e9))
 
 ## Analysis Points and Design Goals
 
-Analysis points follow the [HB convention](harmonic-balance.md#analysis-points): a node needs both `V(node)` and the current `I(Vnode)` of a 0 V probe source in its `.PRINT tran` line. `XyceNetlistParser.probe_nodes` lists them for either analysis.
+Analysis points follow the [HB convention](harmonic-balance.md#analysis-points): a node needs both `V(node)` and the current `I(Vnode)` of a 0 V probe source in its `.PRINT tran` line. `Netlist.probe_nodes` lists them for either analysis.
 
 The transient goals are the HB goals with a `TRAN:` prefix, so both can coexist in one run:
 

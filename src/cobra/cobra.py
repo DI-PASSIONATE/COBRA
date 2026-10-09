@@ -26,7 +26,7 @@ from cobra.optimizers.base_optimizer import (
 )
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
 from cobra.spice_sim.base_simulator import BaseSimulator
-from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+from cobra.spice_sim.netlist_parsers.netlist import Netlist
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages import (
     CircuitSimulationStage,
@@ -51,9 +51,9 @@ class COBRA:
     COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
 
     Can be initialized with:
-    Pass a NetlistParser and component_onnx_mapping dict
-       >>> parser = XyceNetlistParser().from_file("netlist.cir")
-       >>> cobra = COBRA(netlist_parser=parser,
+    Pass a parsed Netlist and component_onnx_mapping dict
+       >>> netlist = XyceNetlistParser().parse_file("netlist.cir")
+       >>> cobra = COBRA(netlist=netlist,
        ...               component_onnx_mapping={"X1": "model.onnx"})
     """
 
@@ -111,7 +111,7 @@ class COBRA:
 
     def __init__(
         self,
-        netlist_parser: BaseNetlistParser,
+        netlist: Netlist,
         component_onnx_mapping: dict[str, str],
         optimizer: BaseOptimizer | None = None,
         circuit_simulator: BaseSimulator | None = None,
@@ -121,10 +121,10 @@ class COBRA:
         fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
     ):
         # Validate initialization arguments
-        if not isinstance(netlist_parser, BaseNetlistParser):
-            raise TypeError("netlist_parser must be an instance of BaseNetlistParser")
+        if not isinstance(netlist, Netlist):
+            raise TypeError("netlist must be a parsed Netlist")
 
-        components = netlist_parser.components
+        components = netlist.components
         if component_onnx_mapping is None:
             component_onnx_mapping = {}
 
@@ -136,7 +136,7 @@ class COBRA:
                 f"Components found in netlist: {set(components.keys())}"
             )
 
-        self.netlist_parser = netlist_parser
+        self.netlist = netlist
         self.component_onnx_mapping = component_onnx_mapping
 
         # Only create a surrogate stage when there are components with models
@@ -196,8 +196,8 @@ class COBRA:
         Run the optimization workflow.
 
         Parameters:
-        - netlist: A path to the netlist file. If a netlist_parser was provided in __init__,
-                   it should correspond to this file.
+        - netlist: A path to the netlist file. The Netlist passed to __init__ should
+                   have been parsed from this file.
         - design_goals: A list of DesignGoal objects representing the design goals and constraints.
         - optimization_parameters: A list of OptimizationProperty objects representing the parameters
                                    to be optimized, their types, and their ranges.
@@ -248,26 +248,26 @@ class COBRA:
         # Update netlist path to point to the results directory for all operations
         netlist = str(netlist_in_results)
 
-        netlist_parser = self.netlist_parser
+        parsed_netlist = self.netlist
 
         # Replace the component model names in the netlist to match the vector fitted subcircuits
         for comp_name in self.component_onnx_mapping:
             try:
-                netlist_parser.set_model(comp_name, f"{comp_name}_subct")
+                parsed_netlist.set_model(comp_name, f"{comp_name}_subct")
             except (KeyError, ValueError, NotImplementedError) as e:
                 logger.warning("Could not set the subcircuit model for %s: %s", comp_name, e)
-        netlist_parser.save(netlist)
+        parsed_netlist.save(netlist)
 
-        # Every trial renders its own netlist from these lines, so that concurrent
-        # trials never share a parser or a file on disk.
-        netlist_template = netlist_parser.lines
+        # Every trial renders its own copy of this netlist, so that concurrent
+        # trials never share a netlist or a file on disk.
+        netlist_template = parsed_netlist.copy()
 
         design_goal_checker = DesignGoalChecker(design_goals)
         optimizer.initialize(len(design_goals), parallel_trials=parallel_trials)
 
         context = OptimizationContext(
             netlist=netlist,
-            native_sim_type=netlist_parser.simulation_type,
+            native_sim_type=parsed_netlist.simulation_type,
             design_goal_checker=design_goal_checker,
             optimization_parameters=optimization_parameters,
             max_iterations=max_iterations,
@@ -412,12 +412,12 @@ class COBRA:
 
         # If goals not achieved, try to retrieve best parameters from optimizer and use those for final context
         if not context.goal_achieved:
-            context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, netlist_parser, context)
+            context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, parsed_netlist, context)
         else:
             # The winning parameters live in a trial directory; put them into the
             # run's own netlist so the saved file, and any fine-tuning, use them.
-            netlist_parser.update_parameters(context.netlist_parameters)
-            netlist_parser.save(netlist)
+            parsed_netlist.update_parameters(context.netlist_parameters)
+            parsed_netlist.save(netlist)
             logger.info("Design goals achieved at iteration %s", context.iteration)
 
         # Save the surrogate model's predicted S-parameters to the results directory for the user
@@ -452,13 +452,13 @@ class COBRA:
         return context
 
     def _evaluate_trial(
-        self, context: OptimizationContext, netlist_template: list[str]
+        self, context: OptimizationContext, netlist_template: Netlist
     ) -> OptimizationContext:
         """Render, simulate and score one trial inside its own directory.
 
         Runs on a worker thread, so it may only touch *context* and objects that
-        are safe to share: the netlist parser is built here from
-        *netlist_template*, the design goals were copied by
+        are safe to share: the netlist is a copy of *netlist_template* made here,
+        the design goals were copied by
         :meth:`~cobra.optimization_context.OptimizationContext.for_trial`, and the
         stages themselves hold no per-iteration state.
         """
@@ -510,17 +510,17 @@ class COBRA:
         context.design_goal_checker.check_goals(context)
         return True
 
-    def _render_netlist(self, context: OptimizationContext, netlist_template: list[str]) -> None:
+    def _render_netlist(self, context: OptimizationContext, netlist_template: Netlist) -> None:
         """Write *context*'s netlist, with its parameters applied, into its own directory.
 
-        Builds its own parser from *netlist_template*, so it is safe on a worker thread.
+        Edits its own copy of *netlist_template*, so it is safe on a worker thread.
         """
-        parser = type(self.netlist_parser)().from_lines(netlist_template)
-        parser.update_parameters(context.netlist_parameters)
+        netlist = netlist_template.copy()
+        netlist.update_parameters(context.netlist_parameters)
         Path(context.results_dir).mkdir(parents=True, exist_ok=True)
-        parser.save(context.netlist)  # The circuit simulator reads the netlist from disk
+        netlist.save(context.netlist)  # The circuit simulator reads the netlist from disk
 
-    def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, netlist_parser, context: OptimizationContext) -> OptimizationContext:
+    def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, parsed_netlist, context: OptimizationContext) -> OptimizationContext:
         logger.info("Maximum iterations reached without achieving the design goals")
 
             # If not MOO, retrieve best parameters and update context to reflect them
@@ -547,8 +547,8 @@ class COBRA:
             context.model_parameters = model_params
 
             # Update netlist
-            netlist_parser.update_parameters(netlist_params)
-            netlist_parser.save(netlist)
+            parsed_netlist.update_parameters(netlist_params)
+            parsed_netlist.save(netlist)
 
             # Rerun simulation to update context with best result
             logger.info("Re-simulating with the best parameters found")
@@ -599,7 +599,7 @@ class COBRA:
         # .snp components keep their fixed network.
         touchstone_networks = surrogate_stage.touchstone_networks()
         # The run's netlist holds the subcircuit models and the parameters to verify.
-        netlist_template = self.netlist_parser.lines
+        netlist_template = self.netlist.copy()
         fine_tuning_dir = Path(context.results_dir) / "fine_tuning"
 
         # Like the surrogate loop, every iteration is evaluated in its own directory
@@ -659,8 +659,8 @@ class COBRA:
             context.absorb_trial(best, include_times=False)
 
         # Put the returned parameters into the run's own netlist.
-        self.netlist_parser.update_parameters(context.netlist_parameters)
-        self.netlist_parser.save(context.netlist)
+        self.netlist.update_parameters(context.netlist_parameters)
+        self.netlist.save(context.netlist)
 
         if not context.goal_achieved:
             logger.info(
@@ -693,7 +693,7 @@ class COBRA:
     def _evaluate_fine_tuning_trial(
         self,
         trial: OptimizationContext,
-        netlist_template: list[str],
+        netlist_template: Netlist,
         fine_tuning_stage: EMFineTuningStage,
         surrogate_stage: EMSurrogateStage,
         touchstone_networks: dict[str, "rf.Network"],

@@ -12,7 +12,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -20,6 +20,9 @@ from cobra.console import LOGGER_NAME
 from cobra.optimization_context import OptimizationContext
 from cobra.optimizers.design_goal import DesignGoalChecker
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+
+if TYPE_CHECKING:
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 NETLIST_DIR = FIXTURE_DIR / "netlists"
@@ -79,33 +82,22 @@ def make_context(**overrides) -> OptimizationContext:
 
 
 @pytest.fixture
-def parser_factory():
-    """Return a callable that parses a fixture netlist into a fresh parser."""
+def netlist_factory():
+    """Return a callable that parses a fixture netlist by name.
 
-    def _factory(name: str) -> XyceNetlistParser:
-        return XyceNetlistParser().from_file(netlist_path(name))
-
-    return _factory
-
-
-@pytest.fixture
-def minimal_ac(parser_factory) -> XyceNetlistParser:
-    return parser_factory("minimal_ac")
-
-
-@pytest.fixture
-def editable_netlist(tmp_path: Path):
-    """Copy a fixture netlist into ``tmp_path`` and parse it from there.
-
-    Use this for mutation tests so the checked-in fixture is never touched.
+    Edits only change the parsed netlist in memory, so the checked-in fixture
+    is never touched.
     """
 
-    def _factory(name: str) -> XyceNetlistParser:
-        destination = tmp_path / f"{name}.cir"
-        shutil.copy(netlist_path(name), destination)
-        return XyceNetlistParser().from_file(destination)
+    def _factory(name: str) -> Netlist:
+        return XyceNetlistParser().parse_file(netlist_path(name))
 
     return _factory
+
+
+@pytest.fixture
+def minimal_ac(netlist_factory) -> Netlist:
+    return netlist_factory("minimal_ac")
 
 
 @pytest.fixture

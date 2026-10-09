@@ -144,7 +144,7 @@ class SurrogateMetadata:
     def frequency_range(self) -> tuple[float, float] | None:
         """The band (Hz) the surrogate is valid over, or ``None`` if it declares no usable one."""
         band = self.input_ranges.get("frequency")
-        if band is None or not 0 < band[0] < band[1]:
+        if band is None or not 0 <= band[0] < band[1]:
             return None
         return band
 

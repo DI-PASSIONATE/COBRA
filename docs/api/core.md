@@ -14,7 +14,7 @@ description: >-
 
 ```python
 COBRA(
-    netlist_parser,
+    netlist,
     component_onnx_mapping,
     optimizer=None,              # defaults to a fresh OptunaOptimizer()
     circuit_simulator=None,      # defaults to a fresh XyceSimulator()
@@ -26,7 +26,7 @@ COBRA(
 
 ### Required Inputs
 
-- `netlist_parser`: parsed netlist object with component discovery.
+- `netlist`: the parsed `Netlist` (from `XyceNetlistParser().parse_file(...)`), used for component discovery.
 - `component_onnx_mapping`: dictionary mapping every parsed component name to a model path (`.onnx` or `.sNp`).
 
 ### Main Method

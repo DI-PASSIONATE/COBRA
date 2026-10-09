@@ -164,7 +164,7 @@ python examples/main.py
 
 The example in `examples/main.py` shows how to:
 
-- parse `netlist_multiple_SPFiles.cir` with `XyceNetlistParser`,
+- parse `netlist_multiple_SPFiles.cir` with `XyceNetlistParser().parse_file(...)`,
 - map `X1` to an ONNX surrogate and `X2` to a fixed Touchstone SNP file,
 - optimize prefixed model inputs for `X1` (for example `X1:bottom_winding_diameter`),
 - optimize parsed netlist values `Cshunt_p` and `Cshunt_n` with `linked_to`,
@@ -261,7 +261,7 @@ You can reference them directly in Python scripts:
 ```python
 import os
 cobra = COBRA(
-    netlist_parser=parser,
+    netlist=netlist,
     component_onnx_mapping={
         "X1": "models/UserA/my_transformer/my_transformer.onnx",
     },
@@ -427,11 +427,13 @@ COBRA runs a staged pipeline on each optimization iteration. Understanding each 
 
 Optuna's sampler proposes the next set of parameters (geometry inputs and/or netlist variables). After each iteration the checker's penalty values are fed back via `tell()`, so the sampler can learn the landscape. TPE (Tree-structured Parzen Estimator) is the default because it works well with a small number of evaluations — exactly what is needed when each evaluation involves a circuit simulation.
 
-### Stage 2 — Netlist parsing and patching (`XyceNetlistParser`)
+### Stage 2 — Netlist parsing and patching (`XyceNetlistParser`, `Netlist`)
+
+`XyceNetlistParser().parse_file(...)` turns the `.cir` file into a `Netlist`: the logical lines (with `+` continuations), the components, directives and subcircuits. A trial copies the template (`Netlist.copy()`) and edits it without re-parsing; an edit replaces only the changed token, so spacing, inline comments and continuation layout are kept and untouched lines render unchanged. Element and parameter names match case-insensitively (`c1` updates `C1`). The first line of a netlist is its title, as in Xyce.
 
 Before each simulation the netlist is updated in two ways:
 
-1. **Parsed netlist elements** (`NETLIST_VARIABLE` parameters) are patched directly in the `.cir` text (for example R/C/L values and supported instance/model parameters) so Xyce picks them up.
+1. **Parsed netlist elements** (`NETLIST_VARIABLE` parameters) are patched in the `Netlist` (for example R/C/L values and supported instance/model parameters) so Xyce picks them up.
 2. **TSTONEFILE rewriting** — Qucs-S exports Touchstone references as `YLIN` devices with a `.MODEL … LIN TSTONEFILE=…` directive. Xyce cannot parse this syntax, and more importantly SPICE simulators in general cannot use a raw Touchstone file as a subcircuit. The parser detects these blocks and rewrites them into normal `X…` subcircuit instances that point to the vector-fitted `.sp` file that will be generated in Stage 3.
 
 ### Stage 3 — EM surrogate inference (`EMSurrogateStage`)
