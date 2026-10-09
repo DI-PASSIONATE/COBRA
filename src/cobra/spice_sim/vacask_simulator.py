@@ -28,7 +28,7 @@ import skrf as rf
 from cobra.configuration.configuration import ConfigurationError
 from cobra.configuration.setting import CobraSetting
 from cobra.spice_sim import tran_spectrum
-from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult, SimulatorError
+from cobra.spice_sim.base_simulator import T0, BaseSimulator, SimulationResult, SimulatorError
 from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import (
     VacaskNetlistParser,
     vacask_float,
@@ -48,8 +48,6 @@ _FLOW_SUFFIX = ":flow(br)"
 _S_PARAMETER_RE = re.compile(r"^s\((\d+),(\d+)\)$")
 #: Name suffix of the image-sideband twin COBRA adds to an hbnoise analysis.
 _IMAGE_SUFFIX = "_img"
-#: Reference temperature of the noise figure (IEEE), in kelvin.
-T0 = 290.0
 _KELVIN = 273.15
 #: Defaults for analysis parameters outside the editable slots.
 _EXTRA_DEFAULTS: dict[SimulationType, dict[str, str]] = {

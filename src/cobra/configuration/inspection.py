@@ -1412,6 +1412,14 @@ def _check_goal_frequency(
 _NOISE_TYPES = frozenset({SimulationType.NOISE, SimulationType.HBNOISE})
 
 
+def _vacask_number(text: str) -> float | None:
+    """A VACASK number such as ``130G`` (``M`` is mega), or ``None``."""
+    try:
+        return vacask_float(text)
+    except ValueError:
+        return None
+
+
 def _check_noise_band(
     frequency_range: str,
     low: float,
@@ -1434,13 +1442,15 @@ def _check_noise_band(
     )
     names = netlist.parser.analysis_metadata(simulation_type).positional_param_names
     sweep = dict(zip(names, directive.positional, strict=False)) if directive is not None else {}
-    for name in ("from", "to"):
+    # VACASK names the sweep ends from/to, Xyce start_freq/stop_freq.
+    start_name, stop_name = ("from", "to") if "from" in names else ("start_freq", "stop_freq")
+    for name in (start_name, stop_name):
         configured = _configured_parameter(configuration, simulation_type.value, name)
         if configured is not None:
             sweep[name] = configured
-    try:
-        start, stop = vacask_float(sweep["from"]), vacask_float(sweep["to"])
-    except (KeyError, ValueError):
+    number = _vacask_number if isinstance(netlist.parser, VacaskNetlistParser) else _spice_number
+    start, stop = number(sweep.get(start_name, "")), number(sweep.get(stop_name, ""))
+    if start is None or stop is None:
         return  # no explicit sweep (COBRA sweeps the goals' band) or one it cannot read
     if low < start or high > stop:
         what = "offset (output sideband)" if simulation_type is SimulationType.HBNOISE else "noise"

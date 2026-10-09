@@ -553,7 +553,7 @@ _ALL_PARAMETERS: list[DesignParameter] = [
         SimulationType.NOISE,
         noise_figure_formula("NF"),
         calculate_array_penalty,
-        "Small-signal noise figure in dB, referred to the input port at 290 K (VACASK noise).",
+        "Small-signal noise figure in dB, referred to the input port at 290 K (.NOISE / VACASK noise).",
         min_ports=1,
     ),
     DesignParameter(

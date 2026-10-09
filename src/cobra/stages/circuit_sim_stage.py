@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
 
@@ -45,7 +46,12 @@ class CircuitSimulationStage(COBRABaseStage):
         # Preprocess surrogate models (e.g. vector fitting)
         for n in ntwks:
             out_name = os.path.join(results_dir, n.name or "cobra_output")
-            self.simulator.preprocess_ntwk(n, name=out_name)
+            try:
+                self.simulator.preprocess_ntwk(n, name=out_name)
+            except VectorFitError as exc:
+                logger.warning("%s; the design goals are penalised so the optimizer avoids these parameters", exc)
+                context.simulation_results = {}
+                return context
 
         # Determine which simulation types to run:
         # 1. Always run the netlist's native simulation type.

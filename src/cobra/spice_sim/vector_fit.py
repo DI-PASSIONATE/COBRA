@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import os
 import re
@@ -138,8 +139,28 @@ def vector_fit(nw: skrf.Network, name: str, enforce_passivity: bool = False) -> 
     netlist_filename = name + ".sp"
     subcircuit_name = os.path.basename(name) + "_subct"
     vf.write_spice_subcircuit_s(netlist_filename, fitted_model_name=subcircuit_name)
+    path = Path(netlist_filename)
+    path.write_text(noiseless_resistors(path.read_text(encoding="utf-8")), encoding="utf-8")
 
     return netlist_filename
+
+
+_SPICE_RESISTOR_RE = re.compile(r"^(R\S*)\s+(\S+)\s+(\S+)\s+(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def noiseless_resistors(subcircuit: str) -> str:
+    """Write every resistor of a SPICE subcircuit as a noiseless equivalent.
+
+    The resistors of a vector-fit realisation are not losses, yet a SPICE
+    resistor always adds thermal noise. ``R n1 n2 r`` becomes a conductance
+    controlled by its own voltage, ``G n1 n2 n1 n2 1/r``: the same current and
+    the same matrix entries, but a controlled source is noiseless.
+    """
+    def conductance(match: re.Match[str]) -> str:
+        name, node1, node2, value = match.groups()
+        return f"G{name} {node1} {node2} {node1} {node2} {1.0 / float(value)!r}"
+
+    return _SPICE_RESISTOR_RE.sub(conductance, subcircuit)
 
 
 def vector_fit_vacask(
@@ -158,10 +179,10 @@ def vector_fit_vacask(
     from snp2le.core.state import ConverterState
 
     state = ConverterState(mode="universal", enforce_passivity=enforce_passivity, max_order=max_order)
-    with _SNP2LE_LOCK:
+    with _SNP2LE_LOCK, _bounded_pole_relocation(_MAX_POLE_RELOCATIONS):
         result = convert(state, nw)
     if not result.ok:
-        raise ValueError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
+        raise VectorFitError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
     for message in result.messages:
         logger.debug("snp2le %s: %s", os.path.basename(name), message)
     circuit = cast("CircuitIR", result.ir)
@@ -175,6 +196,43 @@ def vector_fit_vacask(
 #: parallel trials interleaving would restore each other's stand-ins and leave the
 #: console redirected for good, so the fits run one at a time.
 _SNP2LE_LOCK = threading.Lock()
+
+#: Pole relocations one fit may run. scikit-rf's auto_fit has no iteration limit:
+#: at the order cap, skimming can remove as many poles as it adds while the error
+#: flips between two values, and the loop never ends. Converging fits need about
+#: 20 to 120 relocations.
+_MAX_POLE_RELOCATIONS = 1000
+#: The static method auto_fit calls once per relocation: the only hook inside its loop.
+_RELOCATION_HOOK = "_pole_relocation"
+
+
+class VectorFitError(ValueError):
+    """A surrogate's S-parameters could not be fitted into a subcircuit."""
+
+
+@contextlib.contextmanager
+def _bounded_pole_relocation(limit: int):
+    """Make a scikit-rf fit that exceeds *limit* pole relocations raise instead of looping forever.
+
+    The count is shared by every fit while this is active, so use it around one fit
+    at a time (snp2le fits hold ``_SNP2LE_LOCK``).
+    """
+    relocate = getattr(VectorFitting, _RELOCATION_HOOK)
+    calls = 0
+
+    def bounded(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls > limit:
+            raise VectorFitError(f"vector fit did not converge in {limit} pole relocations")
+        return relocate(*args, **kwargs)
+
+    setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(bounded))
+    try:
+        yield
+    finally:
+        setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(relocate))
+
 
 #: Device module of each master an snp2le subcircuit uses; ``None`` for a VACASK builtin.
 _SNP2LE_MODULES = {

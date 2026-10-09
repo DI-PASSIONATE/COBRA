@@ -419,6 +419,16 @@ class SpiceNetlistParser(NetlistParser):
             raise ValueError(f"{etype} line too short.")
         return self._replace(statement, layout.model, layout.model + 1, model)
 
+    def set_ac_magnitude(self, statement: Statement, magnitude: str) -> Statement:
+        """Set the ``AC <magnitude>`` of a source or port line, adding ``AC`` if it has none."""
+        tokens = self.tokens(statement)
+        for index, token in enumerate(tokens[:-1]):
+            if token.text.upper() == "AC" and index >= 3:
+                value = tokens[index + 1]
+                return self._splice(statement, [(value.line, value.start, value.end, magnitude)])
+        last = tokens[-1]
+        return self._splice(statement, [(last.line, last.end, last.end, f" AC {magnitude}")])
+
     def set_param(self, statement: Statement, key: str, value: str) -> Statement:
         tokens = self.tokens(statement)
         is_model = statement.keyword == ".MODEL"

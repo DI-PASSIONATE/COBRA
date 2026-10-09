@@ -75,6 +75,18 @@ _XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
             "delmax":  "Maximum allowed internal time step size.",
         },
     ),
+    SimulationType.NOISE: SimulationTypeMetadata(
+        positional_param_names=["out", "in", "sweep_type", "points", "start_freq", "stop_freq"],
+        positional_param_descriptions={
+            "out":        "Output node, e.g. Out (written as V(Out)), or V(a,b) for a node pair.",
+            "in":         "Input port (P element) the noise figure is referred to, e.g. P1.",
+            "sweep_type": "Frequency sweep spacing: LIN, DEC or OCT.",
+            "points":     "Number of frequency points (LIN) or points per decade/octave.",
+            "start_freq": "Start frequency (e.g. 120G).",
+            "stop_freq":  "Stop frequency (e.g. 140G).",
+        },
+        positional_param_defaults={"sweep_type": "LIN", "points": "21", "start_freq": "1G", "stop_freq": "10G"},
+    ),
     SimulationType.DC: SimulationTypeMetadata(
         positional_param_names=["src_name", "start", "stop", "incr"],
         positional_param_descriptions={
@@ -98,7 +110,7 @@ class XyceNetlistParser(SpiceNetlistParser):
       as standard surrogate components.
     """
 
-    analysis_keywords: ClassVar[frozenset[str]] = frozenset({".AC", ".DC", ".TRAN", ".HB"})
+    analysis_keywords: ClassVar[frozenset[str]] = frozenset({".AC", ".DC", ".TRAN", ".HB", ".NOISE"})
     # .LIN post-processes .AC into Touchstone output; it is not an analysis of its own.
     modifier_keywords: ClassVar[frozenset[str]] = frozenset({".LIN"})
     model_types: ClassVar[frozenset[str]] = frozenset({"D", "M", "Q", "X", "Y"})

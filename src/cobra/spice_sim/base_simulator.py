@@ -14,6 +14,12 @@ if TYPE_CHECKING:
     from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 
 
+#: Reference temperature of the noise figure (IEEE), in kelvin.
+T0 = 290.0
+#: Boltzmann constant in J/K.
+BOLTZMANN = 1.380649e-23
+
+
 class SimulatorError(RuntimeError):
     """Raised when the simulator itself could not be run.
     This is a technical failure (missing or unusable executable, unreadable
