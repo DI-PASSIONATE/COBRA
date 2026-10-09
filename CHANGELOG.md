@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameters of the 4 869-line mixer netlist went from about 50 ms to about 0.2 ms.
 
 ### Fixed
+- `cobra run`'s "missing models" error names the included files it could not find,
+  since devices from an unfound PDK include look like surrogates without a model.
 - A VACASK surrogate fit could hang a run: scikit-rf's `auto_fit` can cycle forever
   at the order cap, and every other trial waited for it. A fit now stops after 1000
   pole relocations with `VectorFitError`, and `CircuitSimulationStage` penalises that

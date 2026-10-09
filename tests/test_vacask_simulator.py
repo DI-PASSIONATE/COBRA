@@ -395,3 +395,27 @@ def test_parse_warns_about_a_noise_goal_outside_its_sweep(tmp_path):
     config.write_text(json.dumps(data))
     messages = [issue.message for issue in all_issues(inspect_path(config, check_models=False))]
     assert any("outside the noise sweep 1e+09-1e+10 Hz" in message for message in messages), messages
+
+
+def test_a_missing_pdk_include_is_named_in_the_mapping_error(tmp_path, monkeypatch):
+    """PDK devices from an include VACASK cannot find look like surrogates; say which file is missing."""
+    from cobra.configuration.config_runner import build_configured_run
+    from cobra.configuration.configuration import RunConfiguration
+    from tests.conftest import MINIMAL_S2P, make_config_data
+
+    monkeypatch.delenv("SIM_INCLUDE_PATH", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ~/.vacaskrc.toml
+    (tmp_path / "model.s2p").write_text(MINIMAL_S2P, encoding="utf-8")
+    (tmp_path / "deck.sim").write_text(
+        "deck\nground 0\nmodel r resistor\nmodel vsource vsource\n"
+        'include "pdk.lib"\ninclude "X1.inc"\n'
+        "X1 (a b) s_equivalent\nxq1 (b a 0 0) npn13G2 nx=1.0\nR1 (a 0) r r=50\n"
+        "vp1 (p1 0) vsource dc=0 mag=1\nrp1 (p1 a) r r=50\nvp2 (p2 0) vsource dc=0\nrp2 (p2 b) r r=50\n"
+        'control\n  analysis sp1 acsp ports=["vp1", "rp1", "vp2", "rp2"] from=1G to=10G mode="lin" points=9\nendc\n',
+        encoding="utf-8",
+    )
+    data = make_config_data(netlist="deck.sim", simulator={"name": "VacaskSimulator"}, simulation_parameters={})
+    config = RunConfiguration.from_dict(data, tmp_path)
+
+    with pytest.raises(ConfigurationError, match=r"missing models for xq1; .*not found.*: pdk\.lib \("):
+        build_configured_run(config)

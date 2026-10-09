@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cobra.cobra import COBRA
@@ -25,7 +26,6 @@ from cobra.spice_sim.xyce_simulator import XyceSimulator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from cobra.optimization_context import OptimizationContext
     from cobra.spice_sim.base_simulator import BaseSimulator
@@ -140,6 +140,17 @@ def _apply_simulation_parameters(
     return by_type
 
 
+def _unresolved_includes(netlist: Netlist, configuration: RunConfiguration) -> list[str]:
+    """Included files the simulator cannot find, other than the surrogate files COBRA writes."""
+    directory = Path(configuration.netlist).resolve().parent
+    return [
+        included.file_path
+        for included in [*netlist.includes, *netlist.libraries]
+        if not (candidate := netlist.parser.resolve_include(included.file_path, directory)).is_file()
+        and candidate.stem not in configuration.component_models
+    ]
+
+
 @dataclass(slots=True)
 class ConfiguredRun:
     configuration: RunConfiguration
@@ -199,6 +210,13 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         details = []
         if missing:
             details.append(f"missing models for {', '.join(sorted(missing))}")
+            unresolved = _unresolved_includes(netlist, configuration)
+            if unresolved:
+                details.append(
+                    f"these included files were not found, so masters they define look like "
+                    f"surrogates: {', '.join(unresolved)} (VACASK searches SIM_INCLUDE_PATH and "
+                    "~/.vacaskrc.toml; `cobra parse` lists where it looked)"
+                )
         if unknown:
             details.append(f"unknown components {', '.join(sorted(unknown))}")
         raise ConfigurationError("Component model mapping does not match netlist: " + "; ".join(details))
