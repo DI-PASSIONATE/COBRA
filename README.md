@@ -19,7 +19,7 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 **COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design: a circuit-level optimizer that consumes surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA). It combines:
 
 - surrogate-model S-parameter prediction (from [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
-- circuit-level SPICE simulation via Xyce,
+- circuit-level simulation via Xyce or [VACASK](https://codeberg.org/arpadbuermen/VACASK),
 - goal-driven optimization (Optuna-based).
 - optional EM fine-tuning (Palace) to ensure accurate results
 - and real-time visualization of optimization progress
@@ -49,7 +49,8 @@ In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA 
 ### Requirements
 
 - Python 3.11 to 3.13
-- [Xyce](https://xyce.sandia.gov/) (current circuit simulator backend)
+- [Xyce](https://xyce.sandia.gov/) (default circuit simulator backend) or [VACASK](https://codeberg.org/arpadbuermen/VACASK) (optional second backend, native VACASK netlists; see [docs](docs/advanced/vacask.md))
+- [snp2le](https://github.com/iic-jku/snp2le) (installed with COBRA; writes the VACASK surrogates)
 - [Qucs-S](https://qucs-s-help.readthedocs.io/en/latest/) (to create a '.cir' netlist for Xyce)
 - A component model source per parsed component:
     - [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
@@ -206,7 +207,7 @@ it finds an error that would stop a run.
 Check the environment before a run, and turn up the detail when one misbehaves:
 
 ```bash
-cobra doctor                                  # packages, Xyce, Palace
+cobra doctor                                  # packages, Xyce, VACASK, Palace
 cobra run config.json -v                      # debug output
 cobra run config.json --log-file results/run.log
 ```

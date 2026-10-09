@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- A noise analysis COBRA adds sweeps the frequency band of its noise goals unless
+  `simulation_parameters` set `from`/`to`; `cobra parse` warns about a noise goal
+  outside its sweep.
+- VACASK simulator backend (`VacaskSimulator`, `"simulator": {"name": "VacaskSimulator"}`)
+  that reads native VACASK netlists (`VacaskNetlistParser`), vector-fits surrogates
+  into a VACASK subcircuit (`vector_fit_vacask`) and reads raw files (`read_raw`).
+  Supports AC (`acsp`), HB, transient, noise and hbnoise analyses. See
+  `docs/advanced/vacask.md` and `examples/configs/vacask_trafo_acsp.json`.
+- `SimulationType.NOISE` and `HBNOISE`, and the catalogue goals `NF`, `NF_SSB` and `NF_DSB`.
+- `BaseSimulator.supported_simulation_types` and `command_setting`; design goals
+  that need an analysis the simulator cannot run are rejected before the run.
+- `cobra init` and `cobra parse` take `--simulator NAME`; `cobra doctor` lists `vacask`.
+- The GUI offers `VacaskSimulator`, accepts `*.sim`, `*.scs` and `*.spectre` netlists
+  and lists only the goals the selected simulator supports.
+- VACASK surrogates are written by [snp2le](https://github.com/iic-jku/snp2le)
+  (a new required dependency) in universal mode; `vacask_include` makes the file
+  self-contained (`ground GND`, device `load` lines, local `model` bindings).
+- `VacaskSimulator` setting `vector_fit_max_order` (default 12), the highest
+  model order snp2le may use.
+- Surrogates by subcircuit name: a `component_models` key may name a subcircuit
+  (defined in the netlist or an include) instead of an instance. COBRA renames
+  every instance of it, at any depth, to `<name>_subct` and includes the fitted
+  file (VACASK and Xyce). API: `Netlist.masters`, `select_surrogates`,
+  `mark_surrogate_masters`, `use_surrogate`, `Subcircuit.pins`, and the parser
+  hooks `instance_master` and `surrogate_include`.
+- VACASK port detection without `acsp`: a top-level vsource from ground to a node
+  shared only with one resistor is a port (`VacaskNetlistParser.grounds`).
+- VACASK ports are probe points named after their source (`add_port_signals`), so
+  `Power_dBm` and `Gain_dB` work on netlists without 0 V probe sources.
+- GUI: "Subcircuit surrogate" row (combo of the netlist's subcircuits, **Use as
+  surrogate**, **Clear**); loading a configuration restores subcircuit surrogates.
+
 ### Changed
 - **Breaking:** the netlist API is split into a parser and a parsed document.
   `XyceNetlistParser().parse_file("x.cir")` returns a `Netlist`, which is passed
@@ -20,10 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (moved from `CircuitSimulationStage`) and `run_simulation(netlist_path, netlist)`.
 - Edits replace only the edited token, so spacing, inline comments and
   continuation layout are kept and untouched lines render unchanged.
+- VACASK surrogates are now written by snp2le; COBRA's own `vacask_subcircuit`
+  is removed and `vector_fit_vacask` takes `max_order`.
 - Performance: a netlist is no longer re-parsed after every edit. Rendering 10
   parameters of the 4 869-line mixer netlist went from about 50 ms to about 0.2 ms.
 
 ### Fixed
+- `Netlist.update_simulation_directive` no longer drops later slots when it updates
+  an earlier one; only the last, variadic slot is trimmed.
+- The GUI reads a loaded configuration's netlist with the configured simulator.
+- `cobra parse` of an invalid configuration read its netlist with the Xyce parser
+  regardless of the configured simulator.
+- The GUI showed the previous simulator's settings rows at the top left until they
+  were deleted when the simulator was switched.
+- Loading a configuration in the GUI accepts `simulation_parameters` keys without the
+  leading dot (`"AC"` as well as `".AC"`), as `cobra run` does, and shows VACASK's named
+  analysis arguments (e.g. `nharm`) as fields instead of rejecting them.
 - `+` continuation lines are part of their statement: their parameters are read
   and edited, and removing a directive removes its continuation lines.
 - An `X` instance may come before its `.SUBCKT`.

@@ -197,6 +197,39 @@ apply to a run may use empty objects or arrays.
 }
 ```
 
+### Simulator
+
+`simulator.name` is `XyceSimulator` (default) or `VacaskSimulator`. Goals whose
+analysis the chosen simulator cannot run are rejected before the run starts.
+
+| Simulator | Setting | Default | Meaning |
+| --- | --- | --- | --- |
+| `XyceSimulator` | `xyce_command`, `parallel_xyce`, `parallel_xyce_processes`, `enforce_passivity` | — | Xyce executable, MPI ranks, passivity |
+| `VacaskSimulator` | `vacask_command` | `"vacask"` | Command name or absolute path |
+| | `vacask_threads` | `1` | `vacask -n N`; `0` = auto (`OMP_NUM_THREADS`); keep `1` with `parallel_trials` above 1 |
+| | `vector_fit_max_order` | `12` | Highest model order snp2le may use when it fits a surrogate (integer, at least 2) |
+| | `enforce_passivity` | `false` | Enforce passivity on the vector fit |
+
+VACASK netlists use VACASK analysis names as `simulation_parameters` keys
+(`"AC"`, `"HB"`, `"TRAN"`, `"NOISE"`, `"HBNOISE"`) and VACASK parameter names
+(`from`, `to`, `points`, `freq`, `nharm`, ...). Xyce keys keep their leading dot
+(`".AC"`). See [VACASK Simulator](../advanced/vacask.md#analyses-and-simulation_parameters).
+
+```json
+"simulator": {"name": "VacaskSimulator", "settings": {"vacask_command": "vacask", "vacask_threads": 1, "vector_fit_max_order": 12}},
+"simulation_parameters": {"AC": {"points": "500", "from": "1G", "to": "200G"}}
+```
+
+A `component_models` key is normally an instance (`X1`). With either simulator
+it may instead name a *subcircuit* defined in the netlist or an included file;
+COBRA then replaces every instance of it, at any depth, by the surrogate, whose
+ports are the subcircuit's pins in order. See
+[VACASK Simulator](../advanced/vacask.md#style-2-xschem-netlists).
+
+```text
+"component_models": {"ISM_le_new": "../models/ism.onnx"}
+```
+
 ### Optimization Parameters
 
 | Field | Meaning |
@@ -205,7 +238,7 @@ apply to a run may use empty objects or arrays.
 | `name` | `<component>:<onnx input>` for `model_input`, e.g. `X1:width`; an element (`C1`) or `<instance>:<parameter>` (`Xq1:Nx`) for `netlist_variable`. `cobra parse` lists both |
 | `min_value`, `max_value` | Search bounds. Keep `model_input` bounds inside the range the model was trained on (its `input_parameter_ranges` metadata); the surrogate extrapolates outside it, and `cobra parse` warns |
 | `step` | Grid the values snap to; `null` for continuous |
-| `unit` | SPICE scale suffix appended to `netlist_variable` values: `"p"` writes `1.5` as `1.5p`. `null` for `model_input` |
+| `unit` | Scale suffix appended verbatim to `netlist_variable` values: `"p"` writes `1.5` as `1.5p`. `null` for `model_input`. VACASK prefixes are case-sensitive: use `"f"`, not `"F"`, for femto (`cobra parse` warns) |
 | `linked_to` | Name of another parameter this one mirrors, e.g. for symmetric windings. Links must not form a cycle |
 
 ### Design Goals
@@ -218,10 +251,29 @@ or spectral line) or a band (`"125-135GHz"`, every point or line inside counts);
 
 | `kind` | `parameter` | Also required |
 | --- | --- | --- |
-| `catalogue` | An `.AC` parameter such as `S21_dB`, `Qp`, `k` or `K` | — |
+| `catalogue` | An `.AC` parameter such as `S21_dB`, `Qp`, `k` or `K`; also `NF` (small-signal noise, Xyce and VACASK) and, with VACASK, `NF_SSB`, `NF_DSB` (hbnoise), in dB | — |
 | `power_dbm` | `Power_dBm[<node>]` | `node` |
 | `gain_db` | `Gain_dB[<port>@<node>]` | `node`; `port`, a driven port; `source_amplitude`, its SIN amplitude in volts; `impedance`, its `z0` |
 | `isolation_db` | `Isolation_dB[<node>]` | `node`; `frequency_range`, naming the wanted line |
+
+`NF` is the small-signal noise figure referred to the input port at 290 K. Both
+simulators run it; the mixer goals `NF_SSB` and `NF_DSB` need `VacaskSimulator`
+(see [VACASK Simulator](../advanced/vacask.md#noise-figure)). With Xyce, COBRA adds
+`.NOISE V(<out>) <port> ...` and `.PRINT NOISE format=csv ONOISE INOISE` when the
+netlist has no `.NOISE`. Set the output node in `simulation_parameters`:
+
+```json
+"simulation_parameters": {".NOISE": {"out": "Out", "in": "P1"}}
+```
+
+`in` defaults to port 1 and must be a `P` port. Without `start_freq`/`stop_freq`
+the sweep spans the frequencies of the `NF` goals. Xyce computes its input-referred
+noise from an AC solve with every source at its AC magnitude, so for the noise run
+COBRA sets the input port to `AC 1` and every other AC magnitude to 0. Xyce's ports
+are noiseless, so the noise figure is `F = 1 + INOISE / (4 k T0 z0)` with the input
+port's `z0`: the output port terminates the circuit and is left out, as with VACASK.
+The vector-fitted surrogates are noiseless in both simulators (in the Xyce SPICE
+subcircuit every resistor is written as a conductance controlled by its own voltage).
 
 `node` must be a probe node and `port` a port of the netlist, spelled exactly as
 `cobra parse` lists them: names are case-sensitive, so `OUT` and `Out` differ.
