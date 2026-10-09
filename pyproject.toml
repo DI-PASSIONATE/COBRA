@@ -75,6 +75,8 @@ dependencies = [
     "pyqtgraph>=0.13.7",
     "huggingface-hub>=0.25",
     "qtawesome>=1.4.2",
+    # Lumped-element models of the surrogates for VacaskSimulator
+    "snp2le>=0.1.9",
 ]
 
 # ORCA supplies the geometry presets and the Palace simulation of EM fine-tuning. It is

@@ -26,12 +26,16 @@ class SimulationType(Enum):
     ``HB``  — Harmonic Balance (periodic steady-state, non-linear).
     ``TRAN``— Transient time-domain simulation.
     ``DC``  — DC operating-point sweep.
+    ``NOISE``   — Small-signal noise (noise figure).
+    ``HBNOISE`` — Noise around a Harmonic Balance solution (mixer noise figure).
     """
 
     AC      = ".AC"    # AC frequency sweep; COBRA always pairs this with .LIN for S-parameter (Touchstone) output
     HB      = ".HB"    # Harmonic Balance
     TRAN    = ".TRAN"  # Transient
     DC      = ".DC"    # DC sweep
+    NOISE   = ".NOISE"    # Small-signal noise
+    HBNOISE = ".HBNOISE"  # (Quasi)periodic noise on a Harmonic Balance solution
     UNKNOWN = "unknown"
 
     # ------------------------------------------------------------------
@@ -53,6 +57,8 @@ class SimulationType(Enum):
             ".HB":   cls.HB,
             ".TRAN": cls.TRAN,
             ".DC":   cls.DC,
+            ".NOISE": cls.NOISE,
+            ".HBNOISE": cls.HBNOISE,
         }
         return _map.get(normalized, cls.UNKNOWN)
 

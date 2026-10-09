@@ -14,6 +14,7 @@ from cobra.spice_sim.netlist_parsers.netlist import (
 from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
 from cobra.spice_sim.netlist_parsers.spice_netlist_parser import SpiceNetlistParser
 from cobra.spice_sim.netlist_parsers.statement import Statement, StatementKind, Token
+from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import VacaskNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 
 __all__ = [
@@ -31,5 +32,6 @@ __all__ = [
     "StatementKind",
     "Subcircuit",
     "Token",
+    "VacaskNetlistParser",
     "XyceNetlistParser",
 ]

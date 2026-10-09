@@ -2,6 +2,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
@@ -13,6 +14,18 @@ if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
 
 logger = logging.getLogger(__name__)
+
+
+def goal_band(goals: list[DesignGoal]) -> tuple[float, float] | None:
+    """The frequency span, in Hz, that *goals* evaluate; ``None`` when none names a frequency."""
+    lows: list[float] = []
+    highs: list[float] = []
+    for goal in goals:
+        low, high = DesignGoal.str_to_frequency_range(goal.frequency_range)
+        if low is not None and high is not None:
+            lows.append(low)
+            highs.append(high)
+    return (min(lows), max(highs)) if lows else None
 
 
 class CircuitSimulationStage(COBRABaseStage):
@@ -64,7 +77,10 @@ class CircuitSimulationStage(COBRABaseStage):
             # Ensure the netlist contains a directive for this simulation type; a
             # netlist that lacks one gets a copy with it injected.
             prepared = self.simulator.prepare_netlist(
-                netlist, sim_type, sim_params_by_type.get(sim_type, {})
+                netlist,
+                sim_type,
+                sim_params_by_type.get(sim_type, {}),
+                goal_band(design_goal_checker.design_goals.get(sim_type, [])),
             )
             prepared_path = netlist_path
             if prepared is not netlist:

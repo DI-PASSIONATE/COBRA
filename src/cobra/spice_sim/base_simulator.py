@@ -46,6 +46,12 @@ class SimulationResult:
 class BaseSimulator(ABC):
     #: Parser for this simulator's netlist dialect; every subclass sets one.
     netlist_parser: ClassVar[NetlistParser]
+    #: Analyses this simulator can run; a design goal needing another one is rejected.
+    supported_simulation_types: ClassVar[frozenset[SimulationType]]
+    #: Name of the setting holding the simulator executable, e.g. ``"xyce_command"``.
+    command_setting: ClassVar[str]
+    #: Whether analyses take named arguments beyond the slots of their metadata (VACASK).
+    named_analysis_parameters: ClassVar[bool] = False
 
     @classmethod
     def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
@@ -59,14 +65,20 @@ class BaseSimulator(ABC):
 
     @abstractmethod
     def prepare_netlist(
-        self, netlist: Netlist, sim_type: SimulationType, sim_params: dict[str, str]
+        self,
+        netlist: Netlist,
+        sim_type: SimulationType,
+        sim_params: dict[str, str],
+        goal_band: tuple[float, float] | None = None,
     ) -> Netlist:
         """Return *netlist* ready to run a *sim_type* analysis.
 
         Returns *netlist* itself when it already declares that analysis;
         otherwise a new netlist with the directive (from *sim_params*, falling
         back to the metadata defaults) and the output requests the simulator
-        needs to produce a result for it.
+        needs to produce a result for it.  *goal_band* is the frequency span,
+        in Hz, the design goals on this analysis evaluate; a simulator may use
+        it for the sweep of an analysis it adds.
         """
 
     @abstractmethod

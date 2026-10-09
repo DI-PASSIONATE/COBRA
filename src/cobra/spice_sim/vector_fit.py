@@ -1,10 +1,16 @@
 import logging
 import os
 import re
+import threading
 import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import skrf
 from skrf.vectorFitting import VectorFitting
+
+if TYPE_CHECKING:
+    from snp2le.core.ir import CircuitIR
 
 logger = logging.getLogger(__name__)
 
@@ -134,3 +140,69 @@ def vector_fit(nw: skrf.Network, name: str, enforce_passivity: bool = False) -> 
     vf.write_spice_subcircuit_s(netlist_filename, fitted_model_name=subcircuit_name)
 
     return netlist_filename
+
+
+def vector_fit_vacask(
+    nw: skrf.Network, name: str, enforce_passivity: bool = False, max_order: int = 12
+) -> str:
+    """Model *nw* with snp2le and write it as the VACASK subcircuit ``<basename>_subct`` to ``<name>.inc``.
+
+    snp2le's universal mode vector-fits the S-parameters into a lumped-element
+    macromodel whose resistors are noiseless (``noisy=0``): they realise poles,
+    not losses.  *max_order* bounds the model order of the fit.  The file is
+    self-contained, see :func:`vacask_include`.
+    """
+    # Imported here: snp2le is only needed by the VACASK backend.
+    from snp2le.core.engine import convert
+    from snp2le.core.netlist import render_vacask
+    from snp2le.core.state import ConverterState
+
+    state = ConverterState(mode="universal", enforce_passivity=enforce_passivity, max_order=max_order)
+    with _SNP2LE_LOCK:
+        result = convert(state, nw)
+    if not result.ok:
+        raise ValueError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
+    for message in result.messages:
+        logger.debug("snp2le %s: %s", os.path.basename(name), message)
+    circuit = cast("CircuitIR", result.ir)
+    circuit.name = os.path.basename(name) + "_subct"
+    netlist_filename = name + ".inc"
+    Path(netlist_filename).write_text(vacask_include(render_vacask(circuit)), encoding="utf-8")
+    return netlist_filename
+
+
+#: snp2le swaps sys.stdout/sys.stderr for the duration of a fit. Two fits of
+#: parallel trials interleaving would restore each other's stand-ins and leave the
+#: console redirected for good, so the fits run one at a time.
+_SNP2LE_LOCK = threading.Lock()
+
+#: Device module of each master an snp2le subcircuit uses; ``None`` for a VACASK builtin.
+_SNP2LE_MODULES = {
+    "resistor": "resistor.osdi",
+    "capacitor": "capacitor.osdi",
+    "inductor": "inductor.osdi",
+    "vsource": None,
+    "vccs": None,
+    "vcvs": None,
+    "cccs": None,
+    "mutual": None,
+}
+_SUBCKT_RE = re.compile(r"^subckt\s.*$", re.MULTILINE)
+_MASTER_RE = re.compile(r"^\s+\S+\s+\([^)]*\)\s+(\w+)", re.MULTILINE)
+
+
+def vacask_include(subcircuit: str) -> str:
+    """Make an snp2le VACASK subcircuit independent of the netlist that includes it.
+
+    snp2le leaves the device models to the testbench and names ground ``GND``.
+    The include declares ``GND`` as a ground (VACASK allows several names), loads
+    the modules it needs, and binds its masters inside the subcircuit, so the
+    netlist's own ``model`` lines (e.g. a PDK resistor) do not apply to it and
+    ``noisy=0`` reaches VACASK's resistor.  It must be included at the top level.
+    """
+    masters = sorted({m for m in _MASTER_RE.findall(subcircuit) if m in _SNP2LE_MODULES})
+    loads = sorted({module for master in masters if (module := _SNP2LE_MODULES[master])})
+    header = ["ground GND", *(f'load "{module}"' for module in loads), ""]
+    models = "".join(f"\n  model {master} {master}" for master in masters)
+    body = _SUBCKT_RE.sub(lambda match: match.group(0) + models, subcircuit, count=1)
+    return "\n".join(header) + body

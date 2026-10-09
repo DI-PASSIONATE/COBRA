@@ -1,0 +1,33 @@
+Transformer with a surrogate block (VACASK port of Trafo/netlist_xyce_vector.cir)
+ground 0
+
+load "resistor.osdi"
+load "capacitor.osdi"
+load "inductor.osdi"
+model r resistor
+model c capacitor
+model l inductor
+model vsource vsource
+
+// X1 is the surrogate: COBRA vector-fits its predicted S-parameters into
+// X1.inc (subcircuit X1_subct) next to the copy of this netlist it simulates.
+include "X1.inc"
+X1 (Port1 Port2 Port3 Port4 _net0 _net1) s_equivalent
+
+C2 (Port4 Port3) c c=1.0f
+C1 (Port2 Port1) c c=7.94f
+L2 (Port4 Port3) l l=1
+L1 (Port2 Port1) l l=1
+C4 (Port3 0) c c=10.0f
+C3 (0 Port4) c c=10.0f
+
+// Differential ports: a 0 V source in series with the reference resistor.
+// The acsp ports list below declares them to COBRA (port 1 = vp1/rp1, ...).
+vp1 (a1 Port2) vsource dc=0 mag=2.72029 type="sine" ampl=2.72029 freq=130G
+rp1 (a1 Port1) r r=925
+vp2 (a2 Port4) vsource dc=0 mag=0.894427 type="sine" ampl=0.894427 freq=130G
+rp2 (a2 Port3) r r=100
+
+control
+  analysis sp1 acsp ports=["vp1", "rp1", "vp2", "rp2"] from=100G to=170G mode="lin" points=500
+endc

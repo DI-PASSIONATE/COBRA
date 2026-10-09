@@ -359,6 +359,33 @@ def make_s_param_linear(i: int, j: int) -> DesignParameter:
         min_ports=max(i, j),
     )
 
+def noise_figure_formula(column: str) -> Callable[[SimulationResult, str | None], np.ndarray]:
+    """A formula reading the noise figure *column* (dB) of a noise result at *frequency_range*.
+
+    A range selects the points inside it; a single frequency the nearest point.
+    """
+    def formula(sim_result: SimulationResult, frequency_range: str | None = None) -> np.ndarray:
+        frame = next(
+            (df for df in sim_result.dataframes.values() if column in df.columns and "FREQ" in df.columns),
+            None,
+        )
+        if frame is None:
+            raise KeyError(f"No noise result with a {column} column was found.")
+        frequencies = frame["FREQ"].to_numpy(dtype=float)
+        values = frame[column].to_numpy(dtype=float)
+        low, high = DesignGoal.str_to_frequency_range(frequency_range)
+        if low is None or high is None:
+            return values
+        if low == high:
+            return values[[int(np.argmin(np.abs(frequencies - low)))]]
+        inside = (frequencies >= low) & (frequencies <= high)
+        if not inside.any():
+            raise ValueError(f"No noise analysis frequency lies in {frequency_range}.")
+        return values[inside]
+
+    return formula
+
+
 # ----------------------------------------------------------------------------
 # Penalty functions for design goals
 # ----------------------------------------------------------------------------
@@ -520,6 +547,32 @@ _ALL_PARAMETERS: list[DesignParameter] = [
         calculate_array_penalty,
         "Maximum available / stable gain |S21/S12| · (K − √(K²−1)), defined where K ≥ 1.",
         min_ports=2,
+    ),
+    DesignParameter(
+        "NF",
+        SimulationType.NOISE,
+        noise_figure_formula("NF"),
+        calculate_array_penalty,
+        "Small-signal noise figure in dB, referred to the input port at 290 K (VACASK noise).",
+        min_ports=1,
+    ),
+    DesignParameter(
+        "NF_SSB",
+        SimulationType.HBNOISE,
+        noise_figure_formula("NF_SSB"),
+        calculate_array_penalty,
+        "Single-sideband mixer noise figure in dB (VACASK hbnoise); only the signal sideband "
+        "of the source counts as input.",
+        min_ports=1,
+    ),
+    DesignParameter(
+        "NF_DSB",
+        SimulationType.HBNOISE,
+        noise_figure_formula("NF_DSB"),
+        calculate_array_penalty,
+        "Double-sideband mixer noise figure in dB (VACASK hbnoise); the source noise of both "
+        "sidebands counts as input.",
+        min_ports=1,
     ),
 ]
 

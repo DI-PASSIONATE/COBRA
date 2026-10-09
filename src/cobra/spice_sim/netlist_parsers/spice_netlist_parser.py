@@ -208,7 +208,14 @@ class SpiceNetlistParser(NetlistParser):
             # Every definition counts, nested ones included.
             if len(tokens) < 2:
                 return None
-            return Subcircuit(tokens[1].text, line_index, statement_index)
+            first = self._first_param(tokens)
+            pins: list[str] = []
+            for token in tokens[2:first]:
+                if token.text.upper() == "PARAMS:":
+                    break
+                if token.text not in _BRACKETS:
+                    pins.append(token.text)
+            return Subcircuit(tokens[1].text, line_index, statement_index, tuple(pins))
         if statement.scope is not None or not statement.tokens:
             return None  # devices inside a subcircuit are not top-level elements
         if statement.kind is StatementKind.ELEMENT:
@@ -305,6 +312,15 @@ class SpiceNetlistParser(NetlistParser):
     def is_component(self, element: NetlistElement, subcircuit_names: set[str]) -> bool:
         # An instance of a subcircuit defined in this file needs no surrogate.
         return element.etype == "X" and self.fold(element.model or "") not in subcircuit_names
+
+    def instance_master(self, statement: Statement) -> str | None:
+        if statement.kind is not StatementKind.ELEMENT or _etype(statement) != "X":
+            return None
+        layout = self._layout("X", self.tokens(statement))
+        return self.tokens(statement)[layout.model].text if layout and layout.model is not None else None
+
+    def surrogate_include(self, component: str) -> str:
+        return f'.INCLUDE "{component}.sp"\n'
 
     def probe_nodes(self, netlist: Netlist) -> list[str]:
         """Nodes printed with both ``V(X)`` and the current ``I(VX)`` of a 0 V probe source.

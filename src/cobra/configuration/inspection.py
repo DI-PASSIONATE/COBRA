@@ -26,6 +26,7 @@ from cobra.configuration.configuration import (
     RunConfiguration,
 )
 from cobra.optimizers.base_optimizer import OptimizationType
+from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import VacaskNetlistParser, vacask_float
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 
@@ -226,6 +227,8 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
     report.hb_goal_parameters = _large_signal_goal_parameters(netlist, SimulationType.HB)
     report.tran_goal_parameters = _large_signal_goal_parameters(netlist, SimulationType.TRAN)
 
+    ports = netlist.ports
+    port_sources = netlist.port_sources
     for element in netlist.list_elements():
         report.elements.append(
             ElementReport(
@@ -239,8 +242,8 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
             )
         )
         report.element_counts[element.etype] = report.element_counts.get(element.etype, 0) + 1
-        if element.etype == "P":
-            source = netlist.port_sources.get(element.name, {})
+        if element.name in ports:
+            source = port_sources.get(element.name, {})
             report.ports.append(
                 PortReport(
                     name=element.name,
@@ -268,7 +271,7 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
 
     base_directory = netlist_path.resolve().parent
     for include in netlist.includes:
-        candidate = _resolve_reference(include.file_path, base_directory)
+        candidate = netlist.parser.resolve_include(include.file_path, base_directory)
         generated_for = candidate.stem if candidate.stem in netlist.components else None
         entry = IncludeReport(
             file_path=include.file_path,
@@ -278,10 +281,10 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
             generated_for=generated_for,
         )
         if entry.exists:
-            entry.subcircuits = _included_subcircuits(candidate, report)
+            entry.subcircuits = _included_subcircuits(candidate, report, netlist.parser)
         report.includes.append(entry)
     for library in netlist.libraries:
-        candidate = _resolve_reference(library.file_path, base_directory)
+        candidate = netlist.parser.resolve_include(library.file_path, base_directory)
         report.libraries.append(
             LibraryReport(
                 file_path=library.file_path,
@@ -317,10 +320,13 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
     return report
 
 
-def inspect_netlist(path: str | Path) -> NetlistReport:
-    """Parse *path* and return its report, recording load failures as issues."""
+def inspect_netlist(path: str | Path, parser: NetlistParser | None = None) -> NetlistReport:
+    """Parse *path* with *parser* (Xyce by default) and return its report.
+
+    Load failures are recorded as issues.
+    """
     try:
-        netlist = load_netlist(path)
+        netlist = load_netlist(path, parser)
     except ConfigurationError as exc:
         report = NetlistReport(path=str(Path(path).expanduser()))
         report.exists = Path(path).expanduser().is_file()
@@ -335,10 +341,10 @@ def _resolve_reference(file_path: str, base_directory: Path) -> Path:
     return candidate if candidate.is_absolute() else base_directory / candidate
 
 
-def _included_subcircuits(path: Path, report: NetlistReport) -> list[str]:
-    """Return the ``.SUBCKT`` names an included netlist defines."""
+def _included_subcircuits(path: Path, report: NetlistReport, parser: NetlistParser) -> list[str]:
+    """Return the subcircuit names an included netlist defines."""
     try:
-        return sorted(load_netlist(path, has_title=False).inline_subckt_names)
+        return sorted(load_netlist(path, parser, has_title=False).inline_subckt_names)
     except ConfigurationError as exc:
         report.issues.append(Issue(Severity.WARNING, "netlist.include", str(exc)))
         return []
@@ -376,6 +382,13 @@ def _netlist_variables(elements: list[ElementReport]) -> dict[str, str]:
     return variables
 
 
+def _next_to_netlist(file_path: str, resolved_path: str, report: NetlistReport) -> bool:
+    """Whether a relative reference was found next to the netlist, not on a search path."""
+    if Path(file_path).expanduser().is_absolute():
+        return False
+    return Path(resolved_path) == Path(report.path).expanduser().resolve().parent / file_path
+
+
 def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
     """Record netlist-only findings that block or degrade a run."""
     if netlist.simulation_type is SimulationType.UNKNOWN:
@@ -383,8 +396,9 @@ def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
             Issue(
                 Severity.WARNING,
                 "netlist",
-                "No .AC/.LIN, .HB, .TRAN, or .DC directive found; COBRA injects the "
-                "analysis required by the design goals using default parameters.",
+                "No analysis COBRA runs found (Xyce: .AC/.LIN, .HB, .TRAN, .DC; VACASK: "
+                "acsp, hb, tran, noise, hbnoise); COBRA injects the analysis required by "
+                "the design goals using default parameters.",
             )
         )
     if not netlist.num_ports:
@@ -392,7 +406,8 @@ def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
             Issue(
                 Severity.WARNING,
                 "netlist",
-                "No P (port) elements found; S-parameter design goals are unavailable.",
+                "No ports found (Xyce: P elements; VACASK: the ports=[...] list of an acsp "
+                "analysis); S-parameter design goals are unavailable.",
             )
         )
     if netlist.simulation_type in (SimulationType.HB, SimulationType.TRAN) and not netlist.probe_nodes:
@@ -401,7 +416,7 @@ def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
                 Severity.WARNING,
                 "netlist",
                 "No probe node found; a node needs both V(<node>) and I(V<node>), "
-                "which requires a 0 V source named V<node>.",
+                "which requires a 0 V source named V<node> starting at that node.",
             )
         )
     for directive in netlist.print_directives:
@@ -428,14 +443,14 @@ def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
             report.issues.append(
                 Issue(Severity.ERROR, location, f"Included file not found: {include.resolved_path}")
             )
-        elif not include.generated_for and not Path(include.file_path).is_absolute():
+        elif not include.generated_for and _next_to_netlist(include.file_path, include.resolved_path, report):
             report.issues.append(
                 Issue(
                     Severity.WARNING,
                     location,
                     f"'{include.file_path}' is relative; COBRA copies the netlist into "
-                    "results/<timestamp>_<name>/ before simulating, so Xyce resolves it from "
-                    "there. Use an absolute path.",
+                    "results/<timestamp>_<name>/ before simulating, so the simulator resolves "
+                    "it from there. Use an absolute path.",
                 )
             )
     for library in report.libraries:
@@ -444,14 +459,14 @@ def _check_netlist(report: NetlistReport, netlist: Netlist) -> None:
             report.issues.append(
                 Issue(Severity.ERROR, location, f"Library file not found: {library.resolved_path}")
             )
-        elif not Path(library.file_path).is_absolute():
+        elif _next_to_netlist(library.file_path, library.resolved_path, report):
             report.issues.append(
                 Issue(
                     Severity.WARNING,
                     location,
                     f"'{library.file_path}' is relative; COBRA copies the netlist into "
-                    "results/<timestamp>_<name>/ before simulating, so Xyce resolves it from "
-                    "there. Use an absolute path.",
+                    "results/<timestamp>_<name>/ before simulating, so the simulator resolves "
+                    "it from there. Use an absolute path.",
                 )
             )
     for component in report.components:
@@ -619,6 +634,7 @@ def inspect_configuration(path: str | Path, *, check_models: bool = True) -> Con
     netlist: Netlist | None = None
     try:
         netlist = load_netlist(configuration.netlist, _netlist_parser(configuration))
+        netlist.select_surrogates(configuration.component_models)
     except ConfigurationError as exc:
         report.issues.append(Issue(Severity.ERROR, "netlist", str(exc)))
     if netlist is not None:
@@ -672,7 +688,12 @@ def _inspect_raw_netlist(raw: dict[str, Any], config_path: Path, report: Configu
         candidate = config_path.parent / candidate
     candidate = candidate.resolve()
     report.netlist_path = str(candidate)
-    report.netlist = inspect_netlist(candidate)
+    # Imported here: config_runner pulls in the full COBRA pipeline.
+    from cobra.configuration.config_runner import SIMULATOR_REGISTRY
+
+    backend = raw.get("simulator")
+    simulator = SIMULATOR_REGISTRY.get(backend.get("name", "")) if isinstance(backend, dict) else None
+    report.netlist = inspect_netlist(candidate, simulator.netlist_parser if simulator else None)
 
 
 def _netlist_parser(configuration: RunConfiguration) -> NetlistParser | None:
@@ -707,19 +728,20 @@ def _check_backends(configuration: RunConfiguration, report: ConfigurationReport
                 f"{', '.join(SIMULATOR_REGISTRY)}",
             )
         )
-    command = configuration.simulator.settings.get("xyce_command", "Xyce")
-    if (
-        configuration.simulator.name == "XyceSimulator"
-        and isinstance(command, str)
-        and shutil.which(command) is None
-        and not Path(command).is_file()
-    ):
+    simulator = SIMULATOR_REGISTRY.get(configuration.simulator.name)
+    if simulator is None:
+        return
+    setting = simulator.command_setting
+    settings = getattr(simulator, "_settings", [])
+    default = next((item.default for item in settings if item.name == setting), None)
+    command = configuration.simulator.settings.get(setting, default)
+    if isinstance(command, str) and shutil.which(command) is None and not Path(command).is_file():
         report.issues.append(
             Issue(
                 Severity.WARNING,
-                "simulator.settings.xyce_command",
-                f"Xyce command '{command}' was not found on PATH; load Xyce (e.g. via Spack) "
-                "before running.",
+                f"simulator.settings.{setting}",
+                f"{configuration.simulator.name} command '{command}' was not found on PATH; "
+                "install or load it (e.g. Xyce via Spack) before running.",
             )
         )
 
@@ -997,6 +1019,21 @@ def _check_optimization_parameters(
         )
         location = f"optimization_parameters.{parameter.name}"
         instance, _, key = parameter.name.partition(":")
+        if (
+            netlist is not None
+            and isinstance(netlist.parser, VacaskNetlistParser)
+            and parameter.unit
+            and vacask_float(f"1{parameter.unit}") == 1.0
+        ):
+            report.issues.append(
+                Issue(
+                    Severity.WARNING,
+                    location,
+                    f"VACASK reads unit '{parameter.unit}' without a scale prefix, so values "
+                    "are written in base units. Its prefixes are case-sensitive: f, p, n, u, "
+                    "m (milli), k, M (mega), G; e.g. 'f' for femtofarads.",
+                )
+            )
         if OptimizationType(parameter.type) is OptimizationType.NETLIST_VARIABLE:
             if netlist is None:
                 entry.target = "unknown (netlist unavailable)"
@@ -1168,8 +1205,10 @@ def _check_design_goals(
 ) -> None:
     """Rebuild every goal with the run-time validation and record what it needs."""
     # Imported here: both modules pull in the full COBRA pipeline.
-    from cobra.configuration.config_runner import build_design_goals
+    from cobra.configuration.config_runner import SIMULATOR_REGISTRY, build_design_goals
     from cobra.optimizers.design_goal import DesignGoal
+
+    simulator = SIMULATOR_REGISTRY.get(configuration.simulator.name)
 
     directives = (
         {item.simulation_type for item in netlist.simulation_directives}
@@ -1197,7 +1236,7 @@ def _check_design_goals(
         entry.directive_in_netlist = simulation_type in directives
         if netlist is not None:
             try:
-                build_design_goals([goal], netlist)
+                build_design_goals([goal], netlist, simulator)
             except ConfigurationError as exc:
                 report.issues.append(Issue(Severity.ERROR, location, str(exc)))
             else:
@@ -1316,6 +1355,11 @@ def _check_goal_frequency(
     low, high = DesignGoal.str_to_frequency_range(frequency_range)
     if low is None or high is None:
         return
+    if simulation_type in _NOISE_TYPES:
+        _check_noise_band(
+            frequency_range, low, high, simulation_type, configuration, netlist, location, report
+        )
+        return
     for directive in netlist.simulation_directives:
         if directive.simulation_type is not simulation_type:
             continue
@@ -1365,14 +1409,61 @@ def _check_goal_frequency(
         return
 
 
+_NOISE_TYPES = frozenset({SimulationType.NOISE, SimulationType.HBNOISE})
+
+
+def _check_noise_band(
+    frequency_range: str,
+    low: float,
+    high: float,
+    simulation_type: SimulationType,
+    configuration: RunConfiguration,
+    netlist: Netlist,
+    location: str,
+    report: ConfigurationReport,
+) -> None:
+    """Warn when a noise goal lies outside the sweep of its noise analysis.
+
+    The sweep is the netlist's analysis with the configured ``from``/``to``
+    applied. Without such an analysis COBRA sweeps the goals' own band, unless
+    ``simulation_parameters`` set one.
+    """
+    directive = next(
+        (d for d in netlist.simulation_directives if d.simulation_type is simulation_type),
+        None,
+    )
+    names = netlist.parser.analysis_metadata(simulation_type).positional_param_names
+    sweep = dict(zip(names, directive.positional, strict=False)) if directive is not None else {}
+    for name in ("from", "to"):
+        configured = _configured_parameter(configuration, simulation_type.value, name)
+        if configured is not None:
+            sweep[name] = configured
+    try:
+        start, stop = vacask_float(sweep["from"]), vacask_float(sweep["to"])
+    except (KeyError, ValueError):
+        return  # no explicit sweep (COBRA sweeps the goals' band) or one it cannot read
+    if low < start or high > stop:
+        what = "offset (output sideband)" if simulation_type is SimulationType.HBNOISE else "noise"
+        report.issues.append(
+            Issue(
+                Severity.WARNING,
+                location,
+                f"Goal frequency {frequency_range} lies outside the {what} sweep "
+                f"{start:g}-{stop:g} Hz of the {simulation_type.name} analysis.",
+            )
+        )
+
+
 def _check_simulation_parameters(
     configuration: RunConfiguration,
     netlist: Netlist | None,
     report: ConfigurationReport,
 ) -> None:
-    """Verify simulation-parameter keys against the netlist and Xyce metadata."""
-    # Imported here: the simulator module pulls in scikit-rf and pandas.
-    from cobra.spice_sim.xyce_simulator import XyceSimulator
+    """Verify simulation-parameter keys against the netlist and the simulator's metadata."""
+    # Imported here: config_runner pulls in the full COBRA pipeline.
+    from cobra.configuration.config_runner import SIMULATOR_REGISTRY
+
+    simulator = SIMULATOR_REGISTRY.get(configuration.simulator.name)
 
     directives = (
         {item.simulation_type: item for item in netlist.simulation_directives if item.is_analysis}
@@ -1408,9 +1499,15 @@ def _check_simulation_parameters(
                     "injects the analysis for a design goal.",
                 )
             )
-        known = set(XyceSimulator.get_simulation_metadata(simulation_type).positional_param_names)
+        known = (
+            set(simulator.get_simulation_metadata(simulation_type).positional_param_names)
+            if simulator is not None
+            else set()
+        )
         if target is not None:
             known |= set(target.kv_params)
+        if simulator is not None and simulator.named_analysis_parameters:
+            continue  # any named argument of the analysis is valid
         for name in values:
             if name not in known:
                 report.issues.append(
@@ -1814,16 +1911,21 @@ def is_configuration_file(path: str | Path) -> bool:
 
 
 def inspect_path(
-    path: str | Path, *, kind: str = "auto", check_models: bool = True
+    path: str | Path,
+    *,
+    kind: str = "auto",
+    check_models: bool = True,
+    parser: NetlistParser | None = None,
 ) -> ConfigurationReport | NetlistReport:
     """Inspect *path* as a configuration or a netlist.
 
     ``kind`` is ``"auto"``, ``"config"``, or ``"netlist"``; ``"auto"`` treats
     ``.json`` files and JSON objects as configurations and everything else as a
-    netlist.
+    netlist, which is read with *parser* (Xyce by default). A configuration
+    names its own simulator.
     """
     if kind not in {"auto", "config", "netlist"}:
         raise ConfigurationError(f"Unsupported parse kind '{kind}'")
     if kind == "config" or (kind == "auto" and is_configuration_file(path)):
         return inspect_configuration(path, check_models=check_models)
-    return inspect_netlist(path)
+    return inspect_netlist(path, parser)

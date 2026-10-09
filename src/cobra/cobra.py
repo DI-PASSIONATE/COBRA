@@ -124,9 +124,11 @@ class COBRA:
         if not isinstance(netlist, Netlist):
             raise TypeError("netlist must be a parsed Netlist")
 
-        components = netlist.components
         if component_onnx_mapping is None:
             component_onnx_mapping = {}
+        # A mapped name may be a subcircuit, replaced wherever it is used.
+        netlist.select_surrogates(component_onnx_mapping)
+        components = netlist.components
 
         # Validate that all components that have models are present in the netlist
         missing_components = set(component_onnx_mapping.keys()) - set(components.keys())
@@ -253,7 +255,7 @@ class COBRA:
         # Replace the component model names in the netlist to match the vector fitted subcircuits
         for comp_name in self.component_onnx_mapping:
             try:
-                parsed_netlist.set_model(comp_name, f"{comp_name}_subct")
+                parsed_netlist.use_surrogate(comp_name, f"{comp_name}_subct")
             except (KeyError, ValueError, NotImplementedError) as e:
                 logger.warning("Could not set the subcircuit model for %s: %s", comp_name, e)
         parsed_netlist.save(netlist)

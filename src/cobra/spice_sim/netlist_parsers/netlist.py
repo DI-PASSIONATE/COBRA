@@ -9,7 +9,7 @@ cheap and safe to hand to another thread.  Treat the lists and dicts inside a
 record as read-only, since copies share them.
 
 Name lookups follow the parser's :meth:`~NetlistParser.fold`: case-insensitive
-for SPICE dialects.
+for SPICE dialects, case-sensitive for VACASK.
 
 """
 
@@ -21,10 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cobra.spice_sim.netlist_parsers.statement import StatementKind
 from cobra.spice_sim.simulation_type import SimulationType
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
     from cobra.spice_sim.netlist_parsers.statement import Statement
@@ -68,6 +69,7 @@ class Subcircuit:
     name: str
     line_index: int
     statement_index: int
+    pins: tuple[str, ...] = ()  # in definition order
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +138,6 @@ class _Views:
     simulation_directives: list[SimulationDirective]
     print_directives: list[PrintDirective]
     options: dict[str, OptionsDirective]  # keyed by lower-case category
-    port_sources: dict[str, dict[str, float]]
 
 
 class Netlist:
@@ -146,8 +147,21 @@ class Netlist:
         self,
         parser: NetlistParser,
         statements: list[Statement],
+        external_masters: Mapping[str, tuple[str, ...]] | None = None,
+        surrogate_masters: frozenset[str] = frozenset(),
     ) -> None:
         self.parser = parser
+        # Folded names of the subcircuits and models that files included by the
+        # netlist define, e.g. PDK devices, with their pins (empty for a model);
+        # an instance of one needs no surrogate.
+        self.external_masters: Mapping[str, tuple[str, ...]] = dict(external_masters or {})
+        # Subcircuits replaced by a surrogate wherever they are instantiated.
+        self.surrogate_masters = surrogate_masters
+        self._load(statements)
+
+    def _load(self, statements: list[Statement]) -> None:
+        """Decode *statements* as the netlist's content."""
+        parser = self.parser
         self._statements = list(statements)
         self._records: list[NetlistRecord | None] = []
         line_index = 0
@@ -180,7 +194,7 @@ class Netlist:
 
     def with_statements(self, statements: list[Statement]) -> Netlist:
         """A new netlist made of *statements*, decoded by the same parser."""
-        return Netlist(self.parser, statements)
+        return Netlist(self.parser, statements, self.external_masters, self.surrogate_masters)
 
     @property
     def statements(self) -> tuple[Statement, ...]:
@@ -218,8 +232,21 @@ class Netlist:
 
     @property
     def components(self) -> dict[str, Component]:
-        """Dict of X-instance components that require surrogate models."""
+        """Components that require surrogate models, by name.
+
+        These are the instances of masters defined nowhere (e.g. ``X1``) and the
+        subcircuits marked with :meth:`mark_surrogate_masters`, named by their master.
+        """
         return dict(self._view().components)
+
+    @property
+    def masters(self) -> dict[str, tuple[str, ...]]:
+        """Subcircuits a surrogate can replace, defined here or in an included file, with their pins."""
+        masters = {name: pins for name, pins in self.external_masters.items() if pins}
+        masters.update(
+            (record.name, record.pins) for record in self._records if isinstance(record, Subcircuit)
+        )
+        return masters
 
     @property
     def inline_subckt_names(self) -> set[str]:
@@ -261,9 +288,14 @@ class Netlist:
         return {key: dict(entry.params) for key, entry in self._view().options.items()}
 
     @property
+    def ports(self) -> dict[str, int]:
+        """Port element name → port number."""
+        return self.parser.ports(self)
+
+    @property
     def num_ports(self) -> int:
         """Number of port elements found in the netlist."""
-        return sum(1 for element in self._view().elements if element.port is not None)
+        return len(self.ports)
 
     @property
     def port_sources(self) -> dict[str, dict[str, float]]:
@@ -272,7 +304,7 @@ class Netlist:
         Only ports that carry an explicit SIN or AC source declaration are included.
         These are used to compute Pin for Gain calculations.
         """
-        return {name: dict(info) for name, info in self._view().port_sources.items()}
+        return self.parser.port_sources(self)
 
     @property
     def available_design_parameters(self) -> list[str]:
@@ -323,6 +355,51 @@ class Netlist:
                 logger.warning("Parameter '%s' not found in netlist elements.", name)
 
     # -------------------------------------------------------------------------
+    # Surrogates
+    # -------------------------------------------------------------------------
+
+    def mark_surrogate_masters(self, names: Iterable[str]) -> None:
+        """Treat the subcircuits *names* as components, replaced wherever they are used."""
+        names = frozenset(names)
+        unknown = sorted(names - set(self.masters))
+        if unknown:
+            raise KeyError(f"No subcircuit named {', '.join(unknown)} in the netlist or its includes.")
+        self.surrogate_masters = names
+        self._views = None
+
+    def select_surrogates(self, names: Iterable[str]) -> None:
+        """Mark those of *names* that name a subcircuit, not a component instance, as surrogate masters.
+
+        A configuration maps components to models by name; this lets that name be
+        a subcircuit (e.g. an ``ISM_le`` block) as well as an instance such as ``X1``.
+        """
+        instances = set(self._view().components) - self.surrogate_masters
+        masters = set(self.masters)
+        self.mark_surrogate_masters(name for name in names if name not in instances and name in masters)
+
+    def use_surrogate(self, component: str, subcircuit: str) -> None:
+        """Make *component* use the vector-fitted *subcircuit*.
+
+        An instance is pointed at *subcircuit*. A surrogate master has every
+        instance of it, at any depth, renamed to *subcircuit*, and the file the
+        simulator writes the fit to is included.
+        """
+        if component not in self.surrogate_masters:
+            self.set_model(component, subcircuit)
+            return
+        parser = self.parser
+        statements = [
+            parser.set_model(statement, subcircuit)
+            if parser.instance_master(statement) == component
+            else statement
+            for statement in self._statements
+        ]
+        include = parser.make_statements(parser.surrogate_include(component))
+        # After the title, where an include is top-level in every dialect.
+        position = 1 if statements and statements[0].kind is StatementKind.TITLE else 0
+        self._load([*statements[:position], *include, *statements[position:]])
+
+    # -------------------------------------------------------------------------
     # Directive edits
     # -------------------------------------------------------------------------
 
@@ -366,8 +443,10 @@ class Netlist:
                     while len(positional) <= index + offset:
                         positional.append("")
                     positional[index + offset] = token
-                # Drop slots that no longer exist
-                positional = positional[:index + len(sub_tokens)]
+                # The last slot takes any number of tokens; drop those it no
+                # longer has (e.g. an HB tone fewer). Earlier slots stay put.
+                if index == len(param_names) - 1:
+                    positional = positional[:index + len(sub_tokens)]
             else:
                 existing = next((k for k in kv_params if fold(k) == fold(param_name)), param_name)
                 kv_params[existing] = str(value)
@@ -429,6 +508,7 @@ class Netlist:
         # Classified only now that every subcircuit name is known, so an instance
         # may come before the .SUBCKT it uses.
         subcircuit_names = {self.parser.fold(r.name) for r in records if isinstance(r, Subcircuit)}
+        subcircuit_names |= set(self.external_masters)
         components = {
             e.name: Component(
                 name=e.name, nodes=list(e.nodes), model=e.model or "", params=dict(e.params)
@@ -436,12 +516,9 @@ class Netlist:
             for e in elements
             if self.parser.is_component(e, subcircuit_names)
         }
-        port_sources: dict[str, dict[str, float]] = {}
-        for element in elements:
-            if element.port is not None:
-                source = self.parser.port_source(self._statements[element.statement_index])
-                if source:
-                    port_sources[element.name] = source
+        masters = self.masters
+        for name in sorted(self.surrogate_masters):
+            components.setdefault(name, Component(name=name, nodes=list(masters[name]), model=name, params={}))
         options = {r.category.lower(): r for r in records if isinstance(r, OptionsDirective)}
         return _Views(
             elements=elements,
@@ -451,5 +528,4 @@ class Netlist:
             simulation_directives=[r for r in records if isinstance(r, SimulationDirective)],
             print_directives=[r for r in records if isinstance(r, PrintDirective)],
             options=options,
-            port_sources=port_sources,
         )

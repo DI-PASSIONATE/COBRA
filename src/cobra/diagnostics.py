@@ -39,6 +39,7 @@ OPTIONAL_MODULES = (
 )
 REQUIRED_EXECUTABLES = (("Xyce", "circuit simulation"),)
 OPTIONAL_EXECUTABLES = (
+    ("vacask", "circuit simulation with VacaskSimulator"),
     ("palace", "EM fine-tuning"),
     ("mpirun", "parallel Xyce and Palace runs"),
 )

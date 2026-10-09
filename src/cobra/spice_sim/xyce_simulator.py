@@ -31,6 +31,10 @@ _ANALYSIS_COMPANIONS = frozenset({".PRINT", ".OPTIONS", ".MEASURE", ".FOUR"})
 
 class XyceSimulator(BaseSimulator):
     netlist_parser: ClassVar[XyceNetlistParser] = XyceNetlistParser()
+    supported_simulation_types: ClassVar[frozenset[SimulationType]] = frozenset(
+        {SimulationType.AC, SimulationType.HB, SimulationType.TRAN, SimulationType.DC}
+    )
+    command_setting: ClassVar[str] = "xyce_command"
 
     _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
@@ -98,7 +102,11 @@ class XyceSimulator(BaseSimulator):
         return vector_fit(ntwk, name=name, enforce_passivity=self.enforce_passivity)
 
     def prepare_netlist(
-        self, netlist: Netlist, sim_type: SimulationType, sim_params: dict[str, str]
+        self,
+        netlist: Netlist,
+        sim_type: SimulationType,
+        sim_params: dict[str, str],
+        goal_band: tuple[float, float] | None = None,  # noqa: ARG002 - Xyce sweeps come from sim_params
     ) -> Netlist:
         if any(d.simulation_type is sim_type for d in netlist.simulation_directives):
             return netlist  # the existing directive is assumed correct

@@ -92,6 +92,40 @@ class NetlistParser(ABC):
         (HB or transient) analysis, so they can serve as an analysis point.
         """
 
+    def instance_master(self, statement: Statement) -> str | None:  # noqa: ARG002
+        """The subcircuit *statement* instantiates, at any depth; ``None`` for anything else."""
+        return None
+
+    def surrogate_include(self, component: str) -> str:
+        """The statement including the subcircuit the simulator fits for *component*."""
+        raise NotImplementedError(f"{type(self).__name__} cannot replace subcircuit '{component}'")
+
+    def resolve_include(self, file_path: str, directory: Path) -> Path:
+        """Where the simulator finds an included *file_path* of a netlist in *directory*.
+
+        The path is returned even when no such file exists.
+        """
+        candidate = Path(file_path).expanduser()
+        return candidate if candidate.is_absolute() else directory / candidate
+
+    def ports(self, netlist: Netlist) -> dict[str, int]:
+        """Port element name → port number, for the elements decoded as ports."""
+        return {
+            element.name: element.port
+            for element in netlist.list_elements()
+            if element.port is not None
+        }
+
+    def port_sources(self, netlist: Netlist) -> dict[str, dict[str, float]]:
+        """Source data of every port that has a source, keyed by port name (see :meth:`port_source`)."""
+        sources: dict[str, dict[str, float]] = {}
+        for name in self.ports(netlist):
+            element = netlist.get_element(name)
+            source = self.port_source(netlist.statements[element.statement_index])
+            if source:
+                sources[name] = source
+        return sources
+
     def port_source(self, statement: Statement) -> dict[str, float]:  # noqa: ARG002
         """Source data of a port statement: any of ``z0``, ``ac_amplitude``,
         ``sin_amplitude`` and ``sin_frequency``. Empty when the port has no source.

@@ -263,6 +263,7 @@ dependencies = [
     { name = "pyside6" },
     { name = "qtawesome" },
     { name = "scikit-rf" },
+    { name = "snp2le" },
     { name = "tqdm" },
 ]
 
@@ -294,6 +295,7 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.8.0.2" },
     { name = "qtawesome", specifier = ">=1.4.2" },
     { name = "scikit-rf", specifier = ">=1.0" },
+    { name = "snp2le", specifier = ">=0.1.9" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
 provides-extras = ["orca"]
@@ -2762,6 +2764,15 @@ wheels = [
 ]
 
 [[package]]
+name = "schemdraw"
+version = "0.23"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/e0/5f1a5c6a7651ae0325708ead4020446ab8146bf11316f0d35bf7e26f6ee0/schemdraw-0.23.tar.gz", hash = "sha256:e71afd5ec84edfd9b707331c5bcb49ed7133af85bd17dae461de3fc260b0132f", size = 4773368, upload-time = "2026-05-29T18:10:40.713Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/f6/7efb3798e44868e09e8ce8a4329ac21acd134a3d5fd59792f97a7feccc2a/schemdraw-0.23-py3-none-any.whl", hash = "sha256:b6af33cf175fb7692ed3f71b5d2702c400e009ae26efe76c6fa4f85d34e0fac5", size = 152475, upload-time = "2026-05-29T18:10:12.268Z" },
+]
+
+[[package]]
 name = "scikit-image"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3014,6 +3025,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1f/ea/49c993d6dfdd7338c9b1000a0f36817ed7ec84577ae2e52f890d1a4ff909/smmap-5.0.3.tar.gz", hash = "sha256:4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c", size = 22506, upload-time = "2026-03-09T03:43:26.1Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/d4/59e74daffcb57a07668852eeeb6035af9f32cbfd7a1d2511f17d2fe6a738/smmap-5.0.3-py3-none-any.whl", hash = "sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f", size = 24390, upload-time = "2026-03-09T03:43:24.361Z" },
+]
+
+[[package]]
+name = "snp2le"
+version = "0.1.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyside6-essentials" },
+    { name = "schemdraw" },
+    { name = "scikit-rf" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/35/dc7e6c496ce4f5bf39c286c469d438adeba53bfe2e684ce8748d2c3705d8/snp2le-0.1.9.tar.gz", hash = "sha256:9c59d362fb41f94ecb1f9d42a7b91150018678bd65d576b4ec304b296dfa479e", size = 405140, upload-time = "2026-09-04T05:59:37.903Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/3d/e1c062795b0d5ba34ae1e9956649d26be0173552939a181ec8d7a10169a4/snp2le-0.1.9-py3-none-any.whl", hash = "sha256:1d0a20b2c6241cec9356c37b8f08aafff3dc3afb951665d99c444d6d71a71e69", size = 382324, upload-time = "2026-09-04T05:59:36.517Z" },
 ]
 
 [[package]]
