@@ -1,0 +1,198 @@
+{
+  "netlist": "../netlists/VACASK/lna_inductor.sim",
+  "component_models": {
+    "X1": "../../models/DavidL-11/inductor_octa/inductor_octa.onnx"
+  },
+  "simulation_parameters": {},
+  "optimizer": {
+    "name": "OptunaOptimizer",
+    "settings": {
+      "multi_objective": false,
+      "sampler": "tpe",
+      "pruner": null
+    }
+  },
+  "simulator": {
+    "name": "VacaskSimulator",
+    "settings": {
+      "vacask_command": "vacask",
+      "vacask_threads": 1,
+      "vector_fit_max_order": 40,
+      "enforce_passivity": false
+    }
+  },
+  "max_iterations": 600,
+  "parallel_trials": 8,
+  "optimization_parameters": [
+    {
+      "name": "X1:turns",
+      "type": "model_input",
+      "min_value": 1.0,
+      "max_value": 5.0,
+      "step": 0.25,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:width",
+      "type": "model_input",
+      "min_value": 2.0,
+      "max_value": 15.0,
+      "step": 0.5,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:space",
+      "type": "model_input",
+      "min_value": 2.0,
+      "max_value": 6.0,
+      "step": 0.5,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "X1:diameter",
+      "type": "model_input",
+      "min_value": 30.0,
+      "max_value": 300.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "xnpn2:nx",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 10.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "xnpn3:nx",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 10.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "C4",
+      "type": "netlist_variable",
+      "min_value": 50.0,
+      "max_value": 1000.0,
+      "step": 5.0,
+      "unit": "f",
+      "linked_to": null
+    },
+    {
+      "name": "L1",
+      "type": "netlist_variable",
+      "min_value": 10.0,
+      "max_value": 300.0,
+      "step": 2.0,
+      "unit": "p",
+      "linked_to": null
+    },
+    {
+      "name": "L2",
+      "type": "netlist_variable",
+      "min_value": 10.0,
+      "max_value": 150.0,
+      "step": 1.0,
+      "unit": "p",
+      "linked_to": null
+    },
+    {
+      "name": "C3",
+      "type": "netlist_variable",
+      "min_value": 5.0,
+      "max_value": 150.0,
+      "step": 1.0,
+      "unit": "f",
+      "linked_to": null
+    },
+    {
+      "name": "C6",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 150.0,
+      "step": 1.0,
+      "unit": "f",
+      "linked_to": null
+    }
+  ],
+  "design_goals": [
+    {
+      "parameter": "S11_dB",
+      "frequency_range": "125-135GHz",
+      "min_value": null,
+      "max_value": -10.0,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    },
+    {
+      "parameter": "S22_dB",
+      "frequency_range": "125-135GHz",
+      "min_value": null,
+      "max_value": -9.0,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    },
+    {
+      "parameter": "S21_dB",
+      "frequency_range": "125-135GHz",
+      "min_value": 6.5,
+      "max_value": null,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    },
+    {
+      "parameter": "NF",
+      "frequency_range": "130GHz",
+      "min_value": null,
+      "max_value": 5.0,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    },
+    {
+      "parameter": "mu",
+      "frequency_range": "110-170GHz",
+      "min_value": 1.0,
+      "max_value": null,
+      "weight": 1.0,
+      "kind": "catalogue",
+      "node": null,
+      "port": null,
+      "source_amplitude": null,
+      "impedance": null
+    }
+  ],
+  "fine_tuning": {
+    "enabled": false,
+    "palace_command": "palace",
+    "palace_processes": 16,
+    "iterations": 3,
+    "optimizer": "reuse",
+    "geometries": {}
+  },
+  "schema_version": 1
+}

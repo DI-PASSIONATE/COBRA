@@ -1,0 +1,65 @@
+130 GHz cascode LNA with an ORCA inductor surrogate (VACASK port of LNA/lna_inductor.cir)
+// COBRA preset: the octagonal-inductor surrogate X1 is the ORCA model
+// models/DavidL-11/inductor_octa; its geometry is an input of the ONNX model,
+// not part of this netlist. The values below are the Xyce preset's optimum
+// (turns=2, width=10.5, space=3, diameter=229 um), optimized with
+// examples/configs/lna_inductor_config.json. In VACASK (fit order 40) they give
+// S11 -12.3..-12.1 dB, S22 -14.4..-8.9 dB, S21 5.9..7.2 dB (125-135 GHz),
+// NF 4.89 dB at 130 GHz, mu >= 1.49: about 0.7 dB less gain than Xyce, from the
+// PDK's HBT models (VBIC 1.3 in VACASK, 1.15 in Xyce).
+ground 0
+
+load "resistor.osdi"
+load "capacitor.osdi"
+load "inductor.osdi"
+model r resistor
+model c capacitor
+model l inductor
+model vsource vsource
+
+// IHP SG13G2 models converted for VACASK with its sg13g2tovc script (run once
+// with PDK_ROOT set). The PDK's .vacaskrc.toml, or SIM_INCLUDE_PATH and
+// SIM_MODULE_PATH, must point VACASK to libs.tech/vacask/models and .../osdi.
+include "sg13g2_vacask_common.lib"
+include "cornerHBT.lib" section=hbt_typ
+include "cornerRES.lib" section=res_typ
+include "cornerCAP.lib" section=cap_typ
+
+// The inductor surrogate: COBRA writes X1.inc from its S-parameters.
+include "X1.inc"
+X1 (ip Out _net7) inductor_octa
+
+v1 (Vdd 0) vsource dc=2.5
+L1 (_net0 _net1) l l=42p
+L2 (_net2 _net1) l l=30p
+// nx as a real number: the PDK computes (4/nx), which VACASK evaluates as an
+// integer division for an integer nx.
+xnpn1 (_net0 _net0 0 sub) npn13G2 nx=1.0
+R1 (_net3 Vdd) r r=3k
+R2 (0 _net3) r r=13k
+R3 (_net0 Vdd) r r=2.5k
+C2 (0 _net0) c c=200f
+C3 (0 _net2) c c=21f
+C4 (_net4 _net2) c c=315f
+C5 (0 _net3) c c=72f
+xnpn2 (_net5 _net1 0 sub) npn13G2 nx=9.0
+xnpn3 (ip _net3 _net5 sub) npn13G2 nx=5.0
+xptap1 (sub 0) ptap1 w=0.78u l=0.78u
+L4 (Vdd ip) l l=10n
+C6 (0 Out) c c=5f
+
+// Output probe: v<node> is a 0 V source starting at the node, as in Qucs-S.
+vOut (Out _net6) vsource dc=0
+// Ports: 0 V-referenced sources with their 50 ohm reference resistors.
+vp1 (a1 0) vsource dc=0 mag=0.2 type="sine" ampl=0.2 freq=130G
+rp1 (a1 _net4) r r=50
+vp2 (a2 0) vsource dc=0
+rp2 (a2 _net6) r r=50
+
+control
+  save v(Out) i(vOut)
+  // Declares the ports; runs when a goal needs S-parameters.
+  analysis sp1 acsp ports=["vp1", "rp1", "vp2", "rp2"] from=110G to=170G mode="lin" points=120
+  // Runs when a goal needs the noise figure (NF, input port 1).
+  analysis noise1 noise out="Out" in="vp1" from=110G to=170G mode="lin" points=12
+endc
