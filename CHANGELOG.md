@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+- **Breaking:** the netlist API is split into a parser and a parsed document.
+  `XyceNetlistParser().parse_file("x.cir")` returns a `Netlist`, which is passed
+  as `COBRA(netlist=...)` (was `from_file` and `COBRA(netlist_parser=...)`).
+  `from_file`, `from_lines`, `lines`, `parse_netlist` and `BaseNetlistParser`
+  are removed, with no compatibility shim.
+  `ConfiguredRun.parser` is now `ConfiguredRun.netlist`, and
+  `inspection.load_netlist_parser` is now `load_netlist(path, parser=None, *, has_title=True)`.
+- **Breaking:** a simulator owns its parser (`XyceSimulator.netlist_parser`).
+  `BaseSimulator` requires `prepare_netlist(netlist, sim_type, sim_params)`
+  (moved from `CircuitSimulationStage`) and `run_simulation(netlist_path, netlist)`.
+- Edits replace only the edited token, so spacing, inline comments and
+  continuation layout are kept and untouched lines render unchanged.
+- Performance: a netlist is no longer re-parsed after every edit. Rendering 10
+  parameters of the 4 869-line mixer netlist went from about 50 ms to about 0.2 ms.
+
+### Fixed
+- `+` continuation lines are part of their statement: their parameters are read
+  and edited, and removing a directive removes its continuation lines.
+- An `X` instance may come before its `.SUBCKT`.
+- Element and parameter names match case-insensitively (`c1` updates `C1`,
+  `X1:WIDTH` updates `width`); the netlist keeps its own spelling.
+- The first line of a netlist is its title, as in Xyce and ngspice; included
+  files are parsed without one.
+- Port sources accept `SIN(0 a f)` and `SIN (...)`.
+- `key = value` with spaces and `{expr with spaces}` are read correctly.
+
 ## 2.0.0 - 2026-10-07
 
 ### Added

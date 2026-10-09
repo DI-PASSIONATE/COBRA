@@ -36,10 +36,10 @@ design_goals = [
     DesignGoal(_parameter("S21_dB"), min_value=-3, max_value=0, frequency_range="125-135ghz"),
 ]
 
-parser = XyceNetlistParser().from_file(NETLIST_PATH)
+netlist = XyceNetlistParser().parse_file(NETLIST_PATH)
 
 cobra = COBRA(
-    netlist_parser=parser,
+    netlist=netlist,
     component_onnx_mapping={
         "X1": str(ONNX_MODEL_PATH),
         "X2": str(FIXED_TOUCHSTONE_PATH),
