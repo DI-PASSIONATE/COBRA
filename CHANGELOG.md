@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Xyce small-signal noise: `.NOISE` is a supported analysis, the `NF` goal works with
+  `XyceSimulator`, and COBRA adds `.NOISE`/`.PRINT NOISE` when needed. The noise run
+  drives only its input port, with `AC 1`, because Xyce refers the noise to the input
+  with the gain of an AC solve that keeps every source's AC magnitude.
+- Xyce surrogates are noiseless: `vector_fit` writes each resistor of the fitted
+  subcircuit as a self-controlled conductance (`noiseless_resistors`); AC/HB results
+  are unchanged (bit-identical on the transformer example).
 - A noise analysis COBRA adds sweeps the frequency band of its noise goals unless
   `simulation_parameters` set `from`/`to`; `cobra parse` warns about a noise goal
   outside its sweep.
@@ -37,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared only with one resistor is a port (`VacaskNetlistParser.grounds`).
 - VACASK ports are probe points named after their source (`add_port_signals`), so
   `Power_dBm` and `Gain_dB` work on netlists without 0 V probe sources.
+- Example preset `examples/configs/vacask_lna_inductor.json` with
+  `examples/netlists/VACASK/lna_inductor.sim`: the 130 GHz LNA with the ORCA inductor
+  surrogate for VACASK (`vector_fit_max_order` 40).
 - GUI: "Subcircuit surrogate" row (combo of the netlist's subcircuits, **Use as
   surrogate**, **Clear**); loading a configuration restores subcircuit surrogates.
 
@@ -59,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameters of the 4 869-line mixer netlist went from about 50 ms to about 0.2 ms.
 
 ### Fixed
+- A VACASK surrogate fit could hang a run: scikit-rf's `auto_fit` can cycle forever
+  at the order cap, and every other trial waited for it. A fit now stops after 1000
+  pole relocations with `VectorFitError`, and `CircuitSimulationStage` penalises that
+  trial instead of aborting the run.
+- Injecting an analysis into a Xyce netlist no longer drops `.OPTIONS DEVICE` (e.g. the
+  circuit temperature); only analysis-specific `.OPTIONS` lines are replaced.
 - `Netlist.update_simulation_directive` no longer drops later slots when it updates
   an earlier one; only the last, variadic slot is trimmed.
 - The GUI reads a loaded configuration's netlist with the configured simulator.

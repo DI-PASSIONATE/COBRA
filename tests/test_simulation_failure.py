@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import skrf as rf
 
 from cobra.optimizers.design_goal import (
     FAILED_SIMULATION_PENALTY,
@@ -28,6 +29,7 @@ from cobra.spice_sim.base_simulator import (
     SimulatorError,
 )
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.circuit_sim_stage import CircuitSimulationStage
 from tests.conftest import make_context, netlist_path
@@ -118,6 +120,25 @@ def test_failed_run_clears_the_previous_iterations_result(tmp_path, caplog):
 
     assert context.simulation_results == {}
     assert "AC" in caplog.text
+
+
+class _UnfittableSimulator(_StubSimulator):
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
+        raise VectorFitError("vector fit did not converge in 1000 pole relocations")
+
+
+def test_a_surrogate_that_cannot_be_fitted_is_a_simulation_failure(tmp_path, caplog):
+    """One trial's unfittable surrogate is penalised; it must not abort the whole run."""
+    context = _stage_context(tmp_path)
+    context.predicted_networks = [rf.Network(name="X1")]
+    stage = CircuitSimulationStage(_UnfittableSimulator([]))
+
+    with caplog.at_level(logging.WARNING):
+        context = stage.run(context)
+
+    assert context.simulation_results == {}
+    assert "did not converge" in caplog.text
+    assert context.design_goal_checker.check_goals(context).goal_achieved is False
 
 
 # ---------------------------------------------------------------------------

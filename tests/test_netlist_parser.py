@@ -404,3 +404,25 @@ def test_example_netlists_parse():
     parser = XyceNetlistParser()
     unparsed = [path.name for path in EXAMPLE_NETLISTS if not parser.parse_file(path).list_elements()]
     assert unparsed == []
+
+
+def test_subcircuit_surrogate_replaces_every_instance():
+    netlist = _parse(
+        "* title\n"
+        ".SUBCKT stage in out PARAMS: g=1\n"
+        "X1 in mid match\n"
+        "X2 mid out match\n"
+        ".ENDS\n"
+        ".SUBCKT match a b\n"
+        "C1 a b 10f\n"
+        ".ENDS\n"
+        "XS1 n1 n2 stage\n"
+    )
+    assert netlist.masters == {"stage": ("in", "out"), "match": ("a", "b")}
+    netlist.select_surrogates(["match"])
+    assert netlist.components["match"].nodes == ["a", "b"]
+    netlist.use_surrogate("match", "match_subct")
+    lines = netlist.to_string().splitlines()
+    assert lines[1] == '.INCLUDE "match.sp"'
+    assert "X1 in mid match_subct" in lines
+    assert "X2 mid out match_subct" in lines
