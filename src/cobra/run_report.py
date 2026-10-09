@@ -52,7 +52,7 @@ def write_run_header(configured: ConfiguredRun, palette: Palette) -> None:
     write_fields(
         [
             ("netlist", Path(configuration.netlist).name),
-            ("analysis", configured.parser.simulation_type.value),
+            ("analysis", configured.netlist.simulation_type.value),
             ("optimizer", configuration.optimizer.name),
             ("simulator", configuration.simulator.name),
             ("parameters", str(len(configured.optimization_parameters))),

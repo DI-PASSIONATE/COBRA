@@ -1,810 +1,232 @@
+"""Xyce netlist dialect.
+
+Adds to the SPICE base what only Xyce has: ``P`` port elements with their
+AC/SIN sources, ``Y`` devices, the ``.HB`` analysis, the ``.LIN`` S-parameter
+post-processor, the analysis metadata COBRA uses to read and write directive
+arguments, and the rewrite of Qucs-S ``TSTONEFILE`` blocks into plain
+subcircuit calls.
+"""
+
+from __future__ import annotations
+
 import contextlib
-import logging
-import re
-from collections.abc import Mapping
+from typing import ClassVar
 
-from cobra.spice_sim.netlist_parsers.netlist_parser import (
-    BaseNetlistParser,
-    Component,
-    Include,
-    Library,
-    NetlistElement,
-    PrintDirective,
-    SimulationDirective,
+from cobra.spice_sim.netlist_parsers.spice_netlist_parser import (
+    SpiceNetlistParser,
+    _Layout,
+    _unquote,
 )
-from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.netlist_parsers.statement import Statement, StatementKind, Token
+from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# Xyce-specific analysis metadata
+# ---------------------------------------------------------------------------
+
+_XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
+    SimulationType.AC: SimulationTypeMetadata(
+        positional_param_names=["sweep_type", "points", "start_freq", "stop_freq"],
+        positional_param_descriptions={
+            "sweep_type": "Frequency sweep spacing: LIN (linear), DEC (decade), or OCT (octave).",
+            "points":     "Number of frequency points in the sweep.",
+            "start_freq": "Start frequency (e.g. 100G for 100 GHz).",
+            "stop_freq":  "Stop frequency (e.g. 200G for 200 GHz).",
+        },
+        positional_param_defaults={"sweep_type": "LIN", "points": "500", "start_freq": "1G", "stop_freq": "10G"},
+    ),
+    SimulationType.HB: SimulationTypeMetadata(
+        positional_param_names=["frequencies"],
+        positional_param_descriptions={
+            "frequencies": "Space-separated list of fundamental frequencies for the Harmonic Balance analysis.\n"
+                           "Single tone: e.g. 130G. Multi-tone: e.g. 95E9 10E9.",
+        },
+        positional_param_defaults={"frequencies": "1G"},
+        options_category="hbint",
+        options_param_descriptions={
+            "numfreq":        "Number of harmonic frequencies (e.g. 3 = DC + 2 harmonics).",
+            "startupperiods": "Transient startup periods before HB steady-state. Increase if convergence is difficult.",
+            "freq":           "Fundamental frequency (alternative to the positional .HB argument).",
+            "maxsteps":       "Maximum Newton iterations per HB solve.",
+            "abstol":         "Absolute convergence tolerance for the HB residual.",
+            "reltol":         "Relative convergence tolerance for the HB residual.",
+            "voltlim":        "Enable voltage limiting during HB Newton iterations (0 = off, 1 = on).",
+        },
+    ),
+    SimulationType.TRAN: SimulationTypeMetadata(
+        positional_param_names=["step", "stop_time", "start_time", "max_step"],
+        positional_param_descriptions={
+            "step":       "Print/output time step.",
+            "stop_time":  "Total simulation stop time.",
+            "start_time": "Time at which output begins (default 0). Everything before it is the\n"
+                          "start-up transient and is left out of the spectrum, so raise it until\n"
+                          "the circuit has settled. stop_time - start_time sets the FFT resolution\n"
+                          "and should be a whole number of signal periods.",
+            "max_step":   "Maximum internal time step (optional).",
+        },
+        positional_param_defaults={"step": "1n", "stop_time": "100n", "start_time": "0", "max_step": "1n"},
+        options_category="timeint",
+        options_param_descriptions={
+            "abstol":  "Absolute local truncation error tolerance for the time integrator.",
+            "reltol":  "Relative local truncation error tolerance for the time integrator.",
+            "method":  "Integration method: gear or trap (trapezoid).",
+            "maxord":  "Maximum order for the Gear integration method (1–6).",
+            "newlte":  "Enable new local truncation error algorithm (0 = off, 1 = on).",
+            "delmax":  "Maximum allowed internal time step size.",
+        },
+    ),
+    SimulationType.DC: SimulationTypeMetadata(
+        positional_param_names=["src_name", "start", "stop", "incr"],
+        positional_param_descriptions={
+            "src_name": "Name of the voltage/current source to sweep.",
+            "start":    "Sweep start value.",
+            "stop":     "Sweep stop value.",
+            "incr":     "Sweep increment step.",
+        },
+        positional_param_defaults={"src_name": "V1", "start": "0", "stop": "1", "incr": "0.01"},
+    ),
+}
 
 
-class XyceNetlistParser(BaseNetlistParser):
+class XyceNetlistParser(SpiceNetlistParser):
     """
     Xyce-flavoured SPICE netlist parser.
 
-    Responsibilities beyond plain reading/writing:
+    Responsibilities beyond the SPICE base:
     - Rewrites Qucs-S ``TSTONEFILE`` transformer blocks (``YLIN`` instances)
       into ordinary ``X`` subcircuit calls so the rest of COBRA can treat them
       as standard surrogate components.
     """
 
-    # -------------------------------------------------------------------------
-    # Compiled regular expressions (class-level, shared by all instances)
-    # -------------------------------------------------------------------------
+    analysis_keywords: ClassVar[frozenset[str]] = frozenset({".AC", ".DC", ".TRAN", ".HB"})
+    # .LIN post-processes .AC into Touchstone output; it is not an analysis of its own.
+    modifier_keywords: ClassVar[frozenset[str]] = frozenset({".LIN"})
+    model_types: ClassVar[frozenset[str]] = frozenset({"D", "M", "Q", "X", "Y"})
 
-    # Qucs-S / Xyce use ";" or "$" to start an inline comment.
-    _inline_comment_markers = (";", "$")
-
-    # Lines that are pure comments or continuation lines — skipped during parsing.
-    _comment_re      = re.compile(r"^\s*\*",                          re.IGNORECASE)
-    _continuation_re = re.compile(r"^\s*\+",                          re.IGNORECASE)
-
-    # The first token on a device/instance line gives us its name.
-    _inst_re         = re.compile(r"^\s*([A-Za-z]\w*)")
-
-    # key=value parameter tokens.
-    _kv_re           = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$",    re.IGNORECASE)
-
-    # .MODEL directives — we look for LIN + TSTONEFILE to detect surrogates.
-    _model_re        = re.compile(r"^\s*\.model\s+(\S+)\s+(\S+)\s*(.*)$", re.IGNORECASE)
-
-    # .SUBCKT / .ENDS markers for tracking subcircuit nesting depth.
-    _subckt_re       = re.compile(r"^\s*\.subckt\b",                  re.IGNORECASE)
-    _ends_re         = re.compile(r"^\s*\.ends\b",                    re.IGNORECASE)
-
-    # TSTONEFILE=... on a LIN model marks a Qucs-S surrogate placeholder.
-    _tstonefile_re   = re.compile(r"\bTSTONEFILE\s*=\s*([^\s]+)",    re.IGNORECASE)
-
-    # Dot-directives that identify the primary simulation type.
-    _sim_directive_re = re.compile(r"^\s*(\.(?:LIN|AC|HB|TRAN|DC))\b", re.IGNORECASE)
-
-    # .INCLUDE directives that reference fitted-subcircuit files.
-    _include_re      = re.compile(
-        r"^\s*\.include\s+[\"']?([^\s\"']+)[\"']?\s*$",               re.IGNORECASE
-    )
-
-    # .LIB directives that reference PDK model libraries: ".LIB <file> [entry]".
-    _lib_re          = re.compile(
-        r"^\s*\.lib\s+[\"']?([^\s\"']+)[\"']?(?:\s+(\S+))?\s*$",           re.IGNORECASE
-    )
-
-    # .options lines: ".options <category> [key=val ...]"
-    _options_re      = re.compile(r"^\s*\.options\b",                  re.IGNORECASE)
-
-    # .PRINT lines: ".PRINT <analysis> [key=val ...] <signal> ..."
-    _print_re        = re.compile(r"^\s*\.print\b",                    re.IGNORECASE)
-
-    # Printed signal tokens such as "v(Out)" or "I(VOut)".
-    _probe_re        = re.compile(r"^([VI])\(([^)]+)\)$",              re.IGNORECASE)
+    def analysis_metadata(self, sim_type: SimulationType) -> SimulationTypeMetadata:
+        return _XYCE_METADATA.get(sim_type, SimulationTypeMetadata())
 
     # -------------------------------------------------------------------------
-    # Constructor
+    # Xyce devices
     # -------------------------------------------------------------------------
 
-    def __init__(self) -> None:
-        super().__init__()
-        # Maps rewritten X-instance names → original TSTONEFILE paths so the
-        # GUI can display them even after the Y→X conversion.
-        self._tstonefile_map: dict[str, str] = {}
-        # Parsed .options lines: category_lower → {param: value, "_line_index": int}
-        self._options_lines: dict[str, dict] = {}
-
-    # -------------------------------------------------------------------------
-    # Public mutators
-    # -------------------------------------------------------------------------
-
-    def set_value(self, name: str, new_value: str) -> None:
-        """Replace the positional value token of an R, C, L, V, or I element."""
-        e = self.get_element(name)
-        tokens = e.tokens[:]
-
-        if e.etype in ("R", "C", "L"):
-            if len(tokens) < 4:
-                raise ValueError("R/C/L line too short.")
-            tokens[3] = new_value
-
-        elif e.etype in ("V", "I"):
-            if len(tokens) < 3:
-                raise ValueError("V/I line too short.")
-            tokens = [*tokens[:3], new_value]
-
-        else:
-            raise ValueError(
-                f"set_value is for R/C/L and simple V/I. "
-                f"Use set_param or set_model for '{e.etype}'."
-            )
-
-        self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
-        self.parse_netlist()
-
-    def set_model(self, name: str, new_model: str) -> None:
-        """Replace the model-reference token on a device or subcircuit instance line."""
-        e = self.get_element(name)
-        tokens = e.tokens[:]
-
-        if e.etype == "D":
-            if len(tokens) < 4:
-                raise ValueError("D line too short.")
-            tokens[3] = new_model
-
-        elif e.etype == "M":
-            if len(tokens) < 6:
-                raise ValueError("M line too short.")
-            tokens[5] = new_model
-
-        elif e.etype == "Q":
-            if len(tokens) < 5:
-                raise ValueError("Q line too short.")
-            tokens[4] = new_model
-
-        elif e.etype == "X":
-            # Subcircuit name sits just before the first key=value param (or at end).
-            first_kv = next(
-                (i for i in range(1, len(tokens)) if self._kv_re.match(tokens[i])),
-                None,
-            )
-            end = first_kv if first_kv is not None else len(tokens)
-            if end < 2:
-                raise ValueError("X line too short.")
-            tokens[end - 1] = new_model
-
-        elif e.etype == "Y":
-            if len(tokens) < 3:
-                raise ValueError("Y line too short.")
-            tokens[-1] = new_model
-
-        else:
-            raise ValueError(f"set_model not supported for type '{e.etype}'")
-
-        self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
-        self.parse_netlist()
-
-    def set_param(self, name: str, key: str, value: str) -> None:
-        """Update or append a ``key=value`` parameter on any element line."""
-        e = self.get_element(name)
-        tokens = e.tokens[:]
-        key = key.strip()
-
-        # .MODEL lines have two positional tokens before parameters start.
-        start_idx = 3 if e.etype == "MODEL" else 1
-
-        for i in range(start_idx, len(tokens)):
-            m = self._kv_re.match(tokens[i])
-            if m and m.group(1).lower() == key.lower():
-                tokens[i] = f"{key}={value}"
-                break
-        else:
-            tokens.append(f"{key}={value}")
-
-        self._replace_line(e.line_index, tokens, e.inline_comment, e.raw_line.endswith("\n"))
-        self.parse_netlist()
-
-    def update_parameters(self, parameters: Mapping[str, float | str]) -> None:
-        """
-        Bulk-update multiple parameters by name.
-
-        Parameter names follow two conventions:
-
-        * ``"ElementName"`` — updates the positional value of an R/C/L/V/I
-          element via :meth:`set_value`.
-        * ``"InstanceName:ParamKey"`` — updates a key=value parameter on an
-          instance via :meth:`set_param`.
-        """
-        for name, value in parameters.items():
-            if ":" in name:
-                instance_name, param_key = name.split(":", 1)
-                if instance_name in self._elements:
-                    self.set_param(instance_name, param_key, str(value))
-                else:
-                    logger.warning("Instance '%s' not found in netlist elements.", instance_name)
-            elif name in self._elements:
-                self.set_value(name, str(value))
-            else:
-                logger.warning("Parameter '%s' not found in netlist elements.", name)
-
-    # -------------------------------------------------------------------------
-    # Parsing entry point
-    # -------------------------------------------------------------------------
-
-    def parse_netlist(self) -> None:
-        """
-        Parse ``self._lines`` and populate ``_elements``, ``_components``, and
-        ``_includes``.
-
-        Qucs-S TSTONEFILE placeholders are normalised to plain X-subcircuits
-        before the main pass runs.
-        """
-        self._normalize_tstonefile_subcircuits()
-        self._reset_state()
-        self._options_lines = {}
-
-        subckt_depth = 0  # > 0 while inside a .SUBCKT definition block
-
-        for idx, raw in enumerate(self._lines):
-            if not raw.strip():
-                continue
-            if self._comment_re.match(raw) or self._continuation_re.match(raw):
-                continue
-
-            code, inline_comment = self._split_inline_comment(raw)
-            stripped = code.strip()
-            if not stripped:
-                continue
-
-            # ------------------------------------------------------------------
-            # Track .SUBCKT / .ENDS nesting so inner devices are not parsed as
-            # top-level components.
-            # ------------------------------------------------------------------
-            if self._subckt_re.match(stripped):
-                tokens_sc = stripped.split()
-                if len(tokens_sc) >= 2:
-                    self._inline_subckt_names.add(tokens_sc[1])
-                subckt_depth += 1
-                continue
-
-            if self._ends_re.match(stripped):
-                if subckt_depth > 0:
-                    subckt_depth -= 1
-                continue
-
-            if subckt_depth > 0:
-                continue
-
-            # ------------------------------------------------------------------
-            # .INCLUDE directives
-            # ------------------------------------------------------------------
-            m_include = self._include_re.match(stripped)
-            if m_include:
-                self._includes.append(Include(file_path=m_include.group(1), line_index=idx))
-                continue
-
-            # ------------------------------------------------------------------
-            # .LIB directives referencing PDK model libraries.
-            # ------------------------------------------------------------------
-            m_lib = self._lib_re.match(stripped)
-            if m_lib:
-                self._libraries.append(
-                    Library(
-                        file_path=m_lib.group(1),
-                        entry=m_lib.group(2),
-                        line_index=idx,
-                    )
-                )
-                continue
-
-            # ------------------------------------------------------------------
-            # .MODEL directives — kept in the element table for later editing
-            # but not treated as simulation components.
-            # ------------------------------------------------------------------
-            m_model = self._model_re.match(stripped)
-            if m_model:
-                model_name = m_model.group(1)
-                model_type = m_model.group(2)
-                tokens = stripped.split()
-                self._elements[model_name] = NetlistElement(
-                    name=model_name,
-                    etype="MODEL",
-                    subtype=None,
-                    line_index=idx,
-                    raw_line=raw,
-                    inline_comment=inline_comment,
-                    tokens=tokens,
-                    nodes=[],
-                    value=None,
-                    model=model_type,
-                    params=self._collect_params(tokens[3:]),
-                )
-                continue
-
-            # Detect the primary simulation / analysis directive.
-            # Both .AC and .LIN map to SimulationType.AC (see SimulationType.from_directive).
-            # .LIN is a post-processing directive that sits alongside .AC to request
-            # Touchstone/S-parameter output — it is not a separate simulation type.
-            # The first recognised directive wins; subsequent ones are stored but
-            # do not override _simulation_type.
-            m_sim = self._sim_directive_re.match(stripped)
-            if m_sim:
-                detected = SimulationType.from_directive(m_sim.group(1))
-                if self._simulation_type is SimulationType.UNKNOWN:
-                    self._simulation_type = detected
-
-                # Store the full directive so it can be inspected and edited later.
-                tokens_sim = stripped.split()
-                directive_kw = tokens_sim[0]  # e.g. ".AC", ".LIN"
-                remaining = tokens_sim[1:]
-                positional = [t for t in remaining if not self._kv_re.match(t)]
-                kv = self._collect_params(remaining)
-                self._simulation_directives.append(SimulationDirective(
-                    directive=directive_kw,
-                    positional=positional,
-                    kv_params=kv,
-                    line_index=idx,
-                ))
-
-            # Parse .options lines (e.g. ".options hbint numfreq=3 STARTUPPERIODS=2").
-            if self._options_re.match(stripped):
-                tokens_opt = stripped.split()
-                if len(tokens_opt) >= 2:
-                    category = tokens_opt[1].lower()
-                    opt_params = self._collect_params(tokens_opt[2:])
-                    self._options_lines[category] = {"_line_index": idx, **opt_params}
-
-            # Parse .PRINT lines (e.g. ".PRINT hb format=csv I(VOut) v(Out)").
-            if self._print_re.match(stripped):
-                tokens_print = stripped.split()
-                if len(tokens_print) >= 2:
-                    remaining = tokens_print[2:]
-                    self._print_directives.append(PrintDirective(
-                        analysis=tokens_print[1].lower(),
-                        signals=[t for t in remaining if not self._kv_re.match(t)],
-                        kv_params=self._collect_params(remaining),
-                        line_index=idx,
-                    ))
-
-            # Other dot-directives are preserved in the text but not parsed.
-            if stripped.startswith("."):
-                continue
-
-            # ------------------------------------------------------------------
-            # Device and instance lines
-            # ------------------------------------------------------------------
-            if not self._inst_re.match(stripped):
-                continue
-
-            tokens = stripped.split()
-            if not tokens:
-                continue
-
-            name  = tokens[0]
-            etype = name[0].upper()
-            nodes, value, model, params, subtype = self._parse_instance(tokens, etype)
-
-            # Carry the TSTONEFILE path into the params dict so the GUI can find it.
-            if etype == "X" and name in self._tstonefile_map:
-                params["TSTONEFILE"] = self._tstonefile_map[name]
-
-            self._elements[name] = NetlistElement(
-                name=name,
-                etype=etype,
-                subtype=subtype,
-                line_index=idx,
-                raw_line=raw,
-                inline_comment=inline_comment,
-                tokens=tokens,
-                nodes=nodes,
-                value=value,
-                model=model,
-                params=params,
-            )
-
-            # X instances whose model is *not* defined inline are external
-            # surrogates; add them to _components for the model-selector.
-            if etype == "X" and model not in self._inline_subckt_names:
-                self._components[name] = Component(
-                    name=name,
-                    nodes=nodes,
-                    model=model or "",
-                    params=params,
-                )
-
-            # Count P-elements as netlist ports.
-            if etype == "P":
-                self._num_ports += 1
-                # Extract SIN/AC source info for Pin / Gain calculations.
-                source_info = self._extract_port_source_info(tokens)
-                if source_info:
-                    self._port_sources[name] = source_info
-
-    # -------------------------------------------------------------------------
-    # Public: simulation directive editing
-    # -------------------------------------------------------------------------
-
-    @property
-    def probe_nodes(self) -> list[str]:
-        """Node names that can serve as a large-signal (HB or transient) analysis point.
-
-        A node ``X`` qualifies when both its voltage ``V(X)`` and the current
-        ``I(VX)`` of the 0 V probe source named ``VX`` are available, which is
-        the Qucs-S convention for a labelled node with a current probe. Both
-        ``.PRINT hb`` and ``.PRINT tran`` lines count, since the same probe
-        serves either analysis. Falls back to the netlist's V-elements when
-        neither line exists.
-        """
-        voltages: dict[str, str] = {}   # upper-case node → node as written
-        currents: set[str] = set()      # upper-case source name
-        for directive in self._print_directives:
-            if directive.analysis not in ("hb", "tran"):
-                continue
-            for token in directive.signals:
-                m = self._probe_re.match(token)
-                if not m:
-                    continue
-                kind, arg = m.group(1).upper(), m.group(2).strip()
-                if kind == "V":
-                    voltages.setdefault(arg.upper(), arg)
-                else:
-                    currents.add(arg.upper())
-
-        if not voltages:
-            # No .PRINT hb/tran line: derive candidates from the probe sources themselves.
-            for elem in self.list_elements(["V"]):
-                if elem.nodes:
-                    node = elem.nodes[0]
-                    if elem.name.upper() == f"V{node.upper()}":
-                        voltages.setdefault(node.upper(), node)
-                        currents.add(elem.name.upper())
-
-        return [node for key, node in voltages.items() if f"V{key}" in currents]
-
-    @property
-    def options_directives(self) -> dict[str, dict[str, str]]:
-        """Parsed ``.options`` lines, keyed by category name (e.g. ``'hbint'``).
-
-        Returns a copy with the internal ``_line_index`` key stripped out.
-        """
-        return {
-            cat: {k: v for k, v in params.items() if k != "_line_index"}
-            for cat, params in self._options_lines.items()
-        }
-
-    def update_options_directive(self, category: str, params: dict[str, str]) -> None:
-        """Update key=value parameters on a ``.options <category>`` line in-place.
-
-        Example::
-
-            parser.update_options_directive("hbint", {"numfreq": "5"})
-        """
-        cat_lower = category.lower()
-        entry = self._options_lines.get(cat_lower)
-        if entry is None:
-            raise KeyError(f".options {category} not found in netlist.")
-        line_idx = entry["_line_index"]
-        merged = {k: v for k, v in entry.items() if k != "_line_index"}
-        merged.update(params)
-        tokens = [".options", category] + [f"{k}={v}" for k, v in merged.items()]
-        raw_line = self._lines[line_idx]
-        had_newline = raw_line.endswith("\n")
-        _, inline_comment = self._split_inline_comment(raw_line)
-        self._lines[line_idx] = self._format_line(tokens, inline_comment, had_newline)
-        self.parse_netlist()
-
-    def update_simulation_directive(self, directive: str, params: dict[str, str]) -> None:
-        """
-        Update named parameters of a simulation directive in-place, then re-parse.
-
-        ``params`` keys can be:
-
-        * **Positional names** as returned by ``SimulationType.positional_param_names()``
-          (e.g. ``"start_freq"``, ``"stop_freq"``, ``"points"`` for ``.AC``).
-        * **Key=value names** already present on the directive line
-          (e.g. ``"format"`` for ``.LIN format=touchstone``).
-
-        Example::
-
-            parser.update_simulation_directive(".AC", {"start_freq": "100G", "stop_freq": "200G"})
-        """
-        directive_upper = directive.strip().upper()
-        target = next(
-            (d for d in self._simulation_directives if d.directive.upper() == directive_upper),
-            None,
-        )
-        if target is None:
-            raise KeyError(f"Directive '{directive}' not found in netlist.")
-
-        sim_type = SimulationType.from_directive(directive_upper)
-        # Lazy import avoids circular dependency: XyceNetlistParser ← XyceSimulator ← XyceNetlistParser
-        from cobra.spice_sim.xyce_simulator import XyceSimulator
-        param_names = XyceSimulator.get_simulation_metadata(sim_type).positional_param_names
-
-        new_positional = list(target.positional)
-        new_kv = dict(target.kv_params)
-
-        for param_name, value in params.items():
-            if param_name in param_names:
-                idx = param_names.index(param_name)
-                # Special case: a param whose value may contain multiple space-separated
-                # tokens (e.g. HB "frequencies" = "95E9 10E9") — expand into individual
-                # positional slots starting at idx.
-                sub_tokens = str(value).split()
-                for offset, tok in enumerate(sub_tokens):
-                    while len(new_positional) <= idx + offset:
-                        new_positional.append("")
-                    new_positional[idx + offset] = tok
-                # Truncate any extra positional slots that no longer exist
-                new_positional = new_positional[:idx + len(sub_tokens)]
-            else:
-                new_kv[param_name] = str(value)
-
-        tokens = [target.directive, *new_positional]
-        for k, v in new_kv.items():
-            tokens.append(f"{k}={v}")
-
-        raw_line = self._lines[target.line_index]
-        had_newline = raw_line.endswith("\n")
-        _, inline_comment = self._split_inline_comment(raw_line)
-        self._lines[target.line_index] = self._format_line(tokens, inline_comment, had_newline)
-        self.parse_netlist()
-
-    # -------------------------------------------------------------------------
-    # Private: Qucs-S TSTONEFILE → X-subcircuit normalisation
-    # -------------------------------------------------------------------------
-
-    def _normalize_tstonefile_subcircuits(self) -> None:
-        """
-        Convert Qucs-S ``YLIN``/``TSTONEFILE`` device blocks into
-        Xyce-compatible subcircuit instances (``X...``) in-place on
-        ``self._lines``.
-
-        The transformation is two-pass:
-
-        1. Collect every ``.MODEL <name> LIN TSTONEFILE=...`` entry.
-        2. Rewrite the matching ``Y`` instance into an ``X`` call and replace
-           the model line with a ``.INCLUDE`` for the vector-fitted ``.sp``
-           file.
-        """
-        self._tstonefile_map.clear()
-
-        # --- Pass 1: collect LIN models that carry a TSTONEFILE reference ----
-        model_line_index: dict[str, int] = {}
-        model_tstonefile: dict[str, str] = {}
-
-        for idx, raw in enumerate(self._lines):
-            code, _ = self._split_inline_comment(raw)
-            stripped = code.strip()
-            if not stripped or stripped.startswith("*"):
-                continue
-
-            m = self._model_re.match(stripped)
-            if not m or m.group(2).upper() != "LIN":
-                continue
-
-            tstone_match = self._tstonefile_re.search(stripped)
-            if not tstone_match:
-                continue
-
-            model_name = m.group(1)
-            model_line_index[model_name] = idx
-            model_tstonefile[model_name] = tstone_match.group(1)
-
-        if not model_line_index:
-            return
-
-        # --- Pass 2: rewrite Y-instances and replace matching model lines ----
-        updated_lines = self._lines[:]
-        converted_models: dict[str, str] = {}
-
-        for idx, raw in enumerate(self._lines):
-            code, inline_comment = self._split_inline_comment(raw)
-            stripped = code.strip()
-
-            if not stripped or stripped.startswith((".", "*")):
-                continue
-
-            tokens = stripped.split()
-            if len(tokens) < 4 or tokens[0][0].upper() != "Y":
-                continue
-
-            model_name = tokens[-1]
-            mdl_idx    = model_line_index.get(model_name)
-            if mdl_idx is None:
-                continue
-
-            if model_name in converted_models:
-                x_name = converted_models[model_name]
-            else:
-                # Prefix the original instance name with "X" to produce a
-                # standard subcircuit call that Xyce understands.
-                x_name = f"X{tokens[1]}"
-                converted_models[model_name] = x_name
-
-                # Replace the placeholder .MODEL line with the .INCLUDE for
-                # the surrogate .sp file generated by vector fitting.
-                include_line = f'.INCLUDE "{x_name}.sp"'
-                if inline_comment:
-                    include_line += " " + inline_comment.lstrip()
-                if raw.endswith("\n"):
-                    include_line += "\n"
-                updated_lines[mdl_idx] = include_line
-
-            # Qucs-S emits each port as <signal_node> 0; drop the literal zeros
-            # because the fitted subcircuit only expects the signal nodes.
-            port_nodes      = [n for n in tokens[2:-1] if n != "0"]
-            instance_tokens = [x_name, *port_nodes, f"{x_name}_subct"]
-
-            tfile = model_tstonefile.get(model_name)
-            if tfile:
-                self._tstonefile_map[x_name] = tfile
-
-            updated_lines[idx] = self._format_line(instance_tokens, inline_comment, raw.endswith("\n"))
-
-        self._lines = updated_lines
-
-    # -------------------------------------------------------------------------
-    # Private: instance line parsing
-    # -------------------------------------------------------------------------
-
-    def _extract_port_source_info(self, tokens: list[str]) -> dict[str, float]:
-        """Extract AC amplitude, SIN amplitude/frequency and z0 from a P-element token list.
+    def _layout(self, etype: str, tokens: tuple[Token, ...]) -> _Layout | None:
+        count = len(tokens)
+        if etype == "P":
+            # <name> <n1> <n2> [params...] [AC <mag>] [SIN <offset> <amplitude> <freq> ...]
+            return _Layout(slice(1, 3), params=3) if count >= 3 else None
+        if etype == "Y":
+            # Qucs-S format: <name> <subtype> [port_nodes...] <model>
+            return _Layout(slice(2, count - 1), model=count - 1, params=count, subtype=1) if count >= 4 else None
+        return super()._layout(etype, tokens)
+
+    def _port(self, etype: str, params: dict[str, str]) -> int | None:
+        if etype != "P":
+            return None
+        number = next((value for key, value in params.items() if key.lower() == "port"), "0")
+        try:
+            return int(number)
+        except ValueError:
+            return 0  # still a port, just without a usable number
+
+    def port_source(self, statement: Statement) -> dict[str, float]:
+        """Extract AC amplitude, SIN amplitude/frequency and z0 from a P-element.
 
         Handles lines such as::
 
             P2 _net28 0 port=1 z0=100 AC 0.089442719 SIN 0 0.089442719 130G
 
-        Returns a dict with any subset of keys ``{"sin_amplitude", "sin_frequency",
-        "ac_amplitude", "z0"}``. Only populated when at least one of SIN or AC
-        amplitude is found.
+        as well as the bracketed forms ``SIN(0 0.089 130G)`` and ``SIN (...)``.
+        Only populated when at least one of SIN or AC amplitude is found.
         """
         # Imported here: hb_spectrum pulls in numpy and pandas.
         from cobra.spice_sim.hb_spectrum import spice_float
 
+        positional, params = self._split_params(self.tokens(statement)[3:])
         result: dict[str, float] = {}
-
-        # z0 is a key=value token — collect it first.
-        for tok in tokens:
-            m = self._kv_re.match(tok)
-            if m and m.group(1).lower() == "z0":
+        for key, value in params:
+            if key.text.lower() == "z0":
                 with contextlib.suppress(ValueError):
-                    result["z0"] = float(m.group(2))
+                    result["z0"] = float(value.text)
 
-        # Scan for positional AC/SIN waveform keywords.
-        i = 0
-        while i < len(tokens):
-            upper = tokens[i].upper()
-            if upper == "AC" and i + 1 < len(tokens):
+        words = [token.text for token in self._flatten(positional)]
+        index = 0
+        while index < len(words):
+            upper = words[index].upper()
+            if upper == "AC" and index + 1 < len(words):
                 with contextlib.suppress(ValueError):
-                    result["ac_amplitude"] = float(tokens[i + 1])
-                i += 2
+                    result["ac_amplitude"] = float(words[index + 1])
+                index += 2
                 continue
-            if upper == "SIN" and i + 2 < len(tokens):
+            if upper == "SIN" and index + 2 < len(words):
                 # SIN <offset> <amplitude> [freq] [td] [theta]
                 with contextlib.suppress(ValueError):
-                    result["sin_amplitude"] = float(tokens[i + 2])
-                if i + 3 < len(tokens):
+                    result["sin_amplitude"] = float(words[index + 2])
+                if index + 3 < len(words):
                     with contextlib.suppress(ValueError):
-                        result["sin_frequency"] = spice_float(tokens[i + 3])
-                i += 3
+                        result["sin_frequency"] = spice_float(words[index + 3])
+                index += 3
                 continue
-            i += 1
+            index += 1
 
-        # Only return info when a source amplitude is present.
         if "sin_amplitude" not in result and "ac_amplitude" not in result:
             return {}
         return result
 
-    def _parse_instance(
-        self, tokens: list[str], etype: str
-    ) -> tuple[list[str], str | None, str | None, dict[str, str], str | None]:
+    # -------------------------------------------------------------------------
+    # Qucs-S TSTONEFILE → X-subcircuit normalisation
+    # -------------------------------------------------------------------------
+
+    def normalize(self, statements: list[Statement]) -> list[Statement]:
         """
-        Decode a device/instance token list into
-        ``(nodes, value, model, params, subtype)``.
-        Each device type has its own positional layout.
+        Convert Qucs-S ``YLIN``/``TSTONEFILE`` device blocks into
+        Xyce-compatible subcircuit instances (``X...``).
+
+        1. Collect every ``.MODEL <name> LIN TSTONEFILE=...`` entry.
+        2. Rewrite the matching ``Y`` instance into an ``X`` call, keeping the
+           Touchstone path as an annotation, and replace the model line with a
+           ``.INCLUDE`` for the vector-fitted ``.sp`` file.
         """
-        nodes:   list[str]       = []
-        params:  dict[str, str]  = {}
-        value:   str | None   = None
-        model:   str | None   = None
-        subtype: str | None   = None
-
-        if etype in ("R", "C", "L"):
-            # <name> <n+> <n-> <value> [params...]
-            if len(tokens) >= 4:
-                nodes  = tokens[1:3]
-                value  = tokens[3]
-                params = self._collect_params(tokens[4:])
-
-        elif etype == "M":
-            # <name> <drain> <gate> <source> <bulk> <model> [params...]
-            if len(tokens) >= 6:
-                nodes  = tokens[1:5]
-                model  = tokens[5]
-                params = self._collect_params(tokens[6:])
-
-        elif etype == "Q":
-            # <name> <collector> <base> <emitter> <model> [params...]
-            if len(tokens) >= 5:
-                nodes  = tokens[1:4]
-                model  = tokens[4]
-                params = self._collect_params(tokens[5:])
-
-        elif etype == "D":
-            # <name> <anode> <cathode> <model> [params...]
-            if len(tokens) >= 4:
-                nodes  = tokens[1:3]
-                model  = tokens[3]
-                params = self._collect_params(tokens[4:])
-
-        elif etype == "X":
-            # <name> [nodes...] <subckt_name> [key=value...]
-            # The subcircuit name is the last positional token before any key=value.
-            first_kv = next(
-                (i for i in range(1, len(tokens)) if self._kv_re.match(tokens[i])),
+        # folded model name → (statement index, Touchstone path)
+        models: dict[str, tuple[int, str]] = {}
+        for index, statement in enumerate(statements):
+            if statement.keyword != ".MODEL":
+                continue
+            flat = self._flatten(self.tokens(statement))
+            if len(flat) < 3 or flat[2].text.upper() != "LIN":
+                continue
+            touchstone = next(
+                (v.text for k, v in self._split_params(flat[3:])[1] if k.text.upper() == "TSTONEFILE"),
                 None,
             )
-            end = first_kv if first_kv is not None else len(tokens)
-            if end >= 3:
-                model  = tokens[end - 1]
-                nodes  = tokens[1 : end - 1]
-                params = self._collect_params(tokens[first_kv:]) if first_kv is not None else {}
+            if touchstone:
+                models[self.fold(flat[1].text)] = (index, _unquote(touchstone))
+        if not models:
+            return statements
 
-        elif etype == "P":
-            # <name> <n1> <n2> [params...]
-            if len(tokens) >= 3:
-                nodes  = tokens[1:3]
-                params = self._collect_params(tokens[3:])
-
-        elif etype in ("V", "I"):
-            # <name> <n+> <n-> [value or waveform...]
-            if len(tokens) >= 3:
-                nodes = tokens[1:3]
-                value = " ".join(tokens[3:]) if len(tokens) > 3 else None
-
-        elif etype == "Y":
-            # Qucs-S format: <name> <subtype> [port_nodes...] <model>
-            # Only seen before _normalize_tstonefile_subcircuits runs.
-            if len(tokens) >= 4:
-                subtype = tokens[1]
-                model   = tokens[-1]
-                nodes   = tokens[2:-1]
-
-        else:
-            # Fallback for unrecognised types.
-            if len(tokens) >= 3:
-                nodes = tokens[1:3]
-            params = self._collect_params(tokens[3:])
-            value  = tokens[-1] if len(tokens) >= 4 else None
-
-        return nodes, value, model, params, subtype
-
-    def _collect_params(self, toks: list[str]) -> dict[str, str]:
-        """Parse a list of tokens and return only the ``key=value`` pairs as a dict."""
-        result: dict[str, str] = {}
-        for tok in toks or []:
-            m = self._kv_re.match(tok)
-            if m:
-                result[m.group(1)] = m.group(2)
+        result = list(statements)
+        converted: dict[str, str] = {}  # model name → X instance name
+        for index, statement in enumerate(statements):
+            if statement.kind is not StatementKind.ELEMENT or not statement.keyword.startswith("Y"):
+                continue
+            tokens = self.tokens(statement)
+            model = self.fold(tokens[-1].text) if len(tokens) >= 4 else ""
+            if model not in models:
+                continue
+            model_index, touchstone = models[model]
+            x_name = converted.get(model)
+            if x_name is None:
+                # Prefix the original instance name with "X" to produce a
+                # standard subcircuit call that Xyce understands.
+                x_name = converted[model] = f"X{tokens[1].text}"
+                # The fitted subcircuit replaces the placeholder .MODEL.
+                result[model_index] = self._rewrite(statements[model_index], f'.INCLUDE "{x_name}.sp"')
+            # Qucs-S emits each port as <signal_node> 0; drop the literal zeros
+            # because the fitted subcircuit only expects the signal nodes.
+            ports = [token.text for token in tokens[2:-1] if token.text != "0"]
+            result[index] = self._rewrite(
+                statement,
+                " ".join([x_name, *ports, f"{x_name}_subct"]),
+                annotations={"TSTONEFILE": touchstone},
+            )
         return result
-
-    # -------------------------------------------------------------------------
-    # Private: line-level text helpers
-    # -------------------------------------------------------------------------
-
-    def _split_inline_comment(self, raw_line: str) -> tuple[str, str]:
-        """
-        Split *raw_line* into ``(code, comment)``.
-
-        The split point is the earliest occurrence of any inline-comment marker.
-        The original trailing newline (if any) is preserved on the code part.
-        """
-        s       = raw_line.rstrip("\n")
-        newline = "\n" if raw_line.endswith("\n") else ""
-
-        best_pos = min(
-            (s.find(m) for m in self._inline_comment_markers if s.find(m) != -1),
-            default=None,
-        )
-
-        if best_pos is None:
-            return s + newline, ""
-
-        code    = s[:best_pos].rstrip()
-        comment = s[best_pos:].rstrip()
-        return code + newline, comment
-
-    def _replace_line(
-        self, line_index: int, tokens: list[str], inline_comment: str, had_newline: bool
-    ) -> None:
-        """Overwrite ``self._lines[line_index]`` with a rebuilt line."""
-        self._lines[line_index] = self._format_line(tokens, inline_comment, had_newline)
-
-    def _format_line(
-        self, tokens: list[str], inline_comment: str, had_newline: bool
-    ) -> str:
-        """
-        Assemble *tokens* back into a single text line, re-attaching any inline
-        comment and restoring the trailing newline if the original had one.
-        """
-        rebuilt = " ".join(tokens)
-        if inline_comment:
-            rebuilt += " " + inline_comment.lstrip()
-        if had_newline and not rebuilt.endswith("\n"):
-            rebuilt += "\n"
-        return rebuilt

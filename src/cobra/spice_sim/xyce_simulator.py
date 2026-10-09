@@ -16,9 +16,9 @@ from cobra.spice_sim.base_simulator import (
     SimulationResult,
     SimulatorError,
 )
-from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+from cobra.spice_sim.netlist_parsers.netlist import Netlist
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
-from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
+from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vector_fit import vector_fit
 
 logger = logging.getLogger(__name__)
@@ -26,82 +26,11 @@ logger = logging.getLogger(__name__)
 #: Default MPI rank count for parallel Xyce runs: one per available core.
 DEFAULT_XYCE_PROCESSES: int = os.cpu_count() or 1
 
-_PRINT_FILE_RE = re.compile(r"\bfile=(\S+)", re.IGNORECASE)
-
-# ---------------------------------------------------------------------------
-# Xyce-specific simulation metadata
-# ---------------------------------------------------------------------------
-
-_XYCE_METADATA: dict[SimulationType, SimulationTypeMetadata] = {
-    SimulationType.AC: SimulationTypeMetadata(
-        positional_param_names=["sweep_type", "points", "start_freq", "stop_freq"],
-        positional_param_descriptions={
-            "sweep_type": "Frequency sweep spacing: LIN (linear), DEC (decade), or OCT (octave).",
-            "points":     "Number of frequency points in the sweep.",
-            "start_freq": "Start frequency (e.g. 100G for 100 GHz).",
-            "stop_freq":  "Stop frequency (e.g. 200G for 200 GHz).",
-        },
-        positional_param_defaults={"sweep_type": "LIN", "points": "500", "start_freq": "1G", "stop_freq": "10G"},
-    ),
-    SimulationType.HB: SimulationTypeMetadata(
-        positional_param_names=["frequencies"],
-        positional_param_descriptions={
-            "frequencies": "Space-separated list of fundamental frequencies for the Harmonic Balance analysis.\n"
-                           "Single tone: e.g. 130G. Multi-tone: e.g. 95E9 10E9.",
-        },
-        positional_param_defaults={"frequencies": "1G"},
-        options_category="hbint",
-        options_param_descriptions={
-            "numfreq":        "Number of harmonic frequencies (e.g. 3 = DC + 2 harmonics).",
-            "startupperiods": "Transient startup periods before HB steady-state. Increase if convergence is difficult.",
-            "freq":           "Fundamental frequency (alternative to the positional .HB argument).",
-            "maxsteps":       "Maximum Newton iterations per HB solve.",
-            "abstol":         "Absolute convergence tolerance for the HB residual.",
-            "reltol":         "Relative convergence tolerance for the HB residual.",
-            "voltlim":        "Enable voltage limiting during HB Newton iterations (0 = off, 1 = on).",
-        },
-    ),
-    SimulationType.TRAN: SimulationTypeMetadata(
-        positional_param_names=["step", "stop_time", "start_time", "max_step"],
-        positional_param_descriptions={
-            "step":       "Print/output time step.",
-            "stop_time":  "Total simulation stop time.",
-            "start_time": "Time at which output begins (default 0). Everything before it is the\n"
-                          "start-up transient and is left out of the spectrum, so raise it until\n"
-                          "the circuit has settled. stop_time - start_time sets the FFT resolution\n"
-                          "and should be a whole number of signal periods.",
-            "max_step":   "Maximum internal time step (optional).",
-        },
-        positional_param_defaults={"step": "1n", "stop_time": "100n", "start_time": "0", "max_step": "1n"},
-        options_category="timeint",
-        options_param_descriptions={
-            "abstol":  "Absolute local truncation error tolerance for the time integrator.",
-            "reltol":  "Relative local truncation error tolerance for the time integrator.",
-            "method":  "Integration method: gear or trap (trapezoid).",
-            "maxord":  "Maximum order for the Gear integration method (1–6).",
-            "newlte":  "Enable new local truncation error algorithm (0 = off, 1 = on).",
-            "delmax":  "Maximum allowed internal time step size.",
-        },
-    ),
-    SimulationType.DC: SimulationTypeMetadata(
-        positional_param_names=["src_name", "start", "stop", "incr"],
-        positional_param_descriptions={
-            "src_name": "Name of the voltage/current source to sweep.",
-            "start":    "Sweep start value.",
-            "stop":     "Sweep stop value.",
-            "incr":     "Sweep increment step.",
-        },
-        positional_param_defaults={"src_name": "V1", "start": "0", "stop": "1", "incr": "0.01"},
-    ),
-}
+# Output and solver directives that belong to one analysis; injecting another drops them.
+_ANALYSIS_COMPANIONS = frozenset({".PRINT", ".OPTIONS", ".MEASURE", ".FOUR"})
 
 class XyceSimulator(BaseSimulator):
-    netlist_parser: BaseNetlistParser
-
-    @classmethod
-    def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
-        """Return Xyce-specific metadata for *sim_type*."""
-        return _XYCE_METADATA.get(sim_type, SimulationTypeMetadata())
+    netlist_parser: ClassVar[XyceNetlistParser] = XyceNetlistParser()
 
     _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
@@ -159,8 +88,6 @@ class XyceSimulator(BaseSimulator):
             raise ConfigurationError(
                 f"parallel_xyce_processes must be at least 1, got {parallel_xyce_processes}"
             )
-        # A parser holds the state of one netlist, so every simulator gets its own.
-        self.netlist_parser = XyceNetlistParser()
         self.xyce_command = xyce_command
         self.parallel = parallel_xyce
         self.enforce_passivity = enforce_passivity
@@ -170,22 +97,58 @@ class XyceSimulator(BaseSimulator):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
         return vector_fit(ntwk, name=name, enforce_passivity=self.enforce_passivity)
 
-    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
-        results_dir = os.path.dirname(netlist_name)
-        netlist_base = os.path.basename(netlist_name)  # e.g. "circuit_hb.cir"
+    def prepare_netlist(
+        self, netlist: Netlist, sim_type: SimulationType, sim_params: dict[str, str]
+    ) -> Netlist:
+        if any(d.simulation_type is sim_type for d in netlist.simulation_directives):
+            return netlist  # the existing directive is assumed correct
 
-        # --- Determine expected output files from the netlist -----------------
-        parser = XyceNetlistParser().from_file(netlist_name)
-        sim_type = parser.simulation_type  # SimulationType enum
+        # Merge the given params over the built-in defaults
+        meta = self.get_simulation_metadata(sim_type)
+        merged = {**meta.positional_param_defaults, **sim_params}
+
+        # Build the new directive line(s). A param value may contain several
+        # space-separated tokens (e.g. HB frequencies = "95E9 10E9").
+        tokens = [sim_type.value]
+        for param_name in meta.positional_param_names:
+            tokens.extend(merged.get(param_name, "").split())
+        lines = [" ".join(tokens) + "\n"]
+
+        # The output files run_simulation collects: Touchstone for AC, CSV otherwise.
+        if sim_type is SimulationType.AC:
+            lines.append(".LIN format=touchstone sparcalc=1\n")
+        elif sim_type in (SimulationType.HB, SimulationType.TRAN):
+            probes = " ".join(f"V({n}) I(V{n})" for n in netlist.probe_nodes)
+            if probes:
+                lines.append(f".PRINT {sim_type.name} format=csv {probes}\n")
+        injected = netlist.parser.make_statements("".join(lines))
+
+        # Drop the top-level directives of other analyses, each with its
+        # continuation lines, and insert the new ones before .END.
+        parser = self.netlist_parser
+        dropped = parser.analysis_keywords | parser.modifier_keywords | _ANALYSIS_COMPANIONS
+        kept = [
+            statement for statement in netlist.statements
+            if statement.scope is not None or statement.keyword not in dropped
+        ]
+        end = next(
+            (i for i, s in enumerate(kept) if s.keyword == ".END" and s.scope is None),
+            len(kept),
+        )
+        return netlist.with_statements([*kept[:end], *injected, *kept[end:]])
+
+    def run_simulation(self, netlist_path: str, netlist: Netlist) -> SimulationResult | None:
+        results_dir = os.path.dirname(netlist_path)
+        netlist_base = os.path.basename(netlist_path)  # e.g. "circuit_hb.cir"
+        sim_type = netlist.simulation_type
 
         # Collect any custom filenames declared via ".PRINT ... file=X"
-        custom_print_files: list[str] = []
-        for line in parser.lines:
-            stripped = line.strip()
-            if stripped.lower().startswith(".print"):
-                m = _PRINT_FILE_RE.search(stripped)
-                if m:
-                    custom_print_files.append(os.path.join(results_dir, m.group(1)))
+        custom_print_files = [
+            os.path.join(results_dir, value)
+            for directive in netlist.print_directives
+            for key, value in directive.kv_params.items()
+            if key.lower() == "file"
+        ]
 
         # --- Run Xyce --------------------------------------------------------
         parallel_command = (

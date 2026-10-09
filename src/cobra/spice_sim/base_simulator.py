@@ -3,15 +3,15 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import pandas as pd
     import skrf as rf
 
-    from cobra.spice_sim.netlist_parsers.netlist_parser import BaseNetlistParser
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
+    from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
+    from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 
 
 class SimulatorError(RuntimeError):
@@ -43,24 +43,36 @@ class SimulationResult:
     dataframes: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
-@dataclass
 class BaseSimulator(ABC):
-    netlist_parser: BaseNetlistParser
+    #: Parser for this simulator's netlist dialect; every subclass sets one.
+    netlist_parser: ClassVar[NetlistParser]
 
     @classmethod
-    def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:  # noqa: ARG003
+    def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
         """Return simulator-specific metadata for *sim_type*.
 
-        Override in concrete simulator subclasses to provide parameter names,
-        descriptions, defaults, and ``.options`` category information.
-        The base implementation returns an empty metadata object so that
-        unknown simulators degrade gracefully.
+        Parameter names, descriptions, defaults, and ``.options`` category
+        information come from the simulator's netlist parser, since they
+        describe the arguments of its analysis directives.
         """
-        return SimulationTypeMetadata()
+        return cls.netlist_parser.analysis_metadata(sim_type)
 
     @abstractmethod
-    def run_simulation(self, netlist_name: str) -> SimulationResult | None:
-        """Run the simulator on *netlist_name* and return a :class:`SimulationResult`.
+    def prepare_netlist(
+        self, netlist: Netlist, sim_type: SimulationType, sim_params: dict[str, str]
+    ) -> Netlist:
+        """Return *netlist* ready to run a *sim_type* analysis.
+
+        Returns *netlist* itself when it already declares that analysis;
+        otherwise a new netlist with the directive (from *sim_params*, falling
+        back to the metadata defaults) and the output requests the simulator
+        needs to produce a result for it.
+        """
+
+    @abstractmethod
+    def run_simulation(self, netlist_path: str, netlist: Netlist) -> SimulationResult | None:
+        """Run the simulator on the file *netlist_path*, whose parsed content is *netlist*,
+        and return a :class:`SimulationResult`.
 
         Returns ``None`` if the simulation failed (non-zero exit code or no
         output files found).

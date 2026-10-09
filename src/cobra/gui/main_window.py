@@ -63,7 +63,6 @@ from cobra.optimizers.design_goal_collection import (
 )
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim import hb_spectrum
-from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.surrogate_metadata import FeasibilityConstraints, SurrogateMetadata
@@ -1313,8 +1312,8 @@ class MainWindow(QMainWindow):
                 )
             )
 
-        parser = XyceNetlistParser().from_file(config.netlist)
-        self.goals = build_design_goals(config.design_goals, parser)
+        netlist = self._simulator_cls.netlist_parser.parse_file(config.netlist)
+        self.goals = build_design_goals(config.design_goals, netlist)
         for goal in self.goals:
             self.goal_list.addItem(self._goal_label(goal))
         self.loss_history = {index: [] for index in range(len(self.goals))}
@@ -1394,16 +1393,16 @@ class MainWindow(QMainWindow):
     def parse_and_update_components(self, netlist_path: str):
         """Parse netlist and update UI with detected components, simulation type and port count."""
         try:
-            parser = XyceNetlistParser().from_file(netlist_path)
-            components = parser.components
+            netlist = self._simulator_cls.netlist_parser.parse_file(netlist_path)
+            components = netlist.components
 
             # Update available parameters (full list for port count — not gated by sim type)
-            sim_type = parser.simulation_type
-            self._num_ports = parser.num_ports
-            self._parsed_directives = list(parser.simulation_directives)
-            self._parsed_options = dict(parser.options_directives)
-            self._port_sources = dict(parser.port_sources)
-            self._probe_nodes = list(parser.probe_nodes)
+            sim_type = netlist.simulation_type
+            self._num_ports = netlist.num_ports
+            self._parsed_directives = list(netlist.simulation_directives)
+            self._parsed_options = dict(netlist.options_directives)
+            self._port_sources = dict(netlist.port_sources)
+            self._probe_nodes = list(netlist.probe_nodes)
             self._netlist_sim_type = sim_type
             self._populate_analysis_point_combo()
             self._populate_spectrum_input_port_combo()
@@ -1549,7 +1548,7 @@ class MainWindow(QMainWindow):
             # Pull values from the parsed directive that matches this type
             parsed_values: dict = {}
             for d in self._parsed_directives:
-                if SimulationType.from_directive(d.directive) is sim_type:
+                if d.simulation_type is sim_type:
                     for i, name in enumerate(param_names):
                         if i < len(d.positional):
                             # For the last named param, absorb all remaining positional
@@ -1768,18 +1767,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No netlist", "Select a netlist file first")
             return
         try:
-            # We use XyceNetlistParser to identify valid targets
-            # Since parser needs instance but we just want to scan, we instantiate it
-            parser = XyceNetlistParser().from_file(path)
+            # The simulator's netlist parser identifies the valid targets
+            netlist = self._simulator_cls.netlist_parser.parse_file(path)
             # Find R, C, L, V, I elements
-            prospects = [elem.name for elem in parser.list_elements(["R", "C", "L", "V", "I"])]
+            prospects = [elem.name for elem in netlist.list_elements(["R", "C", "L", "V", "I"])]
 
             # Also expose key=value parameters on X instances whose subcircuit
-            # is defined inline (via .SUBCKT). These are treated as netlist
-            # variables, not surrogate model inputs.
-            inline_names = parser.inline_subckt_names
-            for elem in parser.list_elements(["X"]):
-                if elem.model in inline_names:
+            # is defined inline (via .SUBCKT), i.e. that are not surrogate
+            # components. These are netlist variables, not model inputs.
+            components = netlist.components
+            for elem in netlist.list_elements(["X"]):
+                if elem.name not in components:
                     prospects.extend(f"{elem.name}:{key}" for key in elem.params)
 
             # Filter out already added parameters

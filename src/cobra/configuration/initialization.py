@@ -15,14 +15,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cobra.configuration.configuration import BackendConfig, ConfigurationError, RunConfiguration
-from cobra.configuration.inspection import NetlistReport, build_netlist_report, load_netlist_parser
+from cobra.configuration.inspection import NetlistReport, build_netlist_report, load_netlist
 from cobra.spice_sim.simulation_type import SimulationType
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from cobra.spice_sim.netlist_parsers.netlist_parser import SimulationDirective
-    from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist, SimulationDirective
 
 # Positional slots that select *what* is swept rather than how; the GUI hides them too.
 _STRUCTURAL_PARAMETERS = {"sweep_type", "src_name"}
@@ -48,17 +47,14 @@ def _directive_parameters(directive: SimulationDirective, names: list[str]) -> d
     return {name: value for name, value in values.items() if name not in _STRUCTURAL_PARAMETERS}
 
 
-def _simulation_parameters(parser: XyceNetlistParser) -> dict[str, dict[str, str]]:
-    # Imported here: the simulator module imports the netlist parser, which imports this package.
-    from cobra.spice_sim.xyce_simulator import XyceSimulator
-
+def _simulation_parameters(netlist: Netlist) -> dict[str, dict[str, str]]:
     parameters: dict[str, dict[str, str]] = {}
-    for directive in parser.simulation_directives:
-        simulation_type = SimulationType.from_directive(directive.directive)
-        # Match the directive itself: .LIN maps to AC as well but carries no sweep.
-        if directive.directive.upper() != simulation_type.value or simulation_type.value in parameters:
+    for directive in netlist.simulation_directives:
+        simulation_type = directive.simulation_type
+        # Only analyses: .LIN maps to AC as well but carries no sweep.
+        if not directive.is_analysis or simulation_type.value in parameters:
             continue
-        names = XyceSimulator.get_simulation_metadata(simulation_type).positional_param_names
+        names = netlist.parser.analysis_metadata(simulation_type).positional_param_names
         values = _directive_parameters(directive, names)
         if values:
             parameters[simulation_type.value] = values
@@ -66,17 +62,17 @@ def _simulation_parameters(parser: XyceNetlistParser) -> dict[str, dict[str, str
 
 
 def _component_models(
-    parser: XyceNetlistParser, netlist: Path, models: Mapping[str, str]
+    parsed: Netlist, netlist: Path, models: Mapping[str, str]
 ) -> dict[str, str]:
-    unknown = sorted(set(models) - set(parser.components))
+    unknown = sorted(set(models) - set(parsed.components))
     if unknown:
-        available = ", ".join(sorted(parser.components)) or "none"
+        available = ", ".join(sorted(parsed.components)) or "none"
         raise ConfigurationError(
             f"Unknown component(s) {', '.join(unknown)} in model mapping; "
             f"components in {netlist.name}: {available}"
         )
     resolved = {name: str(Path(path).expanduser().resolve()) for name, path in models.items()}
-    for name, component in parser.components.items():
+    for name, component in parsed.components.items():
         touchstone = component.params.get("TSTONEFILE")
         if name in resolved or not touchstone:
             continue
@@ -114,18 +110,18 @@ def initial_configuration(
     from cobra.configuration.config_runner import OPTIMIZER_REGISTRY, SIMULATOR_REGISTRY
 
     netlist_path = Path(netlist).expanduser().resolve()
-    parser = load_netlist_parser(netlist_path)
-    component_models = _component_models(parser, netlist_path, models or {})
+    parsed = load_netlist(netlist_path)
+    component_models = _component_models(parsed, netlist_path, models or {})
     defaults = RunConfiguration(netlist=str(netlist_path))
     configuration = RunConfiguration(
         netlist=str(netlist_path),
         component_models=component_models,
-        simulation_parameters=_simulation_parameters(parser),
+        simulation_parameters=_simulation_parameters(parsed),
         optimizer=_default_backend(defaults.optimizer.name, OPTIMIZER_REGISTRY),
         simulator=_default_backend(defaults.simulator.name, SIMULATOR_REGISTRY),
     )
     return InitialConfiguration(
         configuration=configuration,
-        unmapped_components=sorted(set(parser.components) - set(component_models)),
-        goal_parameters=_goal_parameters(build_netlist_report(parser, netlist_path)),
+        unmapped_components=sorted(set(parsed.components) - set(component_models)),
+        goal_parameters=_goal_parameters(build_netlist_report(parsed, netlist_path)),
     )
