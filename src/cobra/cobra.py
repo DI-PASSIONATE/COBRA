@@ -476,9 +476,11 @@ class COBRA:
         if self.em_surrogate_stage is not None:
             self.em_surrogate_stage.run(context)
 
-        # Perform circuit-level simulation
+        # Perform circuit-level simulation; the stage records its vector fitting separately
         t3 = time.time()
+        fitting_before = context.times["vector_fitting"]
         self.circuit_simulation_stage.run(context)
+        fitting = context.times["vector_fitting"] - fitting_before
 
         # Check design goals
         t4 = time.time()
@@ -488,7 +490,7 @@ class COBRA:
         # Log times for each stage; the run-wide context sums them up in absorb_trial
         context.times["optimizer"] += t2 - t1
         context.times["em_surrogate"] += t3 - t2
-        context.times["circuit_simulation"] += t4 - t3
+        context.times["circuit_simulation"] += t4 - t3 - fitting
         context.times["design_goal_checking"] += t5 - t4
         context.times["total_time"] += t5 - t1
         return context
@@ -740,6 +742,7 @@ class COBRA:
         stages = [
             ("optimizer", "optimizer"),
             ("surrogate", "em_surrogate"),
+            ("vector fitting", "vector_fitting"),
             ("circuit simulation", "circuit_simulation"),
             ("goal checking", "design_goal_checking"),
         ]

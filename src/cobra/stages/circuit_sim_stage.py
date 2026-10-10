@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from typing import TYPE_CHECKING
 
 from cobra.optimizers.design_goal import DesignGoal
@@ -43,15 +44,18 @@ class CircuitSimulationStage(COBRABaseStage):
         ntwks: list[rf.Network] = context.predicted_networks
         results_dir = context.results_dir
 
-        # Preprocess surrogate models (e.g. vector fitting)
-        for n in ntwks:
-            out_name = os.path.join(results_dir, n.name or "cobra_output")
-            try:
+        # Preprocess surrogate models (e.g. vector fitting), timed as its own stage
+        fit_started = time.time()
+        try:
+            for n in ntwks:
+                out_name = os.path.join(results_dir, n.name or "cobra_output")
                 self.simulator.preprocess_ntwk(n, name=out_name)
-            except VectorFitError as exc:
-                logger.warning("%s; the design goals are penalised so the optimizer avoids these parameters", exc)
-                context.simulation_results = {}
-                return context
+        except VectorFitError as exc:
+            logger.warning("%s; the design goals are penalised so the optimizer avoids these parameters", exc)
+            context.simulation_results = {}
+            return context
+        finally:
+            context.times["vector_fitting"] += time.time() - fit_started
 
         # Determine which simulation types to run:
         # 1. Always run the netlist's native simulation type.

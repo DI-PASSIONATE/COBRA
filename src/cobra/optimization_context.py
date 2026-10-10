@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 STAGE_TIME_KEYS = (
     "optimizer",
     "em_surrogate",
+    "vector_fitting",
     "circuit_simulation",
     "design_goal_checking",
     "em_fine_tuning",
