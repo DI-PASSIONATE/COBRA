@@ -4,10 +4,11 @@
     "X1": "../../models/DavidL-11/tf_octa_c_ports/tf_octa_c_ports.onnx"
   },
   "simulation_parameters": {
-    "AC": {
+    ".AC": {
+      "mode": "lin",
       "points": "500",
-      "from": "1G",
-      "to": "200G"
+      "from": "100G",
+      "to": "170G"
     }
   },
   "optimizer": {
@@ -23,6 +24,7 @@
     "settings": {
       "vacask_command": "vacask",
       "vacask_threads": 1,
+      "vector_fit_max_order": 12,
       "enforce_passivity": false
     }
   },
@@ -96,7 +98,7 @@
   "design_goals": [
     {
       "parameter": "S22_dB",
-      "frequency_range": "130-140ghz",
+      "frequency_range": "122-140ghz",
       "min_value": null,
       "max_value": -10.0,
       "weight": 1.0,
@@ -104,19 +106,21 @@
       "node": null,
       "port": null,
       "source_amplitude": null,
-      "impedance": null
+      "impedance": null,
+      "analysis": "HB"
     },
     {
       "parameter": "S21_dB",
-      "frequency_range": "130-140ghz",
-      "min_value": -3.0,
+      "frequency_range": "122-140ghz",
+      "min_value": -2.0,
       "max_value": null,
       "weight": 1.0,
       "kind": "catalogue",
       "node": null,
       "port": null,
       "source_amplitude": null,
-      "impedance": null
+      "impedance": null,
+      "analysis": "HB"
     }
   ],
   "fine_tuning": {
@@ -125,14 +129,7 @@
     "palace_processes": 16,
     "iterations": 3,
     "optimizer": "reuse",
-    "geometries": {
-      "X1": {
-        "source": "preset",
-        "class_name": "TransformerOcta",
-        "module": "orca.geometry.presets",
-        "file": null
-      }
-    }
+    "geometries": {}
   },
   "schema_version": 1
 }
