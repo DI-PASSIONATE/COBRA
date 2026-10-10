@@ -307,6 +307,10 @@ reported back: Optuna can, gradient descent cannot and rejects any value above
 1. One consequence to be aware of: once the design goals are met, the trials
 already running are still finished, so up to `parallel_trials - 1` extra
 evaluations may be performed.
+With `parallel_trials` above 1 the surrogates are also vector-fitted in that many
+worker processes, each using one BLAS thread, because fits in threads of one
+process cannot overlap. A Python script that runs COBRA this way must start it
+under `if __name__ == "__main__":`, since the worker processes import the script.
 
 The summary's `wall time` is always the run's elapsed time. The per-stage
 percentages beside it are shares of the summed stage times, which measure work

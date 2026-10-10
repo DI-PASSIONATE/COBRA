@@ -1,7 +1,14 @@
+import contextlib
 import logging
+import multiprocessing
 import os
 import time
+from collections.abc import Generator
+from concurrent.futures import ProcessPoolExecutor
+from logging.handlers import QueueHandler, QueueListener
 from typing import TYPE_CHECKING
+
+from threadpoolctl import threadpool_limits
 
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
@@ -16,6 +23,26 @@ if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
 
 logger = logging.getLogger(__name__)
+
+
+class _ToOwnLogger(logging.Handler):
+    """Hand a record from a fitting process to the logger that created it, in this process."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        logging.getLogger(record.name).handle(record)
+
+
+def _init_fitting_process(log_queue: "multiprocessing.Queue", level: int) -> None:
+    """Send every log record of a fitting process back to the run through *log_queue*.
+
+    The process also keeps to one BLAS thread: by default each one starts a thread
+    per core, and the fitting processes together would oversubscribe the machine
+    many times over.
+    """
+    root = logging.getLogger()
+    root.handlers = [QueueHandler(log_queue)]
+    root.setLevel(level)
+    threadpool_limits(limits=1)
 
 
 def goal_band(goals: list[DesignGoal]) -> tuple[float, float] | None:
@@ -39,6 +66,46 @@ class CircuitSimulationStage(COBRABaseStage):
 
     def __init__(self, simulator: BaseSimulator | None = None):
         self.simulator = simulator if simulator is not None else XyceSimulator("Xyce")
+        self._fitting_pool: ProcessPoolExecutor | None = None
+
+    @contextlib.contextmanager
+    def fitting_processes(self, processes: int) -> Generator[None]:
+        """Fit the surrogates in *processes* worker processes while the block runs.
+
+        Vector fitting is mostly Python, so fits of concurrent trials in threads
+        take turns on the GIL and barely overlap. Worker processes fit them in
+        parallel. With fewer than two processes the fits stay in the calling
+        thread. The workers are spawned, not forked, because the run already has
+        threads; a script that runs COBRA this way needs an
+        ``if __name__ == "__main__":`` guard.
+        """
+        if processes < 2:
+            yield
+            return
+        spawn = multiprocessing.get_context("spawn")
+        log_queue = spawn.Queue()
+        listener = QueueListener(log_queue, _ToOwnLogger())
+        listener.start()
+        self._fitting_pool = ProcessPoolExecutor(
+            max_workers=processes,
+            mp_context=spawn,
+            initializer=_init_fitting_process,
+            initargs=(log_queue, logging.getLogger("cobra").getEffectiveLevel()),
+        )
+        try:
+            yield
+        finally:
+            self._fitting_pool.shutdown()
+            self._fitting_pool = None
+            listener.stop()
+            log_queue.close()
+
+    def _preprocess(self, ntwk: "rf.Network", name: str) -> None:
+        """Preprocess *ntwk* in a fitting process, if :meth:`fitting_processes` started them."""
+        if self._fitting_pool is None:
+            self.simulator.preprocess_ntwk(ntwk, name=name)
+        else:
+            self._fitting_pool.submit(self.simulator.preprocess_ntwk, ntwk, name=name).result()
 
     def run(self, context: "OptimizationContext") -> "OptimizationContext":
         ntwks: list[rf.Network] = context.predicted_networks
@@ -49,7 +116,7 @@ class CircuitSimulationStage(COBRABaseStage):
         try:
             for n in ntwks:
                 out_name = os.path.join(results_dir, n.name or "cobra_output")
-                self.simulator.preprocess_ntwk(n, name=out_name)
+                self._preprocess(n, out_name)
         except VectorFitError as exc:
             logger.warning("%s; the design goals are penalised so the optimizer avoids these parameters", exc)
             context.simulation_results = {}

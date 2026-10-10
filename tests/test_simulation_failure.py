@@ -9,6 +9,7 @@ must abort the run.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -139,6 +140,40 @@ def test_a_surrogate_that_cannot_be_fitted_is_a_simulation_failure(tmp_path, cap
     assert context.simulation_results == {}
     assert "did not converge" in caplog.text
     assert context.design_goal_checker.check_goals(context).goal_achieved is False
+
+
+class _ProcessReportingSimulator(_StubSimulator):
+    """Records the process that fitted the network, and logs from it."""
+
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
+        Path(name + ".pid").write_text(str(os.getpid()), encoding="utf-8")
+        logging.getLogger("cobra.spice_sim.vector_fit").warning("fitted in a worker")
+        return name
+
+
+def test_fitting_processes_fit_outside_the_trial_thread(tmp_path, caplog):
+    context = _stage_context(tmp_path)
+    context.predicted_networks = [rf.Network(name="X1")]
+    stage = CircuitSimulationStage(_ProcessReportingSimulator([SimulationResult()]))
+
+    with caplog.at_level(logging.WARNING), stage.fitting_processes(2):
+        context = stage.run(context)
+
+    assert int((tmp_path / "X1.pid").read_text(encoding="utf-8")) != os.getpid()
+    assert "fitted in a worker" in caplog.text
+    assert SimulationType.AC in context.simulation_results
+
+
+def test_a_fit_that_fails_in_a_fitting_process_is_a_simulation_failure(tmp_path, caplog):
+    context = _stage_context(tmp_path)
+    context.predicted_networks = [rf.Network(name="X1")]
+    stage = CircuitSimulationStage(_UnfittableSimulator([]))
+
+    with caplog.at_level(logging.WARNING), stage.fitting_processes(2):
+        context = stage.run(context)
+
+    assert context.simulation_results == {}
+    assert "did not converge" in caplog.text
 
 
 # ---------------------------------------------------------------------------

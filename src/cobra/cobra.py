@@ -310,7 +310,11 @@ class COBRA:
         stop = False
         in_flight: dict[Future[OptimizationContext], OptimizationContext] = {}
 
-        with ThreadPoolExecutor(max_workers=parallel_trials) as executor:
+        # The fitting processes outlive the trial threads, which finish first on exit.
+        with (
+            self.circuit_simulation_stage.fitting_processes(parallel_trials),
+            ThreadPoolExecutor(max_workers=parallel_trials) as executor,
+        ):
             while True:
                 # Keep the pool topped up. ask() and tell() stay on this thread, so
                 # the optimizer never sees concurrent calls. Rejected trials do not
