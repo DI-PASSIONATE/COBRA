@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -156,6 +157,12 @@ def test_failed_run_returns_none(tmp_path, netlist):
 def test_threads_must_be_a_non_negative_integer(threads):
     with pytest.raises(ConfigurationError, match="vacask_threads"):
         VacaskSimulator(vacask_threads=threads)
+
+
+def test_surrogate_thermal_noise_needs_passivity():
+    with pytest.raises(ConfigurationError, match="enforce_passivity"):
+        VacaskSimulator(surrogate_thermal_noise=True)
+    assert VacaskSimulator(enforce_passivity=True, surrogate_thermal_noise=True).surrogate_thermal_noise
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +340,44 @@ def test_a_fit_that_does_not_converge_raises_instead_of_looping(tmp_path, monkey
     with pytest.raises(VectorFitError, match="did not converge in 2 pole relocations"):
         vector_fit_vacask(network, str(tmp_path / "X1"))
     assert VectorFitting._pole_relocation is relocate
+
+
+def _lossy_two_port():
+    """A series L-R with a shunt R: strictly passive, so snp2le builds its noise generator."""
+    import skrf as rf
+
+    media = rf.media.DefinedGammaZ0(rf.Frequency(1, 20, 101, "GHz"), z0=50)
+    return media.inductor(1e-9) ** media.resistor(10) ** media.shunt_resistor(200)
+
+
+@pytest.mark.parametrize("thermal_noise", [True, False])
+def test_surrogate_thermal_noise_adds_a_noisy_generator(tmp_path, thermal_noise):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    path = vector_fit_vacask(
+        _lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, thermal_noise=thermal_noise
+    )
+    text = Path(path).read_text(encoding="utf-8")
+    sources = [line for line in text.splitlines() if line.strip().startswith("Rnz_e")]
+    if thermal_noise:
+        assert len(sources) == 2
+        assert all("noisy=0" not in line for line in sources)
+    else:
+        assert "nz_" not in text
+
+
+def test_a_refused_noise_generator_warns_and_keeps_the_model(tmp_path, monkeypatch, caplog):
+    from snp2le.core import noise
+
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    monkeypatch.setattr(
+        noise, "add_thermal_noise", lambda *_args, **_kwargs: noise.NoiseHealth(False, "thermal noise NOT added: test")
+    )
+    with caplog.at_level("WARNING", logger="cobra.spice_sim.vector_fit"):
+        path = vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, thermal_noise=True)
+    assert "X1 stays noiseless: thermal noise NOT added: test" in caplog.text
+    assert "nz_" not in Path(path).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ from skrf.vectorFitting import VectorFitting
 
 if TYPE_CHECKING:
     from snp2le.core.ir import CircuitIR
+    from snp2le.core.noise import NoiseHealth
 
 logger = logging.getLogger(__name__)
 
@@ -164,13 +165,20 @@ def noiseless_resistors(subcircuit: str) -> str:
 
 
 def vector_fit_vacask(
-    nw: skrf.Network, name: str, enforce_passivity: bool = False, max_order: int = 12
+    nw: skrf.Network,
+    name: str,
+    enforce_passivity: bool = False,
+    max_order: int = 12,
+    thermal_noise: bool = False,
 ) -> str:
     """Model *nw* with snp2le and write it as the VACASK subcircuit ``<basename>_subct`` to ``<name>.inc``.
 
     snp2le's universal mode vector-fits the S-parameters into a lumped-element
     macromodel whose resistors are noiseless (``noisy=0``): they realise poles,
-    not losses.  *max_order* bounds the model order of the fit.  The file is
+    not losses.  With *thermal_noise* snp2le appends a generator of the
+    passive's thermal noise, kT(I - S S^H) at the ports.  It exists only for a
+    strictly passive fit; otherwise the model stays noiseless and a warning is
+    logged.  *max_order* bounds the model order of the fit.  The file is
     self-contained, see :func:`vacask_include`.
     """
     # Imported here: snp2le is only needed by the VACASK backend.
@@ -178,13 +186,18 @@ def vector_fit_vacask(
     from snp2le.core.netlist import render_vacask
     from snp2le.core.state import ConverterState
 
-    state = ConverterState(mode="universal", enforce_passivity=enforce_passivity, max_order=max_order)
+    state = ConverterState(
+        mode="universal", enforce_passivity=enforce_passivity, max_order=max_order, thermal_noise=thermal_noise
+    )
     with _SNP2LE_LOCK, _bounded_pole_relocation(_MAX_POLE_RELOCATIONS):
         result = convert(state, nw)
     if not result.ok:
         raise VectorFitError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
     for message in result.messages:
         logger.debug("snp2le %s: %s", os.path.basename(name), message)
+    noise = cast("NoiseHealth | None", result.noise)
+    if noise is not None and not noise.ok:
+        logger.warning("Surrogate %s stays noiseless: %s", os.path.basename(name), noise.message)
     circuit = cast("CircuitIR", result.ir)
     circuit.name = os.path.basename(name) + "_subct"
     netlist_filename = name + ".inc"

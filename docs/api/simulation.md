@@ -33,16 +33,19 @@ simulator that cannot be started at all (Xyce missing or not executable) raises
 same responsibilities as `XyceSimulator`: it owns a `VacaskNetlistParser`, injects
 or switches analyses in `prepare_netlist`, and `run_simulation` calls
 `vacask -sp -qp -n N` and converts the raw files into a `SimulationResult`.
-Settings: `vacask_command`, `vacask_threads`, `vector_fit_max_order`, `enforce_passivity`.
+Settings: `vacask_command`, `vacask_threads`, `vector_fit_max_order`, `enforce_passivity`,
+`surrogate_thermal_noise`.
 
 - `read_raw(path) -> list[RawPlot]` (`cobra.spice_sim.raw_file`) reads a SPICE raw file;
   it raises `ValueError` for a file it cannot read.
-- `vector_fit_vacask(nw, name, enforce_passivity=False, max_order=12)` (`cobra.spice_sim.vector_fit`)
+- `vector_fit_vacask(nw, name, enforce_passivity=False, max_order=12, thermal_noise=False)` (`cobra.spice_sim.vector_fit`)
   models a network with [snp2le](https://github.com/iic-jku/snp2le) (universal mode) and
   writes the VACASK subcircuit `<basename>_subct` to `<name>.inc`; it returns the file name.
   `vacask_include(subcircuit_text)` makes that text self-contained: `ground GND`, the
   `load` lines it needs, and `model` bindings inside the subcircuit. All resistors are
-  `noisy=0`. The Xyce path still uses scikit-rf's SPICE writer.
+  `noisy=0`; with `thermal_noise` snp2le adds a generator of the passive's thermal noise
+  (strictly passive fits only, otherwise a warning is logged). The Xyce path still uses
+  scikit-rf's SPICE writer.
 - `add_port_signals(frame, resistances)` (`cobra.spice_sim.vacask_simulator`) adds
   `V(<src>) = R*I(<src>)` and `I(V<src>) = I(<src>)` to an HB or transient table, so
   each port is a probe point named after its source.

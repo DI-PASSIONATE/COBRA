@@ -209,6 +209,7 @@ analysis the chosen simulator cannot run are rejected before the run starts.
 | | `vacask_threads` | `1` | `vacask -n N`; `0` = auto (`OMP_NUM_THREADS`); keep `1` with `parallel_trials` above 1 |
 | | `vector_fit_max_order` | `12` | Highest model order snp2le may use when it fits a surrogate (integer, at least 2) |
 | | `enforce_passivity` | `false` | Enforce passivity on the vector fit |
+| | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity` |
 
 VACASK netlists use VACASK analysis names as `simulation_parameters` keys
 (`"AC"`, `"HB"`, `"TRAN"`, `"NOISE"`, `"HBNOISE"`) and VACASK parameter names
@@ -273,7 +274,9 @@ COBRA sets the input port to `AC 1` and every other AC magnitude to 0. Xyce's po
 are noiseless, so the noise figure is `F = 1 + INOISE / (4 k T0 z0)` with the input
 port's `z0`: the output port terminates the circuit and is left out, as with VACASK.
 The vector-fitted surrogates are noiseless in both simulators (in the Xyce SPICE
-subcircuit every resistor is written as a conductance controlled by its own voltage).
+subcircuit every resistor is written as a conductance controlled by its own voltage),
+unless VACASK's `surrogate_thermal_noise` adds their thermal noise (see
+[VACASK Simulator](../advanced/vacask.md#surrogate-noise)).
 
 `node` must be a probe node and `port` a port of the netlist, spelled exactly as
 `cobra parse` lists them: names are case-sensitive, so `OUT` and `Out` differ.

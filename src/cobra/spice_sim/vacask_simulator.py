@@ -109,6 +109,17 @@ class VacaskSimulator(BaseSimulator):
                 "active behaviour in the circuit simulator."
             ),
         ),
+        CobraSetting(
+            name="surrogate_thermal_noise",
+            dtype=bool,
+            default=False,
+            description=(
+                "Add the thermal noise of the vector-fitted surrogates (kT(I - S S^H) at\n"
+                "their ports), so noise figures include their losses. Requires\n"
+                "enforce_passivity. A fit that is not strictly passive stays noiseless\n"
+                "and COBRA warns."
+            ),
+        ),
     ]
 
     def __init__(
@@ -117,6 +128,7 @@ class VacaskSimulator(BaseSimulator):
         vacask_threads: int = 1,
         enforce_passivity: bool = False,
         vector_fit_max_order: int = 12,
+        surrogate_thermal_noise: bool = False,
     ):
         if isinstance(vacask_threads, bool) or not isinstance(vacask_threads, int):
             raise ConfigurationError("vacask_threads must be an integer")
@@ -134,11 +146,21 @@ class VacaskSimulator(BaseSimulator):
                 f"vector_fit_max_order must be an integer of at least 2, got {vector_fit_max_order!r}"
             )
         self.vector_fit_max_order = vector_fit_max_order
+        if surrogate_thermal_noise and not enforce_passivity:
+            raise ConfigurationError(
+                "surrogate_thermal_noise needs enforce_passivity=true: "
+                "snp2le builds the noise generator only for a strictly passive fit"
+            )
+        self.surrogate_thermal_noise = surrogate_thermal_noise
 
     def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # snp2le models the S-parameters as a VACASK subcircuit in <name>.inc.
         return vector_fit_vacask(
-            ntwk, name=name, enforce_passivity=self.enforce_passivity, max_order=self.vector_fit_max_order
+            ntwk,
+            name=name,
+            enforce_passivity=self.enforce_passivity,
+            max_order=self.vector_fit_max_order,
+            thermal_noise=self.surrogate_thermal_noise,
         )
 
     # -------------------------------------------------------------------------

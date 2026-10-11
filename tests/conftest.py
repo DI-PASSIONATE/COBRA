@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -62,6 +63,23 @@ def _isolate_cobra_logging():
             target.handlers[:] = handlers
             target.setLevel(level)
         logger.propagate = propagate
+
+
+@pytest.fixture
+def window():
+    """A COBRA main window on Qt's offscreen platform; skipped without PySide6."""
+    # Imported here, not at collection: test_cli checks the CLI never loads Qt.
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from cobra.gui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    main_window = MainWindow()
+    yield main_window
+    main_window.close()
+    app.processEvents()
 
 
 def netlist_path(name: str) -> Path:

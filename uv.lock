@@ -296,7 +296,7 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.8.0.2" },
     { name = "qtawesome", specifier = ">=1.4.2" },
     { name = "scikit-rf", specifier = ">=1.0" },
-    { name = "snp2le", specifier = ">=0.1.9" },
+    { name = "snp2le", specifier = ">=0.1.11" },
     { name = "threadpoolctl", specifier = ">=3.5" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
@@ -3031,7 +3031,7 @@ wheels = [
 
 [[package]]
 name = "snp2le"
-version = "0.1.9"
+version = "0.1.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -3043,9 +3043,9 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/35/dc7e6c496ce4f5bf39c286c469d438adeba53bfe2e684ce8748d2c3705d8/snp2le-0.1.9.tar.gz", hash = "sha256:9c59d362fb41f94ecb1f9d42a7b91150018678bd65d576b4ec304b296dfa479e", size = 405140, upload-time = "2026-09-04T05:59:37.903Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/de/000749816b2c8da4e4c763b438f7ee225a4172e631f77b0c18d30da0990e/snp2le-0.1.11.tar.gz", hash = "sha256:b3f7d912326804ece3b2e25faeea5d4980d323724f7901c85eca958a4b214866", size = 495439, upload-time = "2026-10-11T09:21:16.101Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/3d/e1c062795b0d5ba34ae1e9956649d26be0173552939a181ec8d7a10169a4/snp2le-0.1.9-py3-none-any.whl", hash = "sha256:1d0a20b2c6241cec9356c37b8f08aafff3dc3afb951665d99c444d6d71a71e69", size = 382324, upload-time = "2026-09-04T05:59:36.517Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/bd/0034aa6e82064c907ebe15c9993d17ecfe383fdf0e8c91da9b4fffa83d49/snp2le-0.1.11-py3-none-any.whl", hash = "sha256:974965e612a1c1f93c56d8e0d79c56c62b009f6c6ab129dfb438d957c88446af", size = 438784, upload-time = "2026-10-11T09:21:14.543Z" },
 ]
 
 [[package]]

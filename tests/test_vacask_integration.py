@@ -169,6 +169,55 @@ def test_noise_figure_of_a_matched_pad_is_its_loss(tmp_path):
     np.testing.assert_allclose(frame["NF"], 6.0, atol=1e-3)
 
 
+_SURROGATE_BETWEEN_PORTS = """Surrogate between two 50 Ohm ports
+ground 0
+load "resistor.osdi"
+model r resistor
+model vsource vsource
+include "X1.inc"
+vp1 (a1 0) vsource dc=0 mag=1
+rp1 (a1 in) r r=50
+X1 (in out) X1_subct
+vp2 (a2 0) vsource dc=0
+rp2 (a2 out) r r=50
+control
+  options temp=16.85
+  analysis sp1 acsp ports=["vp1", "rp1", "vp2", "rp2"] from=1G to=20G mode="lin" points=1
+endc
+"""
+
+
+@pytest.mark.parametrize("thermal_noise", [True, False], ids=["thermal-noise", "noiseless"])
+def test_surrogate_thermal_noise_gives_the_noise_figure_of_a_passive(tmp_path, thermal_noise):
+    """At T0 a passive two-port fed from a matched source has F = 1 / G_av; without noise F = 1."""
+    from snp2le.core.engine import convert
+    from snp2le.core.state import ConverterState
+
+    media = rf.media.DefinedGammaZ0(rf.Frequency(1, 20, 101, "GHz"), z0=50)
+    network = media.inductor(1e-9) ** media.resistor(10) ** media.shunt_resistor(200)
+    vector_fit_vacask(network, str(tmp_path / "X1"), enforce_passivity=True, thermal_noise=thermal_noise)
+    simulator = VacaskSimulator(VACASK or "vacask")
+    deck = tmp_path / "surrogate.sim"
+    deck.write_text(_SURROGATE_BETWEEN_PORTS)
+    netlist = simulator.netlist_parser.parse_file(deck)
+    params = {"out": "out", "from": "2G", "to": "18G", "mode": "lin", "points": "4"}
+    prepared = simulator.prepare_netlist(netlist, SimulationType.NOISE, params)
+    path = tmp_path / "surrogate_noise.sim"
+    prepared.save(path)
+    result = simulator.run_simulation(str(path), prepared)
+    assert result is not None
+    [frame] = result.dataframes.values()
+
+    if thermal_noise:
+        model = np.asarray(convert(ConverterState(mode="universal", enforce_passivity=True, max_order=12), network).model_s)
+        available_gain = np.abs(model[:, 1, 0]) ** 2 / (1 - np.abs(model[:, 1, 1]) ** 2)
+        expected = np.interp(frame["FREQ"], network.f, -10 * np.log10(available_gain))
+    else:
+        expected = np.zeros(len(frame))
+    assert len(frame) > 1
+    np.testing.assert_allclose(frame["NF"], expected, atol=1e-3)
+
+
 def _supports_hbnoise(tmp_path) -> bool:
     deck = tmp_path / "probe.sim"
     deck.write_text('probe\nground 0\nmodel vsource vsource\nv1 (a 0) vsource dc=0\ncontrol\n'

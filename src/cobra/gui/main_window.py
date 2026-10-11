@@ -1286,9 +1286,14 @@ class MainWindow(QMainWindow):
         self.opt_params.clear()
         self.param_table.setRowCount(0)
         # The netlist is read in the configured simulator's dialect.
+        # Selected now, so the combo shows the dialect even if a later check fails.
         simulator_index = self.simulator_combo.findText(config.simulator.name)
         if simulator_index >= 0:
             self._simulator_cls = self.simulator_combo.itemData(simulator_index)
+            self.simulator_combo.blockSignals(True)
+            self.simulator_combo.setCurrentIndex(simulator_index)
+            self.simulator_combo.blockSignals(False)
+            self.update_simulator_options()
         # Mapped names that are subcircuits rather than instances are surrogates too.
         self._surrogate_masters = set(config.component_models)
         self.netlist_edit.setText(config.netlist)
@@ -2044,6 +2049,7 @@ class MainWindow(QMainWindow):
 
         self.worker = OptimizationWorker(configured_run)
         self.worker.progress.connect(self.on_progress)
+        self.worker.result.connect(self.on_result)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
@@ -2095,6 +2101,19 @@ class MainWindow(QMainWindow):
         else:
             self._update_progress_display(iteration, max_iterations)
 
+        self._show_context(context, record_loss=True)
+
+    @Slot(object)
+    def on_result(self, context: OptimizationContext):
+        """Show the run's final context.
+
+        Without the goals met it holds the best parameters found, re-simulated,
+        rather than the last trial, which may even have failed.
+        """
+        self._show_context(context, record_loss=False)
+
+    def _show_context(self, context: OptimizationContext, record_loss: bool) -> None:
+        """Show *context*'s parameters, goals and plots; *record_loss* extends the loss history."""
         # 1. Update Parameters Table (Current Values)
         net_params = context.netlist_parameters
         model_params = context.model_parameters
@@ -2189,7 +2208,7 @@ class MainWindow(QMainWindow):
         # 3. Update Loss Plot
         losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in current_goals]
 
-        if self.loss_history:  # Ensure loss history is initialized
+        if record_loss and self.loss_history:  # Ensure loss history is initialized
             for i, loss in enumerate(losses):
                 if i in self.loss_history:
                     self.loss_history[i].append(float(np.asarray(loss).reshape(-1)[0]))

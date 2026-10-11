@@ -100,6 +100,10 @@ The GUI displays:
   run is paused and green once it has finished; the status bar reports the end
   of the run.
 
+When the run ends, the parameters, goals and plots switch to its final result:
+the trial that met the goals or, if none did, the best parameters found,
+re-simulated (single-objective runs). The loss plot keeps one point per iteration.
+
 When a run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels, and **Advanced -> Transient Analysis** for the FFT window.
 
 ## Outputs

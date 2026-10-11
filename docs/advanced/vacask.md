@@ -26,7 +26,8 @@ optional executable. Select the backend in the configuration:
     "vacask_command": "vacask",
     "vacask_threads": 1,
     "vector_fit_max_order": 12,
-    "enforce_passivity": false
+    "enforce_passivity": false,
+    "surrogate_thermal_noise": false
   }
 }
 ```
@@ -37,6 +38,7 @@ optional executable. Select the backend in the configuration:
 | `vacask_threads` | `1` | Threads for VACASK's device evaluation and linear solver (`vacask -n N`); `0` lets VACASK pick (honours `OMP_NUM_THREADS`). Keep `1` when `parallel_trials` is above 1 |
 | `vector_fit_max_order` | `12` | Highest model order snp2le may use for a surrogate (at least 2); see [Surrogate file](#surrogate-file) |
 | `enforce_passivity` | `false` | Enforce passivity on the vector-fitted surrogate; slower pre-processing, no non-physical gain |
+| `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise, so noise figures include their losses; requires `enforce_passivity`. See [Surrogate noise](#surrogate-noise) |
 
 COBRA runs `vacask -sp -qp -n N deck.sim`, so the `postprocess` steps of the
 `control` block are skipped. Use `--simulator VacaskSimulator` with
@@ -344,13 +346,25 @@ The other ports' resistors are terminations and are excluded, as in Spectre and
 ADS. A matched 6 dB pad gives NF = 6.000 dB. The source-port resistor must be
 noisy (the default).
 
-!!! warning "Surrogate losses are noiseless"
-    Vector-fit resistors are written with `noisy=0`, so passive losses inside
-    surrogate blocks add no noise. The NF is optimistic by roughly the loss of
-    the surrogate blocks in front of the first gain stage. snp2le's structure
-    models (balun, inductor-pi, MIM cap, t-line RLGC, Wilkinson, branch-line)
-    keep physically noisy losses; using them is planned as a per-component
-    option and is not implemented yet.
+### Surrogate noise
+
+Vector-fit resistors are written with `noisy=0`: they place poles, they do not
+model loss. By default surrogate blocks are therefore noiseless, and the NF is
+optimistic by roughly the loss of the surrogate blocks in front of the first
+gain stage.
+
+With `"surrogate_thermal_noise": true`, snp2le appends a noise generator to each
+surrogate subcircuit: one 0.25 ohm resistor per port (the only noisy elements)
+drives a spectral factor of the fit, so the ports emit the noise of a passive
+at the simulation temperature, kT(I - S S^H) (Bosma). The S-parameters and the
+operating point stay unchanged. The generator exists only for a strictly passive
+fit, so the setting requires `"enforce_passivity": true` and COBRA rejects the
+configuration otherwise. When enforcement cannot make a fit strictly passive,
+that surrogate stays noiseless for the trial and COBRA logs a warning with
+snp2le's reason ("... stays noiseless: thermal noise NOT added: ..."). This is
+common for fits of de-embedded EM data at high orders; try another
+`vector_fit_max_order`. A matched passive two-port at T0 then has NF = 1/G_av,
+checked against VACASK to 1e-3 dB. Xyce surrogates stay noiseless.
 
 ### Mixers (`hbnoise`)
 
