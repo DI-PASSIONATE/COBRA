@@ -18,6 +18,7 @@ from cobra.spice_sim.vacask_simulator import (
     noise_factor,
     tran_dataframe,
 )
+from tests.conftest import skrf_medium
 
 
 @pytest.fixture
@@ -216,8 +217,8 @@ def test_noise_figure_goal_selects_the_frequency(simulator):
     assert parameter is not None
     assert parameter.simulation_type is SimulationType.NOISE
     result = SimulationResult(dataframes={"noise.csv": frame})
-    assert len(parameter.formula(result, None)) == 3
-    assert len(parameter.formula(result, "1-2.5GHz")) == 2
+    assert np.shape(parameter.formula(result, None)) == (3,)
+    assert np.shape(parameter.formula(result, "1-2.5GHz")) == (2,)
     np.testing.assert_allclose(parameter.formula(result, "2.1GHz"), frame["NF"].to_numpy()[[1]])
 
 
@@ -251,7 +252,7 @@ def test_parallel_surrogate_fits_leave_the_console_alone(tmp_path):
     from cobra.spice_sim.vector_fit import vector_fit_vacask
 
     frequency = rf.Frequency(1, 20, 41, "GHz")
-    media = rf.media.DefinedGammaZ0(frequency, z0=50)
+    media = skrf_medium(frequency)
     network = media.line(30, "deg") ** media.shunt_capacitor(0.2e-12)
     stdout, stderr = sys.stdout, sys.stderr
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -268,7 +269,7 @@ def test_a_fit_that_does_not_settle_is_refitted_not_penalised(tmp_path, monkeypa
     from cobra.spice_sim.vector_fit import vector_fit_vacask
 
     frequency = rf.Frequency(1, 20, 41, "GHz")
-    media = rf.media.DefinedGammaZ0(frequency, z0=50)
+    media = skrf_medium(frequency)
     network = media.line(30, "deg") ** media.shunt_capacitor(0.2e-12)
     monkeypatch.setattr(universal, "_AUTO_FIT_MAX_RELOCATIONS", 2)
 
@@ -280,7 +281,7 @@ def _lossy_two_port():
     """A series L-R with a shunt R: strictly passive, so snp2le builds its noise generator."""
     import skrf as rf
 
-    media = rf.media.DefinedGammaZ0(rf.Frequency(1, 20, 101, "GHz"), z0=50)
+    media = skrf_medium(rf.Frequency(1, 20, 101, "GHz"))
     return media.inductor(1e-9) ** media.resistor(10) ** media.shunt_resistor(200)
 
 

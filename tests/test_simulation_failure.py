@@ -33,7 +33,7 @@ from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.circuit_sim_stage import CircuitSimulationStage
-from tests.conftest import make_context, netlist_path
+from tests.conftest import make_context, netlist_path, skrf_medium
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
@@ -144,7 +144,7 @@ def test_a_surrogate_that_cannot_be_fitted_is_a_simulation_failure(tmp_path, cap
 
 def _line_with_shunt_capacitor() -> rf.Network:
     frequency = rf.Frequency(1, 20, 41, "GHz")
-    media = rf.media.DefinedGammaZ0(frequency, z0=50)
+    media = skrf_medium(frequency)
     return media.line(30, "deg") ** media.shunt_capacitor(0.2e-12)
 
 

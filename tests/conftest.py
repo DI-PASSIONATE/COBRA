@@ -13,7 +13,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -80,6 +80,18 @@ def window():
     yield main_window
     main_window.close()
     app.processEvents()
+
+
+def skrf_medium(frequency: Any, z0: float = 50.0) -> Any:
+    """A 50 ohm scikit-rf medium for building test networks, returned untyped.
+
+    scikit-rf annotates element values as ``numbers.Number``. Python registers int
+    and float as numbers only at runtime, which type checkers do not see, so every
+    literal such as ``media.line(30, "deg")`` would be reported as the wrong type.
+    """
+    import skrf as rf
+
+    return cast("Any", rf.media.DefinedGammaZ0)(frequency, z0=z0)
 
 
 def netlist_path(name: str) -> Path:

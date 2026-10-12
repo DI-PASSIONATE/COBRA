@@ -18,6 +18,7 @@ from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.vector_fit import vector_fit_vacask
+from tests.conftest import skrf_medium
 
 VACASK = shutil.which(os.environ.get("COBRA_VACASK", "vacask"))
 pytestmark = pytest.mark.skipif(VACASK is None, reason="vacask executable not found")
@@ -92,7 +93,7 @@ endc
     y = np.array([[1 / 1e3 + jw * 1e-6, -jw * 1e-6], [-jw * 1e-6 + 1e-3, 1 / 2e3 + jw * 1e-6]])
     expected = rf.network.y2s(np.transpose(y, (2, 0, 1)), z0=np.array([50.0, 75.0]))
     np.testing.assert_allclose(network.z0[0], [50.0, 75.0])
-    np.testing.assert_allclose(network.s, expected, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(network.s), np.asarray(expected), atol=1e-6)
     # The Touchstone copy keeps both reference impedances and leaves the netlist alone.
     written = rf.Network(str(tmp_path / "deck_ac.sim.s2p"))
     np.testing.assert_allclose(written.z0[0], [50.0, 75.0])
@@ -106,7 +107,7 @@ def test_snp2le_subcircuit_reproduces_its_model(tmp_path):
     from snp2le.core.state import ConverterState
 
     frequency = rf.Frequency(1, 20, 101, "GHz")
-    media = rf.media.DefinedGammaZ0(frequency, z0=50)
+    media = skrf_medium(frequency)
     network = media.line(30, "deg") ** media.shunt_capacitor(0.2e-12) ** media.resistor(5)
     vector_fit_vacask(network, str(tmp_path / "X1"))
     deck = """snp2le round trip
@@ -127,7 +128,7 @@ endc
     simulated = _run(tmp_path, deck, SimulationType.AC).network
     assert simulated is not None
     model = convert(ConverterState(mode="universal", enforce_passivity=False, max_order=12), network)
-    np.testing.assert_allclose(simulated.s, model.model_s, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(simulated.s), np.asarray(model.model_s), atol=1e-6)
 
 
 # A matched 6 dB T pad between two 50 Ohm ports, simulated at T0 = 290 K.
@@ -193,7 +194,7 @@ def test_surrogate_thermal_noise_gives_the_noise_figure_of_a_passive(tmp_path, t
     from snp2le.core.engine import convert
     from snp2le.core.state import ConverterState
 
-    media = rf.media.DefinedGammaZ0(rf.Frequency(1, 20, 101, "GHz"), z0=50)
+    media = skrf_medium(rf.Frequency(1, 20, 101, "GHz"))
     network = media.inductor(1e-9) ** media.resistor(10) ** media.shunt_resistor(200)
     vector_fit_vacask(network, str(tmp_path / "X1"), enforce_passivity=True, thermal_noise=thermal_noise)
     simulator = VacaskSimulator(VACASK or "vacask")
@@ -268,7 +269,7 @@ ends
 def test_subcircuit_surrogate_and_port_gain(tmp_path):
     """A 3 dB attenuator replaces Pad_le deep in the hierarchy; the port-based gain is -3 dB."""
     frequency = rf.Frequency(0.5, 2, 31, "GHz")
-    pad = rf.media.DefinedGammaZ0(frequency, z0=50).attenuator(-3, d_b=True, name="Pad_le")
+    pad = skrf_medium(frequency).attenuator(-3, d_b=True, name="Pad_le")
     simulator = VacaskSimulator(VACASK or "vacask")
     deck = tmp_path / "pad.sim"
     deck.write_text(_XSCHEM_PAD)
