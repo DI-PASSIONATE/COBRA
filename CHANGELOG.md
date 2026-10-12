@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 3.0.0 - 2026-10-12
 
 ### Added
 - Xyce small-signal noise: `.NOISE` is a supported analysis, the `NF` goal works with
@@ -49,6 +49,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surrogate for VACASK (`vector_fit_max_order` 40).
 - GUI: "Subcircuit surrogate" row (combo of the netlist's subcircuits, **Use as
   surrogate**, **Clear**); loading a configuration restores subcircuit surrogates.
+- `VacaskSimulator` setting `surrogate_thermal_noise` (requires `enforce_passivity`):
+  snp2le adds a generator of each surrogate's thermal noise, kT(I - S S^H) at its
+  ports, so noise figures include the passives' losses. A fit that is not strictly
+  passive stays noiseless, and COBRA warns, naming snp2le's passivity-enforcement path.
+- With `parallel_trials` above 1, the surrogates are vector-fitted in that many worker
+  processes, each on one BLAS thread (new dependency `threadpoolctl`), because fits in
+  threads of one process cannot overlap. A Python script that runs COBRA this way
+  must start it under `if __name__ == "__main__":`.
+- Run timing reports vector fitting as its own stage (`times["vector_fitting"]`); it
+  is no longer counted as circuit simulation.
+- GUI: when a run ends, the parameters, goals and plots show its final result: the
+  trial that met the goals or, if none did, the best parameters found, re-simulated.
+- `Netlist.port_impedances` and the parser hook `port_impedances`: the reference
+  impedance of every port, driven or not (Xyce: the P element's `z0`; VACASK: the
+  port resistor).
 
 ### Changed
 - **Breaking:** the netlist API is split into a parser and a parsed document.
@@ -67,14 +82,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is removed and `vector_fit_vacask` takes `max_order`.
 - Performance: a netlist is no longer re-parsed after every edit. Rendering 10
   parameters of the 4 869-line mixer netlist went from about 50 ms to about 0.2 ms.
+- A surrogate whose band starts below 1 GHz is also evaluated at the sub-GHz points
+  ORCA's presets simulate (10, 20, 100, 200, 300, 500 and 700 MHz). snp2le drops the
+  0 Hz point, so these set the DC resistance of VACASK surrogates: on ORCA inductors
+  its median error falls from about 16% to 10%. Results of existing runs can shift
+  slightly.
+- COBRA requires snp2le 0.1.13, which keeps overlapping fits in threads from
+  disturbing the process's streams and BLAS threads, stops and refits an `auto_fit`
+  that does not settle, writes element values at full precision (with 10 digits,
+  high-order subcircuits could drift from the fitted model) and names the constant
+  term D when a fit cannot be made passive. COBRA no longer serialises snp2le fits.
+- The GUI redraws its tables and plots at most every 200 ms during a run, so parallel
+  trials no longer make it lag; the loss history still records every trial.
+- Example configurations `netlist_xyce_vector.json` and `vacask_trafo_acsp.json` sweep
+  100-170 GHz and optimise S22 and S21 over 122-140 GHz.
 
 ### Fixed
 - `cobra run`'s "missing models" error names the included files it could not find,
   since devices from an unfound PDK include look like surrogates without a model.
-- A VACASK surrogate fit could hang a run: scikit-rf's `auto_fit` can cycle forever
-  at the order cap, and every other trial waited for it. A fit now stops after 1000
-  pole relocations with `VectorFitError`, and `CircuitSimulationStage` penalises that
-  trial instead of aborting the run.
+- A surrogate fit could hang a run: scikit-rf's `auto_fit` can cycle forever (6 of
+  800 ORCA models at order 20; 3 of 20 ORCA inductors at its default order limit),
+  and every other trial waited for it. Xyce: COBRA stops the fit after 1000 pole
+  relocations with `VectorFitError`, and `CircuitSimulationStage` penalises that trial
+  instead of aborting the run. VACASK: snp2le stops it after 250 relocations and
+  refits, so the trial keeps a model.
+- `cobra parse` showed `z0=None` for a port without a source (a terminating port, e.g.
+  xschem's `Vout ... vsource dc=0`); it now shows the port's reference impedance.
 - Injecting an analysis into a Xyce netlist no longer drops `.OPTIONS DEVICE` (e.g. the
   circuit temperature); only analysis-specific `.OPTIONS` lines are replaced.
 - `Netlist.update_simulation_directive` no longer drops later slots when it updates
