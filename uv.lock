@@ -305,7 +305,7 @@ provides-extras = ["orca"]
 [package.metadata.requires-dev]
 dev = [
     { name = "orca-rfic", specifier = ">=2.1,<3" },
-    { name = "pytest" },
+    { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "ty" },

@@ -67,10 +67,14 @@ def _isolate_cobra_logging():
 
 @pytest.fixture
 def window():
-    """A COBRA main window on Qt's offscreen platform; skipped without PySide6."""
+    """A COBRA main window on Qt's offscreen platform; skipped without PySide6 or
+    the system libraries Qt's GUI modules load (e.g. libEGL).
+    """
     # Imported here, not at collection: test_cli checks the CLI never loads Qt.
-    pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip(
+        "PySide6.QtWidgets", reason="PySide6's Qt GUI libraries cannot be loaded", exc_type=ImportError
+    )
     from PySide6.QtWidgets import QApplication
 
     from cobra.gui.main_window import MainWindow
