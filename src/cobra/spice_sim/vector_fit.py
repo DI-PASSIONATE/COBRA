@@ -131,7 +131,11 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
 
 def vector_fit(nw: skrf.Network, name: str, enforce_passivity: bool = False) -> str:
     vf = VectorFitting(nw)
-    vf.auto_fit()
+    try:
+        with _bounded_pole_relocation(_MAX_POLE_RELOCATIONS):
+            vf.auto_fit()
+    except VectorFitError as exc:
+        raise VectorFitError(f"could not model {os.path.basename(name)}: {exc}") from exc
 
     if enforce_passivity:
         vf = _enforce_passivity(vf, nw)
@@ -217,6 +221,9 @@ _SNP2LE_LOCK = threading.Lock()
 _MAX_POLE_RELOCATIONS = 1000
 #: The static method auto_fit calls once per relocation: the only hook inside its loop.
 _RELOCATION_HOOK = "_pole_relocation"
+#: The hook is a class attribute, so two bounded fits in threads would restore each
+#: other's stand-ins; they run one at a time.
+_RELOCATION_LOCK = threading.Lock()
 
 
 class VectorFitError(ValueError):
@@ -227,10 +234,9 @@ class VectorFitError(ValueError):
 def _bounded_pole_relocation(limit: int):
     """Make a scikit-rf fit that exceeds *limit* pole relocations raise instead of looping forever.
 
-    The count is shared by every fit while this is active, so use it around one fit
-    at a time (snp2le fits hold ``_SNP2LE_LOCK``).
+    Holds ``_RELOCATION_LOCK`` while active: the hook is shared by every fit in the
+    process, so bounded fits in threads run one at a time.
     """
-    relocate = getattr(VectorFitting, _RELOCATION_HOOK)
     calls = 0
 
     def bounded(*args, **kwargs):
@@ -240,11 +246,13 @@ def _bounded_pole_relocation(limit: int):
             raise VectorFitError(f"vector fit did not converge in {limit} pole relocations")
         return relocate(*args, **kwargs)
 
-    setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(bounded))
-    try:
-        yield
-    finally:
-        setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(relocate))
+    with _RELOCATION_LOCK:
+        relocate = getattr(VectorFitting, _RELOCATION_HOOK)
+        setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(bounded))
+        try:
+            yield
+        finally:
+            setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(relocate))
 
 
 #: Device module of each master an snp2le subcircuit uses; ``None`` for a VACASK builtin.

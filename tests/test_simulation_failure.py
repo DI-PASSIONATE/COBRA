@@ -142,6 +142,43 @@ def test_a_surrogate_that_cannot_be_fitted_is_a_simulation_failure(tmp_path, cap
     assert context.design_goal_checker.check_goals(context).goal_achieved is False
 
 
+def _line_with_shunt_capacitor() -> rf.Network:
+    frequency = rf.Frequency(1, 20, 41, "GHz")
+    media = rf.media.DefinedGammaZ0(frequency, z0=50)
+    return media.line(30, "deg") ** media.shunt_capacitor(0.2e-12)
+
+
+def test_xyce_vector_fit_gives_up_instead_of_looping(tmp_path, monkeypatch):
+    """scikit-rf's auto_fit can cycle forever; the Xyce surrogate fit stops with an error."""
+    import importlib
+
+    from skrf.vectorFitting import VectorFitting
+
+    # The package re-exports the function vector_fit under the module's name.
+    module = importlib.import_module("cobra.spice_sim.vector_fit")
+    relocate = VectorFitting._pole_relocation
+    monkeypatch.setattr(module, "_MAX_POLE_RELOCATIONS", 2)
+
+    with pytest.raises(VectorFitError, match="could not model X1: vector fit did not converge in 2"):
+        module.vector_fit(_line_with_shunt_capacitor(), str(tmp_path / "X1"))
+    assert VectorFitting._pole_relocation is relocate
+
+
+def test_concurrent_xyce_fits_restore_the_relocation_hook(tmp_path):
+    """The bound swaps a class attribute; fits in threads must not leave a stand-in behind."""
+    import importlib
+    from concurrent.futures import ThreadPoolExecutor
+
+    from skrf.vectorFitting import VectorFitting
+
+    module = importlib.import_module("cobra.spice_sim.vector_fit")
+    relocate = VectorFitting._pole_relocation
+    network = _line_with_shunt_capacitor()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda k: module.vector_fit(network, str(tmp_path / f"X{k}")), range(16)))
+    assert VectorFitting._pole_relocation is relocate
+
+
 class _ProcessReportingSimulator(_StubSimulator):
     """Records the process that fitted the network, and logs from it."""
 

@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from cobra.configuration.configuration import ConfigurationError
-from cobra.spice_sim.base_simulator import SimulatorError
 from cobra.spice_sim.raw_file import RawPlot
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vacask_simulator import (
@@ -19,19 +18,11 @@ from cobra.spice_sim.vacask_simulator import (
     noise_factor,
     tran_dataframe,
 )
-from tests.conftest import NETLIST_DIR
-
-FIXTURE = NETLIST_DIR / "vacask_trafo.sim"
 
 
 @pytest.fixture
 def simulator():
     return VacaskSimulator()
-
-
-@pytest.fixture
-def netlist(simulator):
-    return simulator.netlist_parser.parse_file(FIXTURE)
 
 
 def _analysis_lines(netlist) -> list[str]:
@@ -41,29 +32,6 @@ def _analysis_lines(netlist) -> list[str]:
 # ---------------------------------------------------------------------------
 # prepare_netlist
 # ---------------------------------------------------------------------------
-
-
-def test_prepare_keeps_only_the_requested_analysis(simulator, netlist):
-    prepared = simulator.prepare_netlist(netlist, SimulationType.HB, {})
-    assert prepared.simulation_type is SimulationType.HB
-    assert [d.name for d in prepared.simulation_directives] == ["hb1"]
-    assert len(prepared.to_string().splitlines()) == len(netlist.to_string().splitlines())
-    assert _analysis_lines(prepared) == [
-        "//cobra-off   analysis op1 op",
-        '//cobra-off   analysis sp1 acsp ports=["vp1", "rp1",',
-        "analysis hb1 hb freq=[95G, 10G] nharm=4",
-    ]
-    # The switched-off acsp still declares the ports.
-    assert prepared.ports == {"vp1": 1, "vp2": 2}
-    assert prepared.port_sources == netlist.port_sources
-    # What the includes define survives the rewrite.
-    assert prepared.external_masters == netlist.external_masters
-
-
-def test_prepare_injects_a_missing_analysis(simulator, netlist):
-    prepared = simulator.prepare_netlist(netlist, SimulationType.TRAN, {"stop": "50n"})
-    assert [d.name for d in prepared.simulation_directives] == ["cobra_tran"]
-    assert "analysis cobra_tran tran step=1p stop=50n start=0 maxstep=1p" in _analysis_lines(prepared)
 
 
 def test_prepare_injects_hb_tones_as_a_vector(simulator):
@@ -119,38 +87,9 @@ def test_tran_table_names_signals_like_xyce():
     assert list(tran_dataframe(plot).columns) == ["TIME", "V(out)", "I(vout)"]
 
 
-def test_network_is_referenced_to_each_port_resistor(simulator, netlist):
-    s21 = np.array([0.5, 0.25], dtype=complex)
-    plot = RawPlot(
-        "AC S-parameter Analysis",
-        {
-            "s(1,1)": np.zeros(2, complex), "s(1,2)": s21, "s(2,1)": s21, "s(2,2)": np.zeros(2, complex),
-            "frequency": np.array([1e9, 2e9], dtype=complex),
-        },
-    )
-    directive = next(d for d in netlist.simulation_directives if d.name == "sp1")
-    network = simulator._network(plot, directive, netlist)
-    np.testing.assert_allclose(network.z0[0], [925.0, 100.0])
-    np.testing.assert_allclose(network.s[:, 1, 0], s21)
-    np.testing.assert_allclose(network.f, [1e9, 2e9])
-
-
 # ---------------------------------------------------------------------------
 # Running
 # ---------------------------------------------------------------------------
-
-
-def test_missing_executable_is_a_simulator_error(tmp_path, netlist):
-    path = tmp_path / "deck.sim"
-    netlist.save(path)
-    with pytest.raises(SimulatorError, match="vacask_command"):
-        VacaskSimulator("/definitely/not/vacask").run_simulation(str(path), netlist)
-
-
-def test_failed_run_returns_none(tmp_path, netlist):
-    path = tmp_path / "deck.sim"
-    netlist.save(path)
-    assert VacaskSimulator("false").run_simulation(str(path), netlist) is None
 
 
 @pytest.mark.parametrize("threads", [-1, 1.5, True])

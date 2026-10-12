@@ -18,13 +18,20 @@ if TYPE_CHECKING:
 
 #: Spacing of the inference grid, in Hz.
 FREQUENCY_STEP = 1e9
+#: Extra points below the first step (Hz), the sub-GHz points ORCA's presets simulate. A fit
+#: that drops the 0 Hz point, as snp2le does, otherwise extrapolates the DC resistance from
+#: the first step (median error 16% instead of 10% on ORCA inductors).
+LOW_FREQUENCIES = (10e6, 20e6, 100e6, 200e6, 300e6, 500e6, 700e6)
 
 
 def inference_frequencies(frequency_range: tuple[float, float]) -> np.ndarray:
-    """The frequencies (Hz) the surrogate is evaluated at: *frequency_range* in ``FREQUENCY_STEP`` steps.
+    """The frequencies (Hz) the surrogate is evaluated at: *frequency_range* in ``FREQUENCY_STEP`` steps,
+    plus the ``LOW_FREQUENCIES`` that fall between its lower end and the first step.
     """
     low, high = frequency_range
-    return np.arange(low, high + FREQUENCY_STEP / 2, FREQUENCY_STEP)
+    steps = np.arange(low, high + FREQUENCY_STEP / 2, FREQUENCY_STEP)
+    extra = [f for f in LOW_FREQUENCIES if low < f < low + FREQUENCY_STEP and f <= high]
+    return np.sort(np.concatenate((steps, extra)))
 
 
 class EMSurrogateStage(COBRABaseStage):

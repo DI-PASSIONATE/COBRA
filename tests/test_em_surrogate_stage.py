@@ -1,6 +1,7 @@
 """Tests for :meth:`EMSurrogateStage.s_param_dict_to_network`: turning a surrogate's
 named ``S<i><j>_real``/``_imag`` outputs into a network, for both output layouts
-ORCA exports (the full matrix and the upper triangle only).
+ORCA exports (the full matrix and the upper triangle only), and for the inference
+frequency grid.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from cobra.stages.em_surrogate_stage import EMSurrogateStage
+from cobra.stages.em_surrogate_stage import LOW_FREQUENCIES, EMSurrogateStage, inference_frequencies
 
 FREQUENCIES = np.array([1e9, 2e9, 3e9])
 
@@ -57,3 +58,21 @@ def test_output_count_does_not_decide_port_count() -> None:
     stage = EMSurrogateStage([])
     assert stage.s_param_dict_to_network(full_six, FREQUENCIES)[0] == 6
     assert stage.s_param_dict_to_network(triangle_eight, FREQUENCIES)[0] == 8
+
+
+def test_grid_from_dc_adds_the_low_frequencies_below_the_first_step() -> None:
+    grid = inference_frequencies((0.0, 500e9))
+    assert grid[0] == 0.0
+    np.testing.assert_array_equal(grid[1 : 1 + len(LOW_FREQUENCIES)], LOW_FREQUENCIES)
+    assert grid[1 + len(LOW_FREQUENCIES)] == 1e9
+    assert grid[-1] == 500e9
+    assert len(grid) == 501 + len(LOW_FREQUENCIES)
+    assert np.all(np.diff(grid) > 0)
+
+
+def test_grid_above_the_low_frequencies_is_unchanged() -> None:
+    np.testing.assert_array_equal(inference_frequencies((50e9, 60e9)), np.arange(50e9, 60.5e9, 1e9))
+
+
+def test_grid_keeps_the_low_frequencies_inside_the_band() -> None:
+    np.testing.assert_array_equal(inference_frequencies((0.0, 0.3e9)), [0.0, 10e6, 20e6, 100e6, 200e6, 300e6])

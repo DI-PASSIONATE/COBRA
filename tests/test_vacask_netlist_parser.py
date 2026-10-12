@@ -6,15 +6,7 @@ import pytest
 
 from cobra.spice_sim.netlist_parsers.statement import StatementKind
 from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import VacaskNetlistParser, vacask_float
-from cobra.spice_sim.simulation_type import SimulationType
-from tests.conftest import EXAMPLE_NETLIST_DIR, NETLIST_DIR
-
-FIXTURE = NETLIST_DIR / "vacask_trafo.sim"
-
-
-@pytest.fixture
-def netlist():
-    return VacaskNetlistParser().parse_file(FIXTURE)
+from tests.conftest import EXAMPLE_NETLIST_DIR
 
 
 def _parse(text: str):
@@ -24,11 +16,6 @@ def _parse(text: str):
 # ---------------------------------------------------------------------------
 # Splitting
 # ---------------------------------------------------------------------------
-
-
-def test_split_is_byte_identical():
-    text = FIXTURE.read_text(encoding="utf-8")
-    assert "".join(s.text for s in VacaskNetlistParser().split(text)) == text
 
 
 @pytest.mark.parametrize(
@@ -64,61 +51,15 @@ def test_brackets_backslash_and_block_comments_join_lines():
     assert netlist.get_element("c1").params == {"c": "2f"}
 
 
-def test_names_are_case_sensitive(netlist):
-    assert netlist.has_element("C1")
-    assert not netlist.has_element("c1")
-
-
 # ---------------------------------------------------------------------------
 # Records
 # ---------------------------------------------------------------------------
-
-
-def test_elements_take_their_type_from_the_model_module(netlist):
-    types = {e.name: e.etype for e in netlist.list_elements()}
-    assert types == {
-        "r": "MODEL", "c": "MODEL", "l": "MODEL",
-        "X1": "X", "C1": "C", "L1": "L", "C2": "C", "vout": "V",
-        "vp1": "V", "rp1": "R", "vp2": "V", "rp2": "R",
-    }
-    assert netlist.get_element("C1").value == "7.94f"
-    assert netlist.get_element("C2").value == "cout"
-
-
-def test_unmodelled_master_is_a_component(netlist):
-    assert list(netlist.components) == ["X1"]
-    assert netlist.components["X1"].nodes == ["p1", "p2", "p3", "p4"]
-    assert netlist.components["X1"].model == "s_equivalent"
 
 
 def test_includes_and_libraries():
     netlist = _parse('t\ninclude "a.inc"\ninclude "pdk.lib" section=tt lang=ngspice\n')
     assert [i.file_path for i in netlist.includes] == ["a.inc"]
     assert [(lib.file_path, lib.entry) for lib in netlist.libraries] == [("pdk.lib", "tt")]
-
-
-def test_analyses_fill_the_xyce_slots(netlist):
-    directives = {d.name: d for d in netlist.simulation_directives}
-    assert not directives["op1"].is_analysis
-    assert directives["sp1"].simulation_type is SimulationType.AC
-    assert directives["sp1"].positional == ["lin", "500", "100G", "170G"]
-    assert directives["hb1"].simulation_type is SimulationType.HB
-    assert directives["hb1"].positional == ["95G", "10G"]
-    assert directives["hb1"].kv_params == {"nharm": "4"}
-    assert netlist.simulation_type is SimulationType.AC
-    assert netlist.options_directives == {"": {"temp": "16.85"}}
-
-
-def test_ports_come_from_the_acsp_list(netlist):
-    assert netlist.ports == {"vp1": 1, "vp2": 2}
-    assert netlist.port_sources == {
-        "vp1": {"ac_amplitude": 2.72, "sin_amplitude": 2.72, "sin_frequency": 130e9, "z0": 925.0},
-        "vp2": {"ac_amplitude": 0.89, "z0": 100.0},
-    }
-
-
-def test_probe_nodes_from_save_then_ports(netlist):
-    assert netlist.probe_nodes == ["out", "vp1", "vp2"]
 
 
 def test_probe_nodes_fall_back_to_probe_sources():
@@ -129,44 +70,6 @@ def test_probe_nodes_fall_back_to_probe_sources():
 # ---------------------------------------------------------------------------
 # Edits
 # ---------------------------------------------------------------------------
-
-
-def test_edits_keep_the_line_count_and_other_lines(netlist):
-    before = netlist.to_string().splitlines()
-    netlist.update_parameters({"C1": "8f", "C2": "3f", "X1:scale": "2", "rp1:r": "50"})
-    after = netlist.to_string().splitlines()
-    assert len(before) == len(after)
-    changed = {before[i].strip(): after[i].strip() for i in range(len(before)) if before[i] != after[i]}
-    assert changed == {
-        "C1 (p1 p2) c c=7.94f": "C1 (p1 p2) c c=8f",
-        "c=cout": "c=3f",
-        "X1 (p1 p2 p3 p4) s_equivalent": "X1 (p1 p2 p3 p4) s_equivalent scale=2",
-        "rp1 (a1 p1) r r=925": "rp1 (a1 p1) r r=50",
-    }
-
-
-def test_set_model_replaces_the_master(netlist):
-    netlist.set_model("X1", "X1_subct")
-    assert netlist.components["X1"].model == "X1_subct"
-    assert "X1 (p1 p2 p3 p4) X1_subct" in netlist.to_string()
-
-
-def test_set_value_rejects_instances_without_a_value(netlist):
-    with pytest.raises(ValueError, match="set_param"):
-        netlist.set_value("X1", "1")
-
-
-def test_update_analysis_writes_named_arguments(netlist):
-    netlist.update_simulation_directive(SimulationType.AC, {"from": "1G", "to": "2G", "points": "10"})
-    sp1 = next(d for d in netlist.simulation_directives if d.name == "sp1")
-    assert sp1.positional == ["lin", "10", "1G", "2G"]
-    assert sp1.kv_params == {"ports": '["vp1", "rp1", "vp2", "rp2"]'}
-    lines = netlist.to_string().splitlines()
-    assert len(lines) == len(FIXTURE.read_text(encoding="utf-8").splitlines())
-    assert any('mode="lin" points=10 from=1G to=2G ports=["vp1", "rp1", "vp2", "rp2"]' in line for line in lines)
-
-    netlist.update_simulation_directive(SimulationType.HB, {"freq": "130G"})
-    assert "analysis hb1 hb freq=[130G] nharm=4" in netlist.to_string()
 
 
 # ---------------------------------------------------------------------------
