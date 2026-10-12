@@ -10,6 +10,7 @@ rewriting a statement for an edit.
 
 from __future__ import annotations
 
+import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -125,6 +126,20 @@ class NetlistParser(ABC):
             if source:
                 sources[name] = source
         return sources
+
+    def port_impedances(self, netlist: Netlist) -> dict[str, float]:
+        """Reference impedance of every port that declares one as a number, driven or not.
+
+        :meth:`port_sources` only covers driven ports; a terminating port has an
+        impedance too. The default reads the port element's own ``z0``.
+        """
+        impedances: dict[str, float] = {}
+        for name in self.ports(netlist):
+            text = next((v for k, v in netlist.get_element(name).params.items() if k.lower() == "z0"), None)
+            if text is not None:
+                with contextlib.suppress(ValueError):
+                    impedances[name] = float(text)
+        return impedances
 
     def port_source(self, statement: Statement) -> dict[str, float]:  # noqa: ARG002
         """Source data of a port statement: any of ``z0``, ``ac_amplitude``,

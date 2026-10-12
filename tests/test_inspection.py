@@ -32,6 +32,16 @@ def test_netlist_report_describes_the_netlist_and_serialises():
     json.dumps(report.to_dict())
 
 
+def test_report_gives_terminating_ports_their_impedance(tmp_path: Path):
+    path = tmp_path / "ports.cir"
+    path.write_text(
+        "two ports\nP1 a 0 port=1 z0=50 AC 1\nP2 b 0 port=2 z0=75\nR1 a b 50\n.AC LIN 10 1G 2G\n.END\n",
+        encoding="utf-8",
+    )
+    report = inspect_netlist(path)
+    assert {port.name: port.z0 for port in report.ports} == {"P1": 50.0, "P2": 75.0}
+
+
 def test_netlist_problems_are_reported_rather_than_raised():
     assert has_errors(inspect_netlist("definitely/not/here.cir"))
     # The fixture's .INCLUDE and .LIB targets do not exist on disk.

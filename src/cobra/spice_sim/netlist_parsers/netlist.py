@@ -298,6 +298,11 @@ class Netlist:
         return len(self.ports)
 
     @property
+    def port_impedances(self) -> dict[str, float]:
+        """Port name → reference impedance, for every port that declares one (driven or not)."""
+        return self.parser.port_impedances(self)
+
+    @property
     def port_sources(self) -> dict[str, dict[str, float]]:
         """Dict mapping port name → waveform info (sin_amplitude, z0, ac_amplitude).
 

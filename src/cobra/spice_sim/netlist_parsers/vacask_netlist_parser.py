@@ -529,6 +529,10 @@ class VacaskNetlistParser(NetlistParser):
         ]
         return nodes + [source for source in self.port_resistances(netlist) if source not in nodes]
 
+    def port_impedances(self, netlist: Netlist) -> dict[str, float]:
+        """A port's reference impedance is its resistor's ``r``."""
+        return self.port_resistances(netlist)
+
     def port_resistances(self, netlist: Netlist) -> dict[str, float]:
         """The reference resistance of each port, by source name, where it is a number."""
         resistances: dict[str, float] = {}

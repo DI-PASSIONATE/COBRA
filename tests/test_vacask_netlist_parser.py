@@ -162,6 +162,12 @@ def test_ports_are_detected_without_acsp():
     assert netlist.probe_nodes == ["Vin", "Vout"]
 
 
+def test_undriven_ports_keep_their_reference_impedance():
+    netlist = _parse(_XSCHEM)
+    assert netlist.port_impedances == {"Vin": 50.0, "Vout": 50.0}
+    assert "Vout" not in netlist.port_sources  # a terminating port is not a drive
+
+
 def test_subcircuit_named_in_the_mapping_becomes_a_surrogate():
     netlist = _parse(_XSCHEM)
     assert netlist.masters == {"Amplifier": ("in", "out", "vdd", "bias"), "Match_le": ("a", "b")}

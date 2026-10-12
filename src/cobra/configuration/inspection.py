@@ -229,6 +229,7 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
 
     ports = netlist.ports
     port_sources = netlist.port_sources
+    port_impedances = netlist.port_impedances
     for element in netlist.list_elements():
         report.elements.append(
             ElementReport(
@@ -249,7 +250,7 @@ def build_netlist_report(netlist: Netlist, path: str | Path) -> NetlistReport:
                     name=element.name,
                     nodes=list(element.nodes),
                     params=dict(element.params),
-                    z0=source.get("z0"),
+                    z0=port_impedances.get(element.name),
                     ac_amplitude=source.get("ac_amplitude"),
                     sin_amplitude=source.get("sin_amplitude"),
                 )
