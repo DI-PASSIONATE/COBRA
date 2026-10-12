@@ -97,6 +97,8 @@ _SIMULATOR_MPI_FLAG = "parallel_xyce"
 _SIMULATOR_MPI_PROCESSES = "parallel_xyce_processes"
 _PARALLEL_TRIALS = "trials"
 _PARALLEL_SIMULATOR = "simulator"
+#: Shortest gap between two redraws of the tables and plots while a run reports trials.
+_RUN_DISPLAY_INTERVAL_MS = 200
 
 #: Primary button state → (label, icon name).
 _ACTION_STATES: dict[str, tuple[str, str]] = {
@@ -126,6 +128,14 @@ class MainWindow(QMainWindow):
         self._run_elapsed_display_timer.setInterval(250)
         self._run_elapsed_display_timer.timeout.connect(self._update_elapsed_time)
         self._elapsed_before_pause = 0
+        # Parallel trials can report far faster than the plots redraw: a trial
+        # arriving within the interval only replaces the pending context, and
+        # the timer shows the newest one when it fires.
+        self._pending_context: OptimizationContext | None = None
+        self._run_display_timer = QTimer(self)
+        self._run_display_timer.setSingleShot(True)
+        self._run_display_timer.setInterval(_RUN_DISPLAY_INTERVAL_MS)
+        self._run_display_timer.timeout.connect(self._show_pending_context)
 
         # Central widget
         central = QWidget()
@@ -2038,6 +2048,8 @@ class MainWindow(QMainWindow):
         self._start_elapsed_clock()
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
+        self._run_display_timer.stop()
+        self._pending_context = None
 
         # Clear plots
         self.s_param_plot.clear()
@@ -2101,7 +2113,27 @@ class MainWindow(QMainWindow):
         else:
             self._update_progress_display(iteration, max_iterations)
 
-        self._show_context(context, record_loss=True)
+        self._record_losses(context)
+        if self._run_display_timer.isActive():
+            self._pending_context = context
+            return
+        self._show_context(context)
+        self._run_display_timer.start()
+
+    def _show_pending_context(self) -> None:
+        """Show the newest trial that arrived while the display was throttled."""
+        if self._pending_context is None:
+            return
+        context, self._pending_context = self._pending_context, None
+        self._show_context(context)
+        self._run_display_timer.start()
+
+    def _record_losses(self, context: OptimizationContext) -> None:
+        """Append *context*'s goal penalties to the loss history; every trial counts, shown or not."""
+        for i, goal in enumerate(context.goals):
+            if i in self.loss_history:
+                loss = goal.current_penalty if goal.current_penalty is not None else 0.0
+                self.loss_history[i].append(float(np.asarray(loss).reshape(-1)[0]))
 
     @Slot(object)
     def on_result(self, context: OptimizationContext):
@@ -2110,10 +2142,13 @@ class MainWindow(QMainWindow):
         Without the goals met it holds the best parameters found, re-simulated,
         rather than the last trial, which may even have failed.
         """
-        self._show_context(context, record_loss=False)
+        # A throttled trial still pending must not overwrite the final result.
+        self._run_display_timer.stop()
+        self._pending_context = None
+        self._show_context(context)
 
-    def _show_context(self, context: OptimizationContext, record_loss: bool) -> None:
-        """Show *context*'s parameters, goals and plots; *record_loss* extends the loss history."""
+    def _show_context(self, context: OptimizationContext) -> None:
+        """Show *context*'s parameters, goals and plots, and redraw the recorded loss history."""
         # 1. Update Parameters Table (Current Values)
         net_params = context.netlist_parameters
         model_params = context.model_parameters
@@ -2206,13 +2241,7 @@ class MainWindow(QMainWindow):
             self.goal_table.setItem(r, 2, val_item)
 
         # 3. Update Loss Plot
-        losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in current_goals]
-
-        if record_loss and self.loss_history:  # Ensure loss history is initialized
-            for i, loss in enumerate(losses):
-                if i in self.loss_history:
-                    self.loss_history[i].append(float(np.asarray(loss).reshape(-1)[0]))
-
+        if self.loss_history:  # Ensure loss history is initialized
             self.loss_plot.clear()
             for i, hist in self.loss_history.items():
                 if hist:

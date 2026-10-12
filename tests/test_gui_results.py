@@ -53,3 +53,27 @@ def test_the_worker_hands_over_the_final_context_before_it_finishes(window):
 
     worker.run()  # in this thread: the signals reach the lambdas directly
     assert events == [("result", final), ("finished", None)]
+
+
+def test_a_burst_of_trials_redraws_once_and_records_every_loss(window):
+    """Fast parallel trials must not redraw per trial, but none may drop out of the loss history."""
+    window.loss_history = {0: []}
+    trials = [make_context(iteration=i, goals=[_goal(np.array([float(i)]), float(i))]) for i in (1, 2, 3)]
+
+    for trial in trials:
+        window.on_progress(trial)
+    assert window.goal_table.item(0, 2).text().startswith("[1.0000, 1.0000]")  # the first shows at once
+    assert window.loss_history == {0: [1.0, 2.0, 3.0]}
+
+    window._run_display_timer.timeout.emit()  # the interval elapses
+    assert window.goal_table.item(0, 2).text().startswith("[3.0000, 3.0000]")  # the newest, not the second
+
+
+def test_a_pending_trial_does_not_overwrite_the_final_result(window):
+    window.loss_history = {0: []}
+    window.on_progress(make_context(iteration=1, goals=[_goal(np.array([1.0]), 1.0)]))
+    window.on_progress(make_context(iteration=2, goals=[_goal(None, 1e6)]))  # throttled
+
+    window.on_result(make_context(iteration=2, goals=[_goal(np.array([6.8]), 0.0)]))
+    window._run_display_timer.timeout.emit()
+    assert window.goal_table.item(0, 2).text().startswith("[6.8000, 6.8000] (penalty 0.00, met)")
