@@ -64,6 +64,7 @@ from cobra.optimizers.design_goal_collection import (
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.surrogate_metadata import FeasibilityConstraints, SurrogateMetadata
 
@@ -86,6 +87,8 @@ _SPECTRUM_VIEWS: dict[str, tuple[SimulationType, str]] = {
     "hb": (SimulationType.HB, "HB spectrum"),
     "tran": (SimulationType.TRAN, "Transient spectrum"),
 }
+#: Named analysis arguments that define the netlist rather than tune the run (VACASK).
+_STRUCTURAL_ANALYSIS_PARAMS = frozenset({"ports"})
 _LARGE_SIGNAL_TYPES: frozenset[SimulationType] = frozenset(
     sim_type for sim_type, _ in _SPECTRUM_VIEWS.values()
 )
@@ -94,6 +97,8 @@ _SIMULATOR_MPI_FLAG = "parallel_xyce"
 _SIMULATOR_MPI_PROCESSES = "parallel_xyce_processes"
 _PARALLEL_TRIALS = "trials"
 _PARALLEL_SIMULATOR = "simulator"
+#: Shortest gap between two redraws of the tables and plots while a run reports trials.
+_RUN_DISPLAY_INTERVAL_MS = 200
 
 #: Primary button state → (label, icon name).
 _ACTION_STATES: dict[str, tuple[str, str]] = {
@@ -123,6 +128,14 @@ class MainWindow(QMainWindow):
         self._run_elapsed_display_timer.setInterval(250)
         self._run_elapsed_display_timer.timeout.connect(self._update_elapsed_time)
         self._elapsed_before_pause = 0
+        # Parallel trials can report far faster than the plots redraw: a trial
+        # arriving within the interval only replaces the pending context, and
+        # the timer shows the newest one when it fires.
+        self._pending_context: OptimizationContext | None = None
+        self._run_display_timer = QTimer(self)
+        self._run_display_timer.setSingleShot(True)
+        self._run_display_timer.setInterval(_RUN_DISPLAY_INTERVAL_MS)
+        self._run_display_timer.timeout.connect(self._show_pending_context)
 
         # Central widget
         central = QWidget()
@@ -250,6 +263,25 @@ class MainWindow(QMainWindow):
         self.component_onnx_container.setVisible(False)
         self.config_form_layout.addRow("", self.component_onnx_container)
 
+        # A subcircuit (e.g. an LE model) can be the surrogate too, replaced wherever it is used.
+        self.surrogate_master_combo = QComboBox()
+        self.surrogate_master_combo.setToolTip(tooltip("surrogate_master_combo"))
+        surrogate_master_btn = QPushButton("Use as surrogate")
+        surrogate_master_btn.setToolTip(tooltip("surrogate_master_btn"))
+        surrogate_master_btn.clicked.connect(self._add_surrogate_master)
+        surrogate_master_clear_btn = QPushButton("Clear")
+        surrogate_master_clear_btn.setProperty("flat", True)
+        surrogate_master_clear_btn.setToolTip(tooltip("surrogate_master_clear_btn"))
+        surrogate_master_clear_btn.clicked.connect(self._clear_surrogate_masters)
+        self.surrogate_master_row = QWidget()
+        surrogate_master_layout = QHBoxLayout(self.surrogate_master_row)
+        surrogate_master_layout.setContentsMargins(0, 0, 0, 0)
+        surrogate_master_layout.addWidget(self.surrogate_master_combo, stretch=1)
+        surrogate_master_layout.addWidget(surrogate_master_btn)
+        surrogate_master_layout.addWidget(surrogate_master_clear_btn)
+        self.config_form_layout.addRow("Subcircuit surrogate", self.surrogate_master_row)
+        self.config_form_layout.setRowVisible(self.surrogate_master_row, False)
+
         # ---- Optimizer selection + dynamic per-optimizer options ----
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
@@ -283,6 +315,7 @@ class MainWindow(QMainWindow):
         # ---- Simulator selection + dynamic per-simulator options ----
         self.simulator_combo = QComboBox()
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
+        self.simulator_combo.addItem("VacaskSimulator", VacaskSimulator)
         self.config_form_layout.addRow("Simulator", self.simulator_combo)
         self.simulator_widgets: dict[str, QWidget] = {}
         self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
@@ -515,11 +548,11 @@ class MainWindow(QMainWindow):
         self._spectrum_data: tuple | None = None
         self._spectrum_markers: dict = {}  # bin index → (number, marker, label) items
         self._num_ports: int = 0
+        self._surrogate_masters: set[str] = set()
+        self._sim_param_forms: dict[str, QFormLayout] = {}
         self._netlist_sim_type: SimulationType | None = None
         self._simulator_cls = self.simulator_combo.currentData() or XyceSimulator
-        self.simulator_combo.currentIndexChanged.connect(
-            lambda: setattr(self, "_simulator_cls", self.simulator_combo.currentData() or XyceSimulator)
-        )
+        self.simulator_combo.currentIndexChanged.connect(self._on_simulator_changed)
 
         self._set_action_button_state("start")
         self._set_progress_state("running")
@@ -990,6 +1023,7 @@ class MainWindow(QMainWindow):
             for item in (result.labelItem, result.fieldItem):
                 widget = item.widget() if item else None
                 if widget:
+                    widget.hide()  # out of the layout, it would show at (0, 0) until deleted
                     widget.deleteLater()
         widgets.clear()
 
@@ -1022,6 +1056,13 @@ class MainWindow(QMainWindow):
 
     def update_optimizer_options(self):
         self._rebuild_backend_options(self.optimizer_combo, self.optimizer_widgets)
+
+    def _on_simulator_changed(self) -> None:
+        """Switch the netlist dialect: a loaded netlist is read again by the new simulator."""
+        self._simulator_cls = self.simulator_combo.currentData() or XyceSimulator
+        path = self.netlist_edit.text()
+        if path:
+            self.parse_and_update_components(path)
 
     def update_simulator_options(self):
         self._rebuild_backend_options(self.simulator_combo, self.simulator_widgets)
@@ -1254,6 +1295,17 @@ class MainWindow(QMainWindow):
         self.goal_list.clear()
         self.opt_params.clear()
         self.param_table.setRowCount(0)
+        # The netlist is read in the configured simulator's dialect.
+        # Selected now, so the combo shows the dialect even if a later check fails.
+        simulator_index = self.simulator_combo.findText(config.simulator.name)
+        if simulator_index >= 0:
+            self._simulator_cls = self.simulator_combo.itemData(simulator_index)
+            self.simulator_combo.blockSignals(True)
+            self.simulator_combo.setCurrentIndex(simulator_index)
+            self.simulator_combo.blockSignals(False)
+            self.update_simulator_options()
+        # Mapped names that are subcircuits rather than instances are surrogates too.
+        self._surrogate_masters = set(config.component_models)
         self.netlist_edit.setText(config.netlist)
         self.parse_and_update_components(config.netlist)
 
@@ -1313,15 +1365,25 @@ class MainWindow(QMainWindow):
             )
 
         netlist = self._simulator_cls.netlist_parser.parse_file(config.netlist)
-        self.goals = build_design_goals(config.design_goals, netlist)
+        netlist.select_surrogates(self._surrogate_masters)
+        self.goals = build_design_goals(config.design_goals, netlist, self._simulator_cls)
         for goal in self.goals:
             self.goal_list.addItem(self._goal_label(goal))
         self.loss_history = {index: [] for index in range(len(self.goals))}
         self._refresh_sim_params_for_goals()
-        for section, values in config.simulation_parameters.items():
+        for written, values in config.simulation_parameters.items():
+            # "AC" and ".AC" name the same analysis, as in a headless run.
+            section = written
+            if not written.upper().startswith(".OPTIONS:"):
+                section = SimulationType.from_directive(
+                    written if written.startswith(".") else f".{written}"
+                ).value.upper()
             for name, value in values.items():
                 key = f"{section}:{name}"
                 edit = self._sim_param_edits.get(key)
+                form = self._sim_param_forms.get(section)
+                if edit is None and form is not None and self._named_analysis_parameters():
+                    edit = self._add_sim_param_edit(section, form, name, "")
                 if edit is None:
                     raise ConfigurationError(f"Simulation setting '{key}' is not available")
                 edit.setText(value)
@@ -1383,9 +1445,12 @@ class MainWindow(QMainWindow):
 
     def on_netlist_selected(self):
         """Handle netlist selection with automatic parsing."""
-        fname, _ = QFileDialog.getOpenFileName(self, "Select netlist", "", "Netlist files (*.cir *.sp)")
+        fname, _ = QFileDialog.getOpenFileName(
+            self, "Select netlist", "", "Netlist files (*.cir *.sp *.sim *.scs *.spectre);;All files (*)"
+        )
         if fname:
             self.netlist_edit.setText(fname)
+            self._surrogate_masters.clear()
             self.opt_params.clear()
             self.param_table.setRowCount(0)
             self.parse_and_update_components(fname)
@@ -1394,7 +1459,9 @@ class MainWindow(QMainWindow):
         """Parse netlist and update UI with detected components, simulation type and port count."""
         try:
             netlist = self._simulator_cls.netlist_parser.parse_file(netlist_path)
+            netlist.select_surrogates(self._surrogate_masters)
             components = netlist.components
+            self._populate_surrogate_master_combo(netlist)
 
             # Update available parameters (full list for port count — not gated by sim type)
             sim_type = netlist.simulation_type
@@ -1468,7 +1535,12 @@ class MainWindow(QMainWindow):
 
     def _rebuild_design_parameters(self) -> None:
         """Rebuild the available design parameters for the current netlist and analysis point."""
-        self._available_parameters = get_available_parameters(self._num_ports)
+        supported = self._simulator_cls.supported_simulation_types
+        self._available_parameters = [
+            parameter
+            for parameter in get_available_parameters(self._num_ports)
+            if parameter.simulation_type in supported
+        ]
         node = self.analysis_point
         if not node:
             return
@@ -1515,6 +1587,18 @@ class MainWindow(QMainWindow):
         self.config_form_layout.setRowVisible(self.analysis_point_combo, show_point)
         self._update_plot_view_availability()
 
+    def _named_analysis_parameters(self) -> bool:
+        """Whether the simulator's analyses take named arguments beyond the editable slots."""
+        return self._simulator_cls.named_analysis_parameters
+
+    def _add_sim_param_edit(self, section: str, form: QFormLayout, name: str, value: str) -> QLineEdit:
+        """Add a field for the named analysis argument *name* to the *section* group."""
+        edit = QLineEdit(value)
+        edit.setToolTip(tooltip("named_analysis_param"))
+        form.addRow(self._setting_label(name), edit)
+        self._sim_param_edits[f"{section}:{name}"] = edit
+        return edit
+
     def _populate_sim_param_widgets(self, sim_types: "set[SimulationType]") -> None:
         """Create editable fields for each sim type in *sim_types*.
 
@@ -1528,6 +1612,7 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
         self._sim_param_edits.clear()
+        self._sim_param_forms.clear()
 
         skip = {"sweep_type", "src_name"}
 
@@ -1547,8 +1632,14 @@ class MainWindow(QMainWindow):
 
             # Pull values from the parsed directive that matches this type
             parsed_values: dict = {}
+            named_values: dict[str, str] = {}
             for d in self._parsed_directives:
                 if d.simulation_type is sim_type:
+                    if self._named_analysis_parameters():
+                        # VACASK analyses also take named arguments, e.g. hb nharm=3.
+                        named_values = {
+                            k: v for k, v in d.kv_params.items() if k not in _STRUCTURAL_ANALYSIS_PARAMS
+                        }
                     for i, name in enumerate(param_names):
                         if i < len(d.positional):
                             # For the last named param, absorb all remaining positional
@@ -1570,6 +1661,9 @@ class MainWindow(QMainWindow):
                     edit.setToolTip(descriptions[name])
                 form.addRow(self._setting_label(name), edit)
                 self._sim_param_edits[key] = edit
+            for name, value in named_values.items():
+                self._add_sim_param_edit(directive_key, form, name, value)
+            self._sim_param_forms[directive_key] = form
             self.sim_params_layout.addWidget(group)
 
             # --- .options group box (if relevant params exist) ---
@@ -1647,6 +1741,36 @@ class MainWindow(QMainWindow):
 
         # Re-evaluate visibility in case fine-tuning is already enabled
         self._update_geometry_selectors_visibility()
+
+    def _populate_surrogate_master_combo(self, netlist) -> None:
+        """Offer the subcircuits that are not surrogates yet."""
+        candidates = sorted(set(netlist.masters) - set(netlist.components))
+        self.surrogate_master_combo.clear()
+        for name in candidates:
+            pins = netlist.masters[name]
+            self.surrogate_master_combo.addItem(f"{name} ({len(pins)} pins)", name)
+        self.config_form_layout.setRowVisible(
+            self.surrogate_master_row, bool(candidates or self._surrogate_masters)
+        )
+
+    def _reparse_keeping_models(self) -> None:
+        """Parse the netlist again, keeping the model paths already entered."""
+        models = {name: edit.text() for name, edit in self.component_onnx_edits.items()}
+        self.parse_and_update_components(self.netlist_edit.text())
+        for name, path in models.items():
+            if name in self.component_onnx_edits and path:
+                self.component_onnx_edits[name].setText(path)
+
+    def _add_surrogate_master(self) -> None:
+        name = self.surrogate_master_combo.currentData()
+        if name:
+            self._surrogate_masters.add(name)
+            self._reparse_keeping_models()
+
+    def _clear_surrogate_masters(self) -> None:
+        if self._surrogate_masters:
+            self._surrogate_masters.clear()
+            self._reparse_keeping_models()
 
     def clear_component_onnx_selectors(self):
         """Remove all component model rows and geometry selectors from the UI."""
@@ -1924,6 +2048,8 @@ class MainWindow(QMainWindow):
         self._start_elapsed_clock()
         self.fine_tuning_active = False
         self.fine_tuning_notification_shown = False
+        self._run_display_timer.stop()
+        self._pending_context = None
 
         # Clear plots
         self.s_param_plot.clear()
@@ -1935,6 +2061,7 @@ class MainWindow(QMainWindow):
 
         self.worker = OptimizationWorker(configured_run)
         self.worker.progress.connect(self.on_progress)
+        self.worker.result.connect(self.on_result)
         self.worker.ask_continue.connect(self.on_ask_continue, Qt.ConnectionType.BlockingQueuedConnection)
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
@@ -1986,6 +2113,42 @@ class MainWindow(QMainWindow):
         else:
             self._update_progress_display(iteration, max_iterations)
 
+        self._record_losses(context)
+        if self._run_display_timer.isActive():
+            self._pending_context = context
+            return
+        self._show_context(context)
+        self._run_display_timer.start()
+
+    def _show_pending_context(self) -> None:
+        """Show the newest trial that arrived while the display was throttled."""
+        if self._pending_context is None:
+            return
+        context, self._pending_context = self._pending_context, None
+        self._show_context(context)
+        self._run_display_timer.start()
+
+    def _record_losses(self, context: OptimizationContext) -> None:
+        """Append *context*'s goal penalties to the loss history; every trial counts, shown or not."""
+        for i, goal in enumerate(context.goals):
+            if i in self.loss_history:
+                loss = goal.current_penalty if goal.current_penalty is not None else 0.0
+                self.loss_history[i].append(float(np.asarray(loss).reshape(-1)[0]))
+
+    @Slot(object)
+    def on_result(self, context: OptimizationContext):
+        """Show the run's final context.
+
+        Without the goals met it holds the best parameters found, re-simulated,
+        rather than the last trial, which may even have failed.
+        """
+        # A throttled trial still pending must not overwrite the final result.
+        self._run_display_timer.stop()
+        self._pending_context = None
+        self._show_context(context)
+
+    def _show_context(self, context: OptimizationContext) -> None:
+        """Show *context*'s parameters, goals and plots, and redraw the recorded loss history."""
         # 1. Update Parameters Table (Current Values)
         net_params = context.netlist_parameters
         model_params = context.model_parameters
@@ -2078,13 +2241,7 @@ class MainWindow(QMainWindow):
             self.goal_table.setItem(r, 2, val_item)
 
         # 3. Update Loss Plot
-        losses = [goal.current_penalty if goal.current_penalty is not None else 0.0 for goal in current_goals]
-
         if self.loss_history:  # Ensure loss history is initialized
-            for i, loss in enumerate(losses):
-                if i in self.loss_history:
-                    self.loss_history[i].append(float(np.asarray(loss).reshape(-1)[0]))
-
             self.loss_plot.clear()
             for i, hist in self.loss_history.items():
                 if hist:

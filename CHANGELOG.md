@@ -5,7 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 3.0.0 - 2026-10-12
+
+### Added
+- Xyce small-signal noise: `.NOISE` is a supported analysis, the `NF` goal works with
+  `XyceSimulator`, and COBRA adds `.NOISE`/`.PRINT NOISE` when needed. The noise run
+  drives only its input port, with `AC 1`, because Xyce refers the noise to the input
+  with the gain of an AC solve that keeps every source's AC magnitude.
+- Xyce surrogates are noiseless: `vector_fit` writes each resistor of the fitted
+  subcircuit as a self-controlled conductance (`noiseless_resistors`); AC/HB results
+  are unchanged (bit-identical on the transformer example).
+- A noise analysis COBRA adds sweeps the frequency band of its noise goals unless
+  `simulation_parameters` set `from`/`to`; `cobra parse` warns about a noise goal
+  outside its sweep.
+- VACASK simulator backend (`VacaskSimulator`, `"simulator": {"name": "VacaskSimulator"}`)
+  that reads native VACASK netlists (`VacaskNetlistParser`), vector-fits surrogates
+  into a VACASK subcircuit (`vector_fit_vacask`) and reads raw files (`read_raw`).
+  Supports AC (`acsp`), HB, transient, noise and hbnoise analyses. See
+  `docs/advanced/vacask.md` and `examples/configs/vacask_trafo_acsp.json`.
+- `SimulationType.NOISE` and `HBNOISE`, and the catalogue goals `NF`, `NF_SSB` and `NF_DSB`.
+- `BaseSimulator.supported_simulation_types` and `command_setting`; design goals
+  that need an analysis the simulator cannot run are rejected before the run.
+- `cobra init` and `cobra parse` take `--simulator NAME`; `cobra doctor` lists `vacask`.
+- The GUI offers `VacaskSimulator`, accepts `*.sim`, `*.scs` and `*.spectre` netlists
+  and lists only the goals the selected simulator supports.
+- VACASK surrogates are written by [snp2le](https://github.com/iic-jku/snp2le)
+  (a new required dependency) in universal mode; `vacask_include` makes the file
+  self-contained (`ground GND`, device `load` lines, local `model` bindings).
+- `VacaskSimulator` setting `vector_fit_max_order` (default 12), the highest
+  model order snp2le may use.
+- Surrogates by subcircuit name: a `component_models` key may name a subcircuit
+  (defined in the netlist or an include) instead of an instance. COBRA renames
+  every instance of it, at any depth, to `<name>_subct` and includes the fitted
+  file (VACASK and Xyce). API: `Netlist.masters`, `select_surrogates`,
+  `mark_surrogate_masters`, `use_surrogate`, `Subcircuit.pins`, and the parser
+  hooks `instance_master` and `surrogate_include`.
+- VACASK port detection without `acsp`: a top-level vsource from ground to a node
+  shared only with one resistor is a port (`VacaskNetlistParser.grounds`).
+- VACASK ports are probe points named after their source (`add_port_signals`), so
+  `Power_dBm` and `Gain_dB` work on netlists without 0 V probe sources.
+- Example preset `examples/configs/vacask_lna_inductor.json` with
+  `examples/netlists/VACASK/lna_inductor.sim`: the 130 GHz LNA with the ORCA inductor
+  surrogate for VACASK (`vector_fit_max_order` 40).
+- GUI: "Subcircuit surrogate" row (combo of the netlist's subcircuits, **Use as
+  surrogate**, **Clear**); loading a configuration restores subcircuit surrogates.
+- `VacaskSimulator` setting `surrogate_thermal_noise` (requires `enforce_passivity`):
+  snp2le adds a generator of each surrogate's thermal noise, kT(I - S S^H) at its
+  ports, so noise figures include the passives' losses. A fit that is not strictly
+  passive stays noiseless, and COBRA warns, naming snp2le's passivity-enforcement path.
+- With `parallel_trials` above 1, the surrogates are vector-fitted in that many worker
+  processes, each on one BLAS thread (new dependency `threadpoolctl`), because fits in
+  threads of one process cannot overlap. A Python script that runs COBRA this way
+  must start it under `if __name__ == "__main__":`.
+- Run timing reports vector fitting as its own stage (`times["vector_fitting"]`); it
+  is no longer counted as circuit simulation.
+- GUI: when a run ends, the parameters, goals and plots show its final result: the
+  trial that met the goals or, if none did, the best parameters found, re-simulated.
+- `Netlist.port_impedances` and the parser hook `port_impedances`: the reference
+  impedance of every port, driven or not (Xyce: the P element's `z0`; VACASK: the
+  port resistor).
 
 ### Changed
 - **Breaking:** the netlist API is split into a parser and a parsed document.
@@ -20,10 +78,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (moved from `CircuitSimulationStage`) and `run_simulation(netlist_path, netlist)`.
 - Edits replace only the edited token, so spacing, inline comments and
   continuation layout are kept and untouched lines render unchanged.
+- VACASK surrogates are now written by snp2le; COBRA's own `vacask_subcircuit`
+  is removed and `vector_fit_vacask` takes `max_order`.
 - Performance: a netlist is no longer re-parsed after every edit. Rendering 10
   parameters of the 4 869-line mixer netlist went from about 50 ms to about 0.2 ms.
+- A surrogate whose band starts below 1 GHz is also evaluated at the sub-GHz points
+  ORCA's presets simulate (10, 20, 100, 200, 300, 500 and 700 MHz). snp2le drops the
+  0 Hz point, so these set the DC resistance of VACASK surrogates: on ORCA inductors
+  its median error falls from about 16% to 10%. Results of existing runs can shift
+  slightly.
+- COBRA requires snp2le 0.1.13, which keeps overlapping fits in threads from
+  disturbing the process's streams and BLAS threads, stops and refits an `auto_fit`
+  that does not settle, writes element values at full precision (with 10 digits,
+  high-order subcircuits could drift from the fitted model) and names the constant
+  term D when a fit cannot be made passive. COBRA no longer serialises snp2le fits.
+- The GUI redraws its tables and plots at most every 200 ms during a run, so parallel
+  trials no longer make it lag; the loss history still records every trial.
+- Example configurations `netlist_xyce_vector.json` and `vacask_trafo_acsp.json` sweep
+  100-170 GHz and optimise S22 and S21 over 122-140 GHz.
 
 ### Fixed
+- `cobra run`'s "missing models" error names the included files it could not find,
+  since devices from an unfound PDK include look like surrogates without a model.
+- A surrogate fit could hang a run: scikit-rf's `auto_fit` can cycle forever (6 of
+  800 ORCA models at order 20; 3 of 20 ORCA inductors at its default order limit),
+  and every other trial waited for it. Xyce: COBRA stops the fit after 1000 pole
+  relocations with `VectorFitError`, and `CircuitSimulationStage` penalises that trial
+  instead of aborting the run. VACASK: snp2le stops it after 250 relocations and
+  refits, so the trial keeps a model.
+- `cobra parse` showed `z0=None` for a port without a source (a terminating port, e.g.
+  xschem's `Vout ... vsource dc=0`); it now shows the port's reference impedance.
+- Injecting an analysis into a Xyce netlist no longer drops `.OPTIONS DEVICE` (e.g. the
+  circuit temperature); only analysis-specific `.OPTIONS` lines are replaced.
+- `Netlist.update_simulation_directive` no longer drops later slots when it updates
+  an earlier one; only the last, variadic slot is trimmed.
+- The GUI reads a loaded configuration's netlist with the configured simulator.
+- `cobra parse` of an invalid configuration read its netlist with the Xyce parser
+  regardless of the configured simulator.
+- The GUI showed the previous simulator's settings rows at the top left until they
+  were deleted when the simulator was switched.
+- Loading a configuration in the GUI accepts `simulation_parameters` keys without the
+  leading dot (`"AC"` as well as `".AC"`), as `cobra run` does, and shows VACASK's named
+  analysis arguments (e.g. `nharm`) as fields instead of rejecting them.
 - `+` continuation lines are part of their statement: their parameters are read
   and edited, and removing a directive removes its continuation lines.
 - An `X` instance may come before its `.SUBCKT`.

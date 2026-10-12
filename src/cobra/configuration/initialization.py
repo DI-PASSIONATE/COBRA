@@ -98,9 +98,11 @@ def _goal_parameters(report: NetlistReport) -> list[str]:
 
 
 def initial_configuration(
-    netlist: str | Path, models: Mapping[str, str] | None = None
+    netlist: str | Path,
+    models: Mapping[str, str] | None = None,
+    simulator: str = "XyceSimulator",
 ) -> InitialConfiguration:
-    """Return a starter configuration for *netlist*.
+    """Return a starter configuration for *netlist*, simulated by *simulator*.
 
     *models* maps component names to ONNX or Touchstone files, relative to the
     current directory.  A component without one keeps the netlist's own
@@ -109,8 +111,13 @@ def initial_configuration(
     # Imported here: the runner pulls in the full COBRA pipeline.
     from cobra.configuration.config_runner import OPTIMIZER_REGISTRY, SIMULATOR_REGISTRY
 
+    if simulator not in SIMULATOR_REGISTRY:
+        raise ConfigurationError(
+            f"Unsupported simulator '{simulator}'. Supported: {', '.join(SIMULATOR_REGISTRY)}"
+        )
     netlist_path = Path(netlist).expanduser().resolve()
-    parsed = load_netlist(netlist_path)
+    parsed = load_netlist(netlist_path, SIMULATOR_REGISTRY[simulator].netlist_parser)
+    parsed.select_surrogates(models or {})
     component_models = _component_models(parsed, netlist_path, models or {})
     defaults = RunConfiguration(netlist=str(netlist_path))
     configuration = RunConfiguration(
@@ -118,7 +125,7 @@ def initial_configuration(
         component_models=component_models,
         simulation_parameters=_simulation_parameters(parsed),
         optimizer=_default_backend(defaults.optimizer.name, OPTIMIZER_REGISTRY),
-        simulator=_default_backend(defaults.simulator.name, SIMULATOR_REGISTRY),
+        simulator=_default_backend(simulator, SIMULATOR_REGISTRY),
     )
     return InitialConfiguration(
         configuration=configuration,

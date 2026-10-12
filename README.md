@@ -19,7 +19,7 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 **COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design: a circuit-level optimizer that consumes surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA). It combines:
 
 - surrogate-model S-parameter prediction (from [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
-- circuit-level SPICE simulation via Xyce,
+- circuit-level simulation via Xyce or [VACASK](https://codeberg.org/arpadbuermen/VACASK),
 - goal-driven optimization (Optuna-based).
 - optional EM fine-tuning (Palace) to ensure accurate results
 - and real-time visualization of optimization progress
@@ -49,7 +49,8 @@ In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA 
 ### Requirements
 
 - Python 3.11 to 3.13
-- [Xyce](https://xyce.sandia.gov/) (current circuit simulator backend)
+- [Xyce](https://xyce.sandia.gov/) (default circuit simulator backend) or [VACASK](https://codeberg.org/arpadbuermen/VACASK) (optional second backend, native VACASK netlists; see [docs](docs/advanced/vacask.md))
+- [snp2le](https://github.com/iic-jku/snp2le) (installed with COBRA; writes the VACASK surrogates)
 - [Qucs-S](https://qucs-s-help.readthedocs.io/en/latest/) (to create a '.cir' netlist for Xyce)
 - A component model source per parsed component:
     - [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
@@ -206,7 +207,7 @@ it finds an error that would stop a run.
 Check the environment before a run, and turn up the detail when one misbehaves:
 
 ```bash
-cobra doctor                                  # packages, Xyce, Palace
+cobra doctor                                  # packages, Xyce, VACASK, Palace
 cobra run config.json -v                      # debug output
 cobra run config.json --log-file results/run.log
 ```
@@ -442,7 +443,7 @@ The ONNX model (produced by ORCA) receives the current geometry parameters and a
 
 Before inference, the geometry is checked against the feasibility constraints the model declares in its `input_constraints` metadata (written by ORCA). A trial that violates one is not simulated at all, since the surrogate was never trained on that geometry, and it does not count as an iteration: Optuna records it as pruned and suggests a replacement (optimizers without a pruned state get the failed-simulation penalty instead).
 
-The sweep covers the whole band the model declares in its `input_parameter_ranges` metadata (the `frequency` entry, written by ORCA), in 1 GHz steps; a model without that metadata is rejected before the run starts, since COBRA will not guess a band. The full band is used deliberately rather than just the design goals' range: the vector fit of the next stage extrapolates freely outside the frequencies it was given, and Xyce evaluates the fitted subcircuit at the DC operating point and at every harmonic of an `.HB` or `.TRAN` analysis. `cobra parse` warns when the netlist's `.AC` sweep or `.HB` harmonics reach beyond the model's band.
+The sweep covers the whole band the model declares in its `input_parameter_ranges` metadata (the `frequency` entry, written by ORCA), in 1 GHz steps; a model without that metadata is rejected before the run starts, since COBRA will not guess a band. A band that starts below 1 GHz also gets the sub-GHz points ORCA's presets simulate (10, 20, 100, 200, 300, 500 and 700 MHz). The full band is used deliberately rather than just the design goals' range: the vector fit of the next stage extrapolates freely outside the frequencies it was given, and Xyce evaluates the fitted subcircuit at the DC operating point and at every harmonic of an `.HB` or `.TRAN` analysis. `cobra parse` warns when the netlist's `.AC` sweep or `.HB` harmonics reach beyond the model's band.
 
 ONNX was chosen because it is a portable, framework-agnostic format: the model runs with `onnxruntime` at inference time without requiring the full training environment (PyTorch, TensorFlow, …), keeping COBRA's dependency footprint small and deployment straightforward.
 
@@ -455,6 +456,8 @@ A plain Touchstone file (`.sNp`) can also be used instead of an ONNX model when 
 Xyce (like all SPICE-family simulators) cannot read a Touchstone file directly as a component. SPICE netlists describe circuits in terms of lumped elements and analytical subcircuits — there is no native mechanism to embed a tabulated frequency-domain response.
 
 COBRA solves this by vector-fitting the surrogate-predicted S-parameter network using `scikit-rf`'s `VectorFitting` implementation. Vector fitting approximates the frequency response as a sum of rational functions (poles and residues). The fitted model is then written out as a standard SPICE subcircuit (`.sp`) containing only resistors, capacitors, inductors, and controlled sources — elements every SPICE engine understands natively.
+
+`VectorFitting.auto_fit` has no iteration limit and, on some data, never converges: its adding-and-skimming loop can cycle between two model orders forever (3 of 20 ORCA inductors tested at its default order limit). COBRA stops such a fit after 1000 pole relocations (a converging fit needs about 20 to 120), logs a warning and penalises that trial. The VACASK backend's fitter, snp2le, has its own limit (250 relocations) and refits a stuck fit instead, so there the trial keeps a model.
 
 The generated subcircuit is automatically included in the patched netlist via a `.INCLUDE` directive, so Xyce sees a fully self-contained netlist on every iteration.
 

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -62,6 +63,39 @@ def _isolate_cobra_logging():
             target.handlers[:] = handlers
             target.setLevel(level)
         logger.propagate = propagate
+
+
+@pytest.fixture
+def window():
+    """A COBRA main window on Qt's offscreen platform; skipped without PySide6 or
+    the system libraries Qt's GUI modules load (e.g. libEGL).
+    """
+    # Imported here, not at collection: test_cli checks the CLI never loads Qt.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip(
+        "PySide6.QtWidgets", reason="PySide6's Qt GUI libraries cannot be loaded", exc_type=ImportError
+    )
+    from PySide6.QtWidgets import QApplication
+
+    from cobra.gui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    main_window = MainWindow()
+    yield main_window
+    main_window.close()
+    app.processEvents()
+
+
+def skrf_medium(frequency: Any, z0: float = 50.0) -> Any:
+    """A 50 ohm scikit-rf medium for building test networks, returned untyped.
+
+    scikit-rf annotates element values as ``numbers.Number``. Python registers int
+    and float as numbers only at runtime, which type checkers do not see, so every
+    literal such as ``media.line(30, "deg")`` would be reported as the wrong type.
+    """
+    import skrf as rf
+
+    return cast("Any", rf.media.DefinedGammaZ0)(frequency, z0=z0)
 
 
 def netlist_path(name: str) -> Path:

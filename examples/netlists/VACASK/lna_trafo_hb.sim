@@ -1,0 +1,75 @@
+LNA with an output balun and a transformer surrogate (VACASK port of LNA/lna_trafo_hb.cir)
+ground 0
+
+load "resistor.osdi"
+load "capacitor.osdi"
+load "inductor.osdi"
+model r resistor
+model c capacitor
+model l inductor
+model vsource vsource
+
+// IHP SG13G2 models converted for VACASK with its sg13g2tovc script (run once
+// with PDK_ROOT set). The PDK's .vacaskrc.toml, or SIM_INCLUDE_PATH and
+// SIM_MODULE_PATH, must point VACASK to libs.tech/vacask/models and .../osdi.
+include "sg13g2_vacask_common.lib"
+include "cornerHBT.lib" section=hbt_typ
+include "cornerRES.lib" section=res_typ
+
+// The transformer surrogate: COBRA writes X1.inc from its S-parameters.
+include "X1.inc"
+X1 (ip Vdd op on _net9 _net10) trafo
+
+// Ideal transformer, as Qucs-S's xfmr.cir: V(p3,p4) = ratio * V(p1,p2).
+subckt xfmr (p1 p2 p3 p4)
+  parameters ratio=1
+  model vcvs vcvs
+  model cccs cccs
+  e (n5 p4 p1 p2) vcvs gain=ratio
+  f (p1 p2) cccs ctlinst="vm" gain=ratio
+  vm (n5 n6) vsource dc=0
+  rp (p1 p2) r r=1M
+  rs (n6 p3) r r=1u
+ends
+
+subckt ideal_balun (n1 n4 n3 n0 n2)
+  w1 (n1 n2 n4 n3) xfmr ratio=0.5
+  w2 (n1 n2 n0 n4) xfmr ratio=0.5
+ends
+
+parameters cout=44f
+v1 (Vdd 0) vsource dc=2.5
+L1 (_net0 _net1) l l=100p
+C1 (0 on) c c=cout
+L2 (_net2 _net1) l l=40p
+// nx as a real number: the PDK computes (4/nx), which VACASK evaluates as an
+// integer division for an integer nx (nx=8 would zero the series resistances).
+xnpn1 (_net0 _net0 0 sub) npn13G2 nx=1.0
+R1 (_net3 Vdd) r r=3k
+R2 (0 _net3) r r=13k
+R3 (_net0 Vdd) r r=2.5k
+C2 (0 _net0) c c=200f
+C3 (0 _net2) c c=38f
+C4 (_net4 _net2) c c=300f
+C5 (0 _net3) c c=72f
+xnpn2 (_net5 _net1 0 sub) npn13G2 nx=8.0
+xnpn3 (ip _net3 _net5 sub) npn13G2 nx=8.0
+xptap1 (sub 0) ptap1 w=0.78u l=0.78u
+xbalun (Out Vdd on op 0) ideal_balun
+C6 (0 op) c c=cout
+
+// Output probe: v<node> is a 0 V source starting at the node, as in Qucs-S.
+vOut (Out _net8) vsource dc=0
+// Ports: 0 V-referenced sources with their reference resistors.
+vp1 (a1 0) vsource dc=0 mag=0.074833148 type="sine" ampl=0.074833148 freq=130G
+rp1 (a1 _net4) r r=70
+vp2 (a2 0) vsource dc=0 mag=0.89442719
+rp2 (a2 _net8) r r=100
+
+control
+  save v(Out) i(vOut) v(Vdd) v(ip) v(on) v(op)
+  // The first analysis is the netlist's own: COBRA always runs it.
+  analysis hb1 hb freq=[130G] nharm=3
+  // Declares the ports; runs only when a goal needs S-parameters.
+  analysis sp1 acsp ports=["vp1", "rp1", "vp2", "rp2"] from=100G to=170G mode="lin" points=70
+endc

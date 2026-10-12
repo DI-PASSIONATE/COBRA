@@ -9,12 +9,14 @@ must abort the run.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import skrf as rf
 
 from cobra.optimizers.design_goal import (
     FAILED_SIMULATION_PENALTY,
@@ -28,9 +30,10 @@ from cobra.spice_sim.base_simulator import (
     SimulatorError,
 )
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.circuit_sim_stage import CircuitSimulationStage
-from tests.conftest import make_context, netlist_path
+from tests.conftest import make_context, netlist_path, skrf_medium
 
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
@@ -118,6 +121,96 @@ def test_failed_run_clears_the_previous_iterations_result(tmp_path, caplog):
 
     assert context.simulation_results == {}
     assert "AC" in caplog.text
+
+
+class _UnfittableSimulator(_StubSimulator):
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
+        raise VectorFitError("vector fit did not converge in 1000 pole relocations")
+
+
+def test_a_surrogate_that_cannot_be_fitted_is_a_simulation_failure(tmp_path, caplog):
+    """One trial's unfittable surrogate is penalised; it must not abort the whole run."""
+    context = _stage_context(tmp_path)
+    context.predicted_networks = [rf.Network(name="X1")]
+    stage = CircuitSimulationStage(_UnfittableSimulator([]))
+
+    with caplog.at_level(logging.WARNING):
+        context = stage.run(context)
+
+    assert context.simulation_results == {}
+    assert "did not converge" in caplog.text
+    assert context.design_goal_checker.check_goals(context).goal_achieved is False
+
+
+def _line_with_shunt_capacitor() -> rf.Network:
+    frequency = rf.Frequency(1, 20, 41, "GHz")
+    media = skrf_medium(frequency)
+    return media.line(30, "deg") ** media.shunt_capacitor(0.2e-12)
+
+
+def test_xyce_vector_fit_gives_up_instead_of_looping(tmp_path, monkeypatch):
+    """scikit-rf's auto_fit can cycle forever; the Xyce surrogate fit stops with an error."""
+    import importlib
+
+    from skrf.vectorFitting import VectorFitting
+
+    # The package re-exports the function vector_fit under the module's name.
+    module = importlib.import_module("cobra.spice_sim.vector_fit")
+    relocate = VectorFitting._pole_relocation
+    monkeypatch.setattr(module, "_MAX_POLE_RELOCATIONS", 2)
+
+    with pytest.raises(VectorFitError, match="could not model X1: vector fit did not converge in 2"):
+        module.vector_fit(_line_with_shunt_capacitor(), str(tmp_path / "X1"))
+    assert VectorFitting._pole_relocation is relocate
+
+
+def test_concurrent_xyce_fits_restore_the_relocation_hook(tmp_path):
+    """The bound swaps a class attribute; fits in threads must not leave a stand-in behind."""
+    import importlib
+    from concurrent.futures import ThreadPoolExecutor
+
+    from skrf.vectorFitting import VectorFitting
+
+    module = importlib.import_module("cobra.spice_sim.vector_fit")
+    relocate = VectorFitting._pole_relocation
+    network = _line_with_shunt_capacitor()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda k: module.vector_fit(network, str(tmp_path / f"X{k}")), range(16)))
+    assert VectorFitting._pole_relocation is relocate
+
+
+class _ProcessReportingSimulator(_StubSimulator):
+    """Records the process that fitted the network, and logs from it."""
+
+    def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
+        Path(name + ".pid").write_text(str(os.getpid()), encoding="utf-8")
+        logging.getLogger("cobra.spice_sim.vector_fit").warning("fitted in a worker")
+        return name
+
+
+def test_fitting_processes_fit_outside_the_trial_thread(tmp_path, caplog):
+    context = _stage_context(tmp_path)
+    context.predicted_networks = [rf.Network(name="X1")]
+    stage = CircuitSimulationStage(_ProcessReportingSimulator([SimulationResult()]))
+
+    with caplog.at_level(logging.WARNING), stage.fitting_processes(2):
+        context = stage.run(context)
+
+    assert int((tmp_path / "X1.pid").read_text(encoding="utf-8")) != os.getpid()
+    assert "fitted in a worker" in caplog.text
+    assert SimulationType.AC in context.simulation_results
+
+
+def test_a_fit_that_fails_in_a_fitting_process_is_a_simulation_failure(tmp_path, caplog):
+    context = _stage_context(tmp_path)
+    context.predicted_networks = [rf.Network(name="X1")]
+    stage = CircuitSimulationStage(_UnfittableSimulator([]))
+
+    with caplog.at_level(logging.WARNING), stage.fitting_processes(2):
+        context = stage.run(context)
+
+    assert context.simulation_results == {}
+    assert "did not converge" in caplog.text
 
 
 # ---------------------------------------------------------------------------

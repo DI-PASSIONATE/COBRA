@@ -12,11 +12,12 @@ import json
 import re
 import shlex
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from cobra import __main__ as cli
+from cobra.configuration.config_runner import SIMULATOR_REGISTRY
 from cobra.configuration.configuration import (
     DesignGoalConfig,
     OptimizationParameterConfig,
@@ -25,6 +26,9 @@ from cobra.configuration.configuration import (
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from tests.conftest import REPO_ROOT
+
+if TYPE_CHECKING:
+    from cobra.spice_sim.base_simulator import BaseSimulator
 
 DOCUMENTS = sorted(
     [
@@ -91,16 +95,29 @@ def _cobra_commands() -> list[Any]:
     return commands
 
 
-def _check_simulation_parameters(parameters: dict[str, dict[str, str]]) -> None:
-    """Directive entries must name parameters the simulator knows; ``.OPTIONS`` entries are free-form."""
+def _check_simulation_parameters(
+    parameters: dict[str, dict[str, str]], simulator: type[BaseSimulator] = XyceSimulator
+) -> None:
+    """Directive entries must name analyses the simulator runs; ``.OPTIONS`` entries are free-form.
+
+    Xyce takes only the positional slots; a VACASK analysis takes any of its named arguments.
+    """
     for directive, values in parameters.items():
         assert all(isinstance(value, str) for value in values.values()), directive
         if directive.upper().startswith(".OPTIONS:"):
             continue
-        simulation_type = SimulationType.from_directive(directive)
-        assert simulation_type is not SimulationType.UNKNOWN, directive
-        known = XyceSimulator.get_simulation_metadata(simulation_type).positional_param_names
-        assert set(values) <= set(known), f"{directive}: {sorted(set(values) - set(known))}"
+        simulation_type = SimulationType.from_directive(directive if directive.startswith(".") else f".{directive}")
+        assert simulation_type in simulator.supported_simulation_types, directive
+        if simulator is XyceSimulator:
+            known = simulator.get_simulation_metadata(simulation_type).positional_param_names
+            assert set(values) <= set(known), f"{directive}: {sorted(set(values) - set(known))}"
+
+
+def _check_simulator(backend: dict[str, Any]) -> type[BaseSimulator]:
+    simulator = SIMULATOR_REGISTRY[backend["name"]]
+    names = {setting.name for setting in getattr(simulator, "_settings", [])}
+    assert set(backend.get("settings", {})) <= names, sorted(set(backend.get("settings", {})) - names)
+    return simulator
 
 
 @pytest.mark.parametrize("example", _json_examples())
@@ -121,7 +138,12 @@ def test_json_example_matches_the_schema(example: dict[str, Any], tmp_path: Path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.touch()
         RunConfiguration.from_dict(example, base)
-        _check_simulation_parameters(example.get("simulation_parameters", {}))
+        _check_simulation_parameters(
+            example.get("simulation_parameters", {}), _check_simulator(example.get("simulator", {"name": "XyceSimulator"}))
+        )
+    elif example.keys() <= {"simulator", "simulation_parameters"}:
+        simulator = _check_simulator(example["simulator"]) if "simulator" in example else XyceSimulator
+        _check_simulation_parameters(example.get("simulation_parameters", {}), simulator)
     elif "parameter" in example:
         DesignGoalConfig.from_dict(example).validate()
     elif {"name", "type"} <= example.keys():

@@ -124,9 +124,11 @@ class COBRA:
         if not isinstance(netlist, Netlist):
             raise TypeError("netlist must be a parsed Netlist")
 
-        components = netlist.components
         if component_onnx_mapping is None:
             component_onnx_mapping = {}
+        # A mapped name may be a subcircuit, replaced wherever it is used.
+        netlist.select_surrogates(component_onnx_mapping)
+        components = netlist.components
 
         # Validate that all components that have models are present in the netlist
         missing_components = set(component_onnx_mapping.keys()) - set(components.keys())
@@ -253,7 +255,7 @@ class COBRA:
         # Replace the component model names in the netlist to match the vector fitted subcircuits
         for comp_name in self.component_onnx_mapping:
             try:
-                parsed_netlist.set_model(comp_name, f"{comp_name}_subct")
+                parsed_netlist.use_surrogate(comp_name, f"{comp_name}_subct")
             except (KeyError, ValueError, NotImplementedError) as e:
                 logger.warning("Could not set the subcircuit model for %s: %s", comp_name, e)
         parsed_netlist.save(netlist)
@@ -308,7 +310,11 @@ class COBRA:
         stop = False
         in_flight: dict[Future[OptimizationContext], OptimizationContext] = {}
 
-        with ThreadPoolExecutor(max_workers=parallel_trials) as executor:
+        # The fitting processes outlive the trial threads, which finish first on exit.
+        with (
+            self.circuit_simulation_stage.fitting_processes(parallel_trials),
+            ThreadPoolExecutor(max_workers=parallel_trials) as executor,
+        ):
             while True:
                 # Keep the pool topped up. ask() and tell() stay on this thread, so
                 # the optimizer never sees concurrent calls. Rejected trials do not
@@ -474,9 +480,11 @@ class COBRA:
         if self.em_surrogate_stage is not None:
             self.em_surrogate_stage.run(context)
 
-        # Perform circuit-level simulation
+        # Perform circuit-level simulation; the stage records its vector fitting separately
         t3 = time.time()
+        fitting_before = context.times["vector_fitting"]
         self.circuit_simulation_stage.run(context)
+        fitting = context.times["vector_fitting"] - fitting_before
 
         # Check design goals
         t4 = time.time()
@@ -486,7 +494,7 @@ class COBRA:
         # Log times for each stage; the run-wide context sums them up in absorb_trial
         context.times["optimizer"] += t2 - t1
         context.times["em_surrogate"] += t3 - t2
-        context.times["circuit_simulation"] += t4 - t3
+        context.times["circuit_simulation"] += t4 - t3 - fitting
         context.times["design_goal_checking"] += t5 - t4
         context.times["total_time"] += t5 - t1
         return context
@@ -738,6 +746,7 @@ class COBRA:
         stages = [
             ("optimizer", "optimizer"),
             ("surrogate", "em_surrogate"),
+            ("vector fitting", "vector_fitting"),
             ("circuit simulation", "circuit_simulation"),
             ("goal checking", "design_goal_checking"),
         ]

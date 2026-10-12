@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobra-rfic"
-version = "2.0.0"
+version = "3.0.0"
 description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer: an open-source EDA tool for AI-assisted RFIC design combining Xyce SPICE simulation, ORCA ONNX EM surrogate models, and Optuna goal-driven optimization"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -75,6 +75,9 @@ dependencies = [
     "pyqtgraph>=0.13.7",
     "huggingface-hub>=0.25",
     "qtawesome>=1.4.2",
+    # Lumped-element models of the surrogates for VacaskSimulator
+    "snp2le>=0.1.13",
+    "threadpoolctl>=3.5",
 ]
 
 # ORCA supplies the geometry presets and the Palace simulation of EM fine-tuning. It is
@@ -102,7 +105,7 @@ Changelog = "https://github.com/DI-PASSIONATE/COBRA/blob/main/CHANGELOG.md"
 dev = [
     "ruff",
     "ty",
-    "pytest",
+    "pytest>=8.2",
     "pytest-cov",
     # So that ty and the tests check COBRA against ORCA's API
     "orca-rfic>=2.1,<3",

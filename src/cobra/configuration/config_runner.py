@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cobra.cobra import COBRA
@@ -20,17 +21,21 @@ from cobra.optimizers.design_goal_collection import (
 )
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from cobra.optimization_context import OptimizationContext
+    from cobra.spice_sim.base_simulator import BaseSimulator
     from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 OPTIMIZER_REGISTRY = {"OptunaOptimizer": OptunaOptimizer}
-SIMULATOR_REGISTRY = {"XyceSimulator": XyceSimulator}
+SIMULATOR_REGISTRY: dict[str, type[BaseSimulator]] = {
+    "XyceSimulator": XyceSimulator,
+    "VacaskSimulator": VacaskSimulator,
+}
 
 
 def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
@@ -92,10 +97,24 @@ def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
 
 
 def build_design_goals(
-    configurations: list[DesignGoalConfig], netlist: Netlist
+    configurations: list[DesignGoalConfig],
+    netlist: Netlist,
+    simulator: type[BaseSimulator] | None = None,
 ) -> list[DesignGoal]:
-    """Reconstruct design goals using the same validation as a headless run."""
-    return [_build_goal(config, netlist) for config in configurations]
+    """Reconstruct design goals using the same validation as a headless run.
+
+    With *simulator*, a goal whose analysis that simulator cannot run is rejected.
+    """
+    goals = [_build_goal(config, netlist) for config in configurations]
+    if simulator is not None:
+        for goal in goals:
+            simulation_type = goal.parameter.simulation_type
+            if simulation_type not in simulator.supported_simulation_types:
+                raise ConfigurationError(
+                    f"Design goal '{goal.parameter.name}' needs a {simulation_type.name} analysis, "
+                    f"which {simulator.__name__} cannot run"
+                )
+    return goals
 
 
 def _apply_simulation_parameters(
@@ -119,6 +138,17 @@ def _apply_simulation_parameters(
         if simulation_type in existing:
             netlist.update_simulation_directive(simulation_type, values)
     return by_type
+
+
+def _unresolved_includes(netlist: Netlist, configuration: RunConfiguration) -> list[str]:
+    """Included files the simulator cannot find, other than the surrogate files COBRA writes."""
+    directory = Path(configuration.netlist).resolve().parent
+    return [
+        included.file_path
+        for included in [*netlist.includes, *netlist.libraries]
+        if not (candidate := netlist.parser.resolve_include(included.file_path, directory)).is_file()
+        and candidate.stem not in configuration.component_models
+    ]
 
 
 @dataclass(slots=True)
@@ -171,6 +201,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         )
 
     netlist = simulator_class.netlist_parser.parse_file(configuration.netlist)
+    netlist.select_surrogates(configuration.component_models)
     components = set(netlist.components)
     configured_components = set(configuration.component_models)
     if components != configured_components:
@@ -179,6 +210,13 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         details = []
         if missing:
             details.append(f"missing models for {', '.join(sorted(missing))}")
+            unresolved = _unresolved_includes(netlist, configuration)
+            if unresolved:
+                details.append(
+                    f"these included files were not found, so masters they define look like "
+                    f"surrogates: {', '.join(unresolved)} (VACASK searches SIM_INCLUDE_PATH and "
+                    "~/.vacaskrc.toml; `cobra parse` lists where it looked)"
+                )
         if unknown:
             details.append(f"unknown components {', '.join(sorted(unknown))}")
         raise ConfigurationError("Component model mapping does not match netlist: " + "; ".join(details))
@@ -186,7 +224,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
     simulation_parameters = _apply_simulation_parameters(
         netlist, configuration.simulation_parameters
     )
-    goals = build_design_goals(configuration.design_goals, netlist)
+    goals = build_design_goals(configuration.design_goals, netlist, simulator_class)
     properties = [
         OptimizationProperty(
             name=item.name,

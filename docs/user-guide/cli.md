@@ -73,10 +73,11 @@ cobra parse design_config.json && cobra run design_config.json
 | --- | --- |
 | `-o`, `--output PATH` | Where to write the file (default: `<netlist stem>_config.json` in the current directory) |
 | `--model NAME=PATH` | ONNX or Touchstone model for component `NAME`; repeat for each component |
+| `--simulator NAME` | Simulator whose netlist dialect to read: `XyceSimulator` (default) or `VacaskSimulator` |
 | `--force` | Overwrite an existing output file |
 
 The file contains the netlist, the parameters of its analysis directives (`.AC`,
-`.HB`, `.TRAN`, `.DC`), the default optimizer and simulator settings, and a
+`.HB`, `.TRAN`, `.DC`; for VACASK `acsp`, `hb`, `tran`, `noise`, `hbnoise`), the default optimizer and simulator settings, and a
 model for every component given with `--model` or whose netlist `TSTONEFILE`
 exists. Paths are written relative to the output file. Components still without
 a model are listed on stderr, together with the design-goal parameters the
@@ -85,6 +86,16 @@ netlist supports.
 `design_goals` and `optimization_parameters` are left empty: they are design
 decisions COBRA cannot infer. `cobra parse` and `cobra run` reject a
 configuration until both have at least one entry.
+
+For a VACASK netlist pass the simulator, here and for `parse`:
+
+```bash
+cobra init examples/netlists/VACASK/trafo_acsp.sim --simulator VacaskSimulator
+cobra parse examples/netlists/VACASK/trafo_acsp.sim --simulator VacaskSimulator
+```
+
+`parse` applies `--simulator` to a netlist TARGET; for a configuration the
+simulator named in the file is used. See [VACASK Simulator](../advanced/vacask.md).
 
 ## Running a Configuration
 
@@ -124,7 +135,8 @@ pre-flight check in CI.
 cobra doctor
 ```
 
-Xyce is required for circuit simulation; when it comes from Spack, load it in
+Xyce is required for circuit simulation; `vacask` is listed as an optional
+executable (needed only for `VacaskSimulator`). When it comes from Spack, load it in
 the same shell first:
 
 ```bash

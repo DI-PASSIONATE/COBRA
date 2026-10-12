@@ -17,6 +17,16 @@ cobra
 - Netlist source
 - Component-to-model mapping (`.onnx` or `.sNp`). Hover over the model field to see what
   an ONNX model declares: its band, trained ranges, feasibility constraints and guarantees
+- Simulator: `XyceSimulator` or `VacaskSimulator`. The netlist dialog accepts
+  `*.sim`, `*.scs` and `*.spectre` files besides SPICE netlists. Switching the
+  simulator re-reads the loaded netlist with that simulator's parser, and the goal
+  list offers only goals the selected simulator can run (e.g. `NF` for VACASK)
+- Subcircuit surrogate: the "Subcircuit surrogate" row lists the netlist's
+  subcircuits as "name (N pins)"; **Use as surrogate** adds a model row for the
+  selected one (its instances are replaced, see
+  [VACASK Simulator](../advanced/vacask.md#style-2-xschem-netlists)) and
+  **Clear** removes the selection. Loading a configuration restores subcircuit
+  surrogates
 - Design goals (S-parameter and RF metrics)
 - Analysis point, when the run includes a Harmonic Balance or transient analysis
 - Optimization parameters and ranges
@@ -89,6 +99,10 @@ The GUI displays:
 - progress against maximum iterations. The progress bar turns amber while the
   run is paused and green once it has finished; the status bar reports the end
   of the run.
+
+When the run ends, the parameters, goals and plots switch to its final result:
+the trial that met the goals or, if none did, the best parameters found,
+re-simulated (single-objective runs). The loss plot keeps one point per iteration.
 
 When a run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels, and **Advanced -> Transient Analysis** for the FFT window.
 

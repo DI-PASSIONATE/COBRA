@@ -34,6 +34,7 @@ nav:
     - Optimizers: api/optimizers.md
     - Simulation and Netlist Parsing: api/simulation.md
   - Advanced:
+    - VACASK Simulator: advanced/vacask.md
     - Harmonic Balance: advanced/harmonic-balance.md
     - Transient Analysis: advanced/transient.md
     - Fine-Tuning: advanced/fine-tuning.md

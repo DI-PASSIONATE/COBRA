@@ -1,10 +1,18 @@
+import contextlib
 import logging
 import os
 import re
+import threading
 import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import skrf
 from skrf.vectorFitting import VectorFitting
+
+if TYPE_CHECKING:
+    from snp2le.core.ir import CircuitIR
+    from snp2le.core.noise import NoiseHealth
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +131,11 @@ def _enforce_passivity(vf: VectorFitting, nw: skrf.Network) -> VectorFitting:
 
 def vector_fit(nw: skrf.Network, name: str, enforce_passivity: bool = False) -> str:
     vf = VectorFitting(nw)
-    vf.auto_fit()
+    try:
+        with _bounded_pole_relocation(_MAX_POLE_RELOCATIONS):
+            vf.auto_fit()
+    except VectorFitError as exc:
+        raise VectorFitError(f"could not model {os.path.basename(name)}: {exc}") from exc
 
     if enforce_passivity:
         vf = _enforce_passivity(vf, nw)
@@ -132,5 +144,144 @@ def vector_fit(nw: skrf.Network, name: str, enforce_passivity: bool = False) -> 
     netlist_filename = name + ".sp"
     subcircuit_name = os.path.basename(name) + "_subct"
     vf.write_spice_subcircuit_s(netlist_filename, fitted_model_name=subcircuit_name)
+    path = Path(netlist_filename)
+    path.write_text(noiseless_resistors(path.read_text(encoding="utf-8")), encoding="utf-8")
 
     return netlist_filename
+
+
+_SPICE_RESISTOR_RE = re.compile(r"^(R\S*)\s+(\S+)\s+(\S+)\s+(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def noiseless_resistors(subcircuit: str) -> str:
+    """Write every resistor of a SPICE subcircuit as a noiseless equivalent.
+
+    The resistors of a vector-fit realisation are not losses, yet a SPICE
+    resistor always adds thermal noise. ``R n1 n2 r`` becomes a conductance
+    controlled by its own voltage, ``G n1 n2 n1 n2 1/r``: the same current and
+    the same matrix entries, but a controlled source is noiseless.
+    """
+    def conductance(match: re.Match[str]) -> str:
+        name, node1, node2, value = match.groups()
+        return f"G{name} {node1} {node2} {node1} {node2} {1.0 / float(value)!r}"
+
+    return _SPICE_RESISTOR_RE.sub(conductance, subcircuit)
+
+
+def vector_fit_vacask(
+    nw: skrf.Network,
+    name: str,
+    enforce_passivity: bool = False,
+    max_order: int = 12,
+    thermal_noise: bool = False,
+) -> str:
+    """Model *nw* with snp2le and write it as the VACASK subcircuit ``<basename>_subct`` to ``<name>.inc``.
+
+    snp2le's universal mode vector-fits the S-parameters into a lumped-element
+    macromodel whose resistors are noiseless (``noisy=0``): they realise poles,
+    not losses.  With *thermal_noise* snp2le appends a generator of the
+    passive's thermal noise, kT(I - S S^H) at the ports.  It exists only for a
+    strictly passive fit; otherwise the model stays noiseless and a warning is
+    logged.  *max_order* bounds the model order of the fit.  The file is
+    self-contained, see :func:`vacask_include`.
+    """
+    # Imported here: snp2le is only needed by the VACASK backend.
+    from snp2le.core.engine import convert
+    from snp2le.core.netlist import render_vacask
+    from snp2le.core.state import ConverterState
+
+    state = ConverterState(
+        mode="universal", enforce_passivity=enforce_passivity, max_order=max_order, thermal_noise=thermal_noise
+    )
+    result = convert(state, nw)
+    if not result.ok:
+        raise VectorFitError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
+    for message in result.messages:
+        logger.debug("snp2le %s: %s", os.path.basename(name), message)
+    noise = cast("NoiseHealth | None", result.noise)
+    if noise is not None and not noise.ok:
+        logger.warning(
+            "Surrogate %s stays noiseless (passivity enforcement: %s): %s",
+            os.path.basename(name),
+            result.passivity_path,
+            noise.message,
+        )
+    circuit = cast("CircuitIR", result.ir)
+    circuit.name = os.path.basename(name) + "_subct"
+    netlist_filename = name + ".inc"
+    Path(netlist_filename).write_text(vacask_include(render_vacask(circuit)), encoding="utf-8")
+    return netlist_filename
+
+
+#: Pole relocations one fit of the Xyce backend may run (snp2le bounds its own fits).
+#: scikit-rf's auto_fit has no iteration limit:
+#: at the order cap, skimming can remove as many poles as it adds while the error
+#: flips between two values, and the loop never ends. Converging fits need about
+#: 20 to 120 relocations.
+_MAX_POLE_RELOCATIONS = 1000
+#: The static method auto_fit calls once per relocation: the only hook inside its loop.
+_RELOCATION_HOOK = "_pole_relocation"
+#: The hook is a class attribute, so two bounded fits in threads would restore each
+#: other's stand-ins; they run one at a time.
+_RELOCATION_LOCK = threading.Lock()
+
+
+class VectorFitError(ValueError):
+    """A surrogate's S-parameters could not be fitted into a subcircuit."""
+
+
+@contextlib.contextmanager
+def _bounded_pole_relocation(limit: int):
+    """Make a scikit-rf fit that exceeds *limit* pole relocations raise instead of looping forever.
+
+    Holds ``_RELOCATION_LOCK`` while active: the hook is shared by every fit in the
+    process, so bounded fits in threads run one at a time.
+    """
+    calls = 0
+
+    def bounded(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls > limit:
+            raise VectorFitError(f"vector fit did not converge in {limit} pole relocations")
+        return relocate(*args, **kwargs)
+
+    with _RELOCATION_LOCK:
+        relocate = getattr(VectorFitting, _RELOCATION_HOOK)
+        setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(bounded))
+        try:
+            yield
+        finally:
+            setattr(VectorFitting, _RELOCATION_HOOK, staticmethod(relocate))
+
+
+#: Device module of each master an snp2le subcircuit uses; ``None`` for a VACASK builtin.
+_SNP2LE_MODULES = {
+    "resistor": "resistor.osdi",
+    "capacitor": "capacitor.osdi",
+    "inductor": "inductor.osdi",
+    "vsource": None,
+    "vccs": None,
+    "vcvs": None,
+    "cccs": None,
+    "mutual": None,
+}
+_SUBCKT_RE = re.compile(r"^subckt\s.*$", re.MULTILINE)
+_MASTER_RE = re.compile(r"^\s+\S+\s+\([^)]*\)\s+(\w+)", re.MULTILINE)
+
+
+def vacask_include(subcircuit: str) -> str:
+    """Make an snp2le VACASK subcircuit independent of the netlist that includes it.
+
+    snp2le leaves the device models to the testbench and names ground ``GND``.
+    The include declares ``GND`` as a ground (VACASK allows several names), loads
+    the modules it needs, and binds its masters inside the subcircuit, so the
+    netlist's own ``model`` lines (e.g. a PDK resistor) do not apply to it and
+    ``noisy=0`` reaches VACASK's resistor.  It must be included at the top level.
+    """
+    masters = sorted({m for m in _MASTER_RE.findall(subcircuit) if m in _SNP2LE_MODULES})
+    loads = sorted({module for master in masters if (module := _SNP2LE_MODULES[master])})
+    header = ["ground GND", *(f'load "{module}"' for module in loads), ""]
+    models = "".join(f"\n  model {master} {master}" for master in masters)
+    body = _SUBCKT_RE.sub(lambda match: match.group(0) + models, subcircuit, count=1)
+    return "\n".join(header) + body

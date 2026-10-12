@@ -248,7 +248,7 @@ wheels = [
 
 [[package]]
 name = "cobra-rfic"
-version = "2.0.0"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },
@@ -263,6 +263,8 @@ dependencies = [
     { name = "pyside6" },
     { name = "qtawesome" },
     { name = "scikit-rf" },
+    { name = "snp2le" },
+    { name = "threadpoolctl" },
     { name = "tqdm" },
 ]
 
@@ -294,6 +296,8 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.8.0.2" },
     { name = "qtawesome", specifier = ">=1.4.2" },
     { name = "scikit-rf", specifier = ">=1.0" },
+    { name = "snp2le", specifier = ">=0.1.13" },
+    { name = "threadpoolctl", specifier = ">=3.5" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
 provides-extras = ["orca"]
@@ -301,7 +305,7 @@ provides-extras = ["orca"]
 [package.metadata.requires-dev]
 dev = [
     { name = "orca-rfic", specifier = ">=2.1,<3" },
-    { name = "pytest" },
+    { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "ty" },
@@ -2762,6 +2766,15 @@ wheels = [
 ]
 
 [[package]]
+name = "schemdraw"
+version = "0.23"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/e0/5f1a5c6a7651ae0325708ead4020446ab8146bf11316f0d35bf7e26f6ee0/schemdraw-0.23.tar.gz", hash = "sha256:e71afd5ec84edfd9b707331c5bcb49ed7133af85bd17dae461de3fc260b0132f", size = 4773368, upload-time = "2026-05-29T18:10:40.713Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/f6/7efb3798e44868e09e8ce8a4329ac21acd134a3d5fd59792f97a7feccc2a/schemdraw-0.23-py3-none-any.whl", hash = "sha256:b6af33cf175fb7692ed3f71b5d2702c400e009ae26efe76c6fa4f85d34e0fac5", size = 152475, upload-time = "2026-05-29T18:10:12.268Z" },
+]
+
+[[package]]
 name = "scikit-image"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3017,6 +3030,26 @@ wheels = [
 ]
 
 [[package]]
+name = "snp2le"
+version = "0.1.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyside6-essentials" },
+    { name = "schemdraw" },
+    { name = "scikit-rf" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "threadpoolctl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a2/7f/c9c8b3c7b589140521c085a893d2fa7f28f391154c733a4725a38370a62f/snp2le-0.1.13.tar.gz", hash = "sha256:92cf5b542b3395d7306e8d592cb4c9fb612707abb3a2160cccff94c361826bf4", size = 503770, upload-time = "2026-10-12T12:26:55.729Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/1b/286c3f0f7324e602264bad457fee8ac72882e90c976400033d9d8ed56e56/snp2le-0.1.13-py3-none-any.whl", hash = "sha256:1135ca9fd4b28415adf46c63d6f649d6df312178632bfa9a90060f9d5e643154", size = 443082, upload-time = "2026-10-12T12:26:54.182Z" },
+]
+
+[[package]]
 name = "sqlalchemy"
 version = "2.0.54"
 source = { registry = "https://pypi.org/simple" }
@@ -3062,6 +3095,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707, upload-time = "2023-09-30T13:58:05.479Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521, upload-time = "2023-09-30T13:58:03.53Z" },
+]
+
+[[package]]
+name = "threadpoolctl"
+version = "3.7.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/dc/6c58154c1c65f758ea979e7139cb76993a9cfc662d14e9be3c4a667cfb77/threadpoolctl-3.7.0.tar.gz", hash = "sha256:61348cfb77d53b9242e0017029244b559b810c142ced65b4e21eeca1843959a7", size = 31961, upload-time = "2026-09-15T15:46:20.263Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl", hash = "sha256:cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be", size = 26362, upload-time = "2026-09-15T15:46:19.168Z" },
 ]
 
 [[package]]

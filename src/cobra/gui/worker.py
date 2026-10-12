@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class OptimizationWorker(QThread):
     progress = Signal(object)
+    result = Signal(object)
     finished = Signal()
     error = Signal(str)
     ask_continue = Signal(int)
@@ -52,7 +53,7 @@ class OptimizationWorker(QThread):
                 return True
 
             # Same entry point a headless `cobra run CONFIG` takes.
-            self.configured_run.run(optimization_callback)
+            self.result.emit(self.configured_run.run(optimization_callback))
 
             self.finished.emit()
 

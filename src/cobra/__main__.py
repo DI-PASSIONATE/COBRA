@@ -116,7 +116,13 @@ def _parser() -> argparse.ArgumentParser:
             "parameters are left empty to be added before `cobra run`."
         ),
     )
-    init_parser.add_argument("netlist", metavar="NETLIST", help="Path to a Xyce netlist")
+    init_parser.add_argument("netlist", metavar="NETLIST", help="Path to a Xyce or VACASK netlist")
+    init_parser.add_argument(
+        "--simulator",
+        metavar="NAME",
+        default="XyceSimulator",
+        help="Simulator whose netlist dialect to read: XyceSimulator (default) or VacaskSimulator",
+    )
     init_parser.add_argument(
         "-o",
         "--output",
@@ -152,6 +158,12 @@ def _parser() -> argparse.ArgumentParser:
         choices=("auto", "config", "netlist"),
         default="auto",
         help="How to read the target file (default: auto, by suffix and content)",
+    )
+    parse_parser.add_argument(
+        "--simulator",
+        metavar="NAME",
+        default="XyceSimulator",
+        help="Simulator whose netlist dialect a netlist TARGET is in: XyceSimulator (default) or VacaskSimulator",
     )
     parse_parser.add_argument(
         "--json", action="store_true", help="Print the report as JSON instead of text"
@@ -252,7 +264,7 @@ def _init_config(args: argparse.Namespace) -> int:
         logger.error("%s already exists; pass --force to overwrite it", output)
         return EXIT_INVALID
     try:
-        initial = initial_configuration(args.netlist, _model_mapping(args.model))
+        initial = initial_configuration(args.netlist, _model_mapping(args.model), args.simulator)
         written = initial.configuration.save(output)
     except (ConfigurationError, OSError) as exc:
         logger.error("%s", exc)  # noqa: TRY400 - a bad netlist or path is user input, not a crash
@@ -281,10 +293,22 @@ def _parse_target(args: argparse.Namespace) -> int:
     import json
 
     from cobra.configuration import ConfigurationError
+    from cobra.configuration.config_runner import SIMULATOR_REGISTRY
     from cobra.configuration.inspection import has_errors, inspect_path, render_report
 
+    simulator = SIMULATOR_REGISTRY.get(args.simulator)
+    if simulator is None:
+        logger.error(
+            "Unsupported simulator '%s'. Supported: %s", args.simulator, ", ".join(SIMULATOR_REGISTRY)
+        )
+        return EXIT_INVALID
     try:
-        report = inspect_path(args.target, kind=args.kind, check_models=args.check_models)
+        report = inspect_path(
+            args.target,
+            kind=args.kind,
+            check_models=args.check_models,
+            parser=simulator.netlist_parser,
+        )
     except (ConfigurationError, OSError) as exc:
         logger.error("%s", exc)  # noqa: TRY400 - an unreadable target is user input, not a crash
         logger.debug("Traceback for the failure above", exc_info=exc)

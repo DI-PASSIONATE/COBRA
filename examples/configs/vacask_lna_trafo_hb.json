@@ -1,0 +1,81 @@
+{
+  "netlist": "../netlists/VACASK/lna_trafo_hb.sim",
+  "component_models": {
+    "X1": "../XYLIN_Trafo_output_predicted.s6p"
+  },
+  "simulation_parameters": {
+    "HB": {
+      "freq": "130G",
+      "nharm": "3"
+    }
+  },
+  "optimizer": {
+    "name": "OptunaOptimizer",
+    "settings": {
+      "multi_objective": false,
+      "sampler": "tpe",
+      "pruner": null
+    }
+  },
+  "simulator": {
+    "name": "VacaskSimulator",
+    "settings": {
+      "vacask_command": "vacask",
+      "vacask_threads": 1,
+      "enforce_passivity": false
+    }
+  },
+  "max_iterations": 500,
+  "parallel_trials": 8,
+  "optimization_parameters": [
+    {
+      "name": "xnpn1:nx",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 12.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "xnpn2:nx",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 12.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    },
+    {
+      "name": "xnpn3:nx",
+      "type": "netlist_variable",
+      "min_value": 1.0,
+      "max_value": 12.0,
+      "step": 1.0,
+      "unit": null,
+      "linked_to": null
+    }
+  ],
+  "design_goals": [
+    {
+      "parameter": "Gain_dB[vp1@Out]",
+      "frequency_range": "130-130ghz",
+      "min_value": 5.0,
+      "max_value": null,
+      "weight": 1.0,
+      "kind": "gain_db",
+      "node": "Out",
+      "port": "vp1",
+      "source_amplitude": 0.074833148,
+      "impedance": 70.0
+    }
+  ],
+  "fine_tuning": {
+    "enabled": false,
+    "palace_command": "palace",
+    "iterations": 3,
+    "optimizer": "reuse",
+    "geometries": {}
+  },
+  "schema_version": 1
+}
