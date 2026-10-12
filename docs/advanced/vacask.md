@@ -202,9 +202,7 @@ works in decks with `ground 0`. The `load` lines and local `model` bindings
 mean the netlist's own `model` lines (for example a PDK resistor) do not apply
 to the surrogate. Include it at the top level. The setting `vector_fit_max_order`
 (default 12) is the highest model order snp2le may use: snp2le's GUI default of 6
-is too coarse, but at very high orders (e.g. 24 on a simple 2-port) poles land
-far out of band and VACASK solves the subcircuit inaccurately (|S| error about
-0.3 against the model).
+is too coarse.
 
 Broadband models need more. The octagonal-inductor model of the LNA preset spans
 0 to 500 GHz: at order 12 its fit is off by up to 0.17 in |S| at 110 to 170 GHz,
@@ -212,8 +210,10 @@ at order 40 by 0.02, and orders 40 and 60 give the same circuit results, so
 `examples/configs/vacask_lna_inductor.json` sets 40. Check a new model by
 re-simulating one design at two orders.
 
-A fit that does not converge (scikit-rf's `auto_fit` can cycle at the order cap)
-stops after 1000 pole relocations; COBRA logs a warning and penalises that trial.
+A fit that does not converge is stopped by snp2le after 250 pole
+relocations and refitted at the pole counts it was cycling at, so the trial keeps
+a model. The Xyce backend fits with scikit-rf directly; there COBRA stops such a
+fit after 1000 relocations, logs a warning and penalises the trial.
 
 ### PDK models (IHP SG13G2)
 

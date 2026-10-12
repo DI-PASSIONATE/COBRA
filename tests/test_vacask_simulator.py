@@ -260,25 +260,20 @@ def test_parallel_surrogate_fits_leave_the_console_alone(tmp_path):
     assert sys.stderr is stderr
 
 
-def test_a_fit_that_does_not_converge_raises_instead_of_looping(tmp_path, monkeypatch):
-    """scikit-rf's auto_fit can cycle forever at the order cap; the fit gives up with an error."""
-    import sys
-
+def test_a_fit_that_does_not_settle_is_refitted_not_penalised(tmp_path, monkeypatch):
+    """scikit-rf's auto_fit can cycle forever; snp2le stops it and refits, so the trial keeps its model."""
     import skrf as rf
-    from skrf.vectorFitting import VectorFitting
+    from snp2le.core import universal
 
-    from cobra.spice_sim.vector_fit import VectorFitError, vector_fit_vacask
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
 
     frequency = rf.Frequency(1, 20, 41, "GHz")
     media = rf.media.DefinedGammaZ0(frequency, z0=50)
     network = media.line(30, "deg") ** media.shunt_capacitor(0.2e-12)
-    relocate = VectorFitting._pole_relocation
-    # The package re-exports the function vector_fit under the module's name.
-    monkeypatch.setattr(sys.modules[vector_fit_vacask.__module__], "_MAX_POLE_RELOCATIONS", 2)
+    monkeypatch.setattr(universal, "_AUTO_FIT_MAX_RELOCATIONS", 2)
 
-    with pytest.raises(VectorFitError, match="did not converge in 2 pole relocations"):
-        vector_fit_vacask(network, str(tmp_path / "X1"))
-    assert VectorFitting._pole_relocation is relocate
+    path = vector_fit_vacask(network, str(tmp_path / "X1"))
+    assert "subckt X1_subct" in Path(path).read_text(encoding="utf-8")
 
 
 def _lossy_two_port():
@@ -315,7 +310,8 @@ def test_a_refused_noise_generator_warns_and_keeps_the_model(tmp_path, monkeypat
     )
     with caplog.at_level("WARNING", logger="cobra.spice_sim.vector_fit"):
         path = vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, thermal_noise=True)
-    assert "X1 stays noiseless: thermal noise NOT added: test" in caplog.text
+    assert "X1 stays noiseless (passivity enforcement: " in caplog.text
+    assert "thermal noise NOT added: test" in caplog.text
     assert "nz_" not in Path(path).read_text(encoding="utf-8")
 
 

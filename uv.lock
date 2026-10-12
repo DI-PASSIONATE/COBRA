@@ -296,7 +296,7 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.8.0.2" },
     { name = "qtawesome", specifier = ">=1.4.2" },
     { name = "scikit-rf", specifier = ">=1.0" },
-    { name = "snp2le", specifier = ">=0.1.11" },
+    { name = "snp2le", specifier = ">=0.1.13" },
     { name = "threadpoolctl", specifier = ">=3.5" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
@@ -3031,7 +3031,7 @@ wheels = [
 
 [[package]]
 name = "snp2le"
-version = "0.1.11"
+version = "0.1.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -3042,10 +3042,11 @@ dependencies = [
     { name = "scikit-rf" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "threadpoolctl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a1/de/000749816b2c8da4e4c763b438f7ee225a4172e631f77b0c18d30da0990e/snp2le-0.1.11.tar.gz", hash = "sha256:b3f7d912326804ece3b2e25faeea5d4980d323724f7901c85eca958a4b214866", size = 495439, upload-time = "2026-10-11T09:21:16.101Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/7f/c9c8b3c7b589140521c085a893d2fa7f28f391154c733a4725a38370a62f/snp2le-0.1.13.tar.gz", hash = "sha256:92cf5b542b3395d7306e8d592cb4c9fb612707abb3a2160cccff94c361826bf4", size = 503770, upload-time = "2026-10-12T12:26:55.729Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/bd/0034aa6e82064c907ebe15c9993d17ecfe383fdf0e8c91da9b4fffa83d49/snp2le-0.1.11-py3-none-any.whl", hash = "sha256:974965e612a1c1f93c56d8e0d79c56c62b009f6c6ab129dfb438d957c88446af", size = 438784, upload-time = "2026-10-11T09:21:14.543Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/1b/286c3f0f7324e602264bad457fee8ac72882e90c976400033d9d8ed56e56/snp2le-0.1.13-py3-none-any.whl", hash = "sha256:1135ca9fd4b28415adf46c63d6f649d6df312178632bfa9a90060f9d5e643154", size = 443082, upload-time = "2026-10-12T12:26:54.182Z" },
 ]
 
 [[package]]

@@ -95,8 +95,8 @@ class VacaskSimulator(BaseSimulator):
             default=12,
             description=(
                 "Highest model order snp2le may use when it vector-fits a surrogate.\n"
-                "Higher follows the S-parameters more closely, but very high orders can\n"
-                "place poles far out of band, which VACASK then solves inaccurately."
+                "Higher follows the S-parameters more closely; the fit stops below it\n"
+                "when more poles no longer help."
             ),
         ),
         CobraSetting(

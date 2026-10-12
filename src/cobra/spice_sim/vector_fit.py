@@ -193,15 +193,19 @@ def vector_fit_vacask(
     state = ConverterState(
         mode="universal", enforce_passivity=enforce_passivity, max_order=max_order, thermal_noise=thermal_noise
     )
-    with _SNP2LE_LOCK, _bounded_pole_relocation(_MAX_POLE_RELOCATIONS):
-        result = convert(state, nw)
+    result = convert(state, nw)
     if not result.ok:
         raise VectorFitError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
     for message in result.messages:
         logger.debug("snp2le %s: %s", os.path.basename(name), message)
     noise = cast("NoiseHealth | None", result.noise)
     if noise is not None and not noise.ok:
-        logger.warning("Surrogate %s stays noiseless: %s", os.path.basename(name), noise.message)
+        logger.warning(
+            "Surrogate %s stays noiseless (passivity enforcement: %s): %s",
+            os.path.basename(name),
+            result.passivity_path,
+            noise.message,
+        )
     circuit = cast("CircuitIR", result.ir)
     circuit.name = os.path.basename(name) + "_subct"
     netlist_filename = name + ".inc"
@@ -209,12 +213,8 @@ def vector_fit_vacask(
     return netlist_filename
 
 
-#: snp2le swaps sys.stdout/sys.stderr for the duration of a fit. Two fits of
-#: parallel trials interleaving would restore each other's stand-ins and leave the
-#: console redirected for good, so the fits run one at a time.
-_SNP2LE_LOCK = threading.Lock()
-
-#: Pole relocations one fit may run. scikit-rf's auto_fit has no iteration limit:
+#: Pole relocations one fit of the Xyce backend may run (snp2le bounds its own fits).
+#: scikit-rf's auto_fit has no iteration limit:
 #: at the order cap, skimming can remove as many poles as it adds while the error
 #: flips between two values, and the loop never ends. Converging fits need about
 #: 20 to 120 relocations.

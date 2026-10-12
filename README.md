@@ -457,7 +457,7 @@ Xyce (like all SPICE-family simulators) cannot read a Touchstone file directly a
 
 COBRA solves this by vector-fitting the surrogate-predicted S-parameter network using `scikit-rf`'s `VectorFitting` implementation. Vector fitting approximates the frequency response as a sum of rational functions (poles and residues). The fitted model is then written out as a standard SPICE subcircuit (`.sp`) containing only resistors, capacitors, inductors, and controlled sources — elements every SPICE engine understands natively.
 
-`VectorFitting.auto_fit` has no iteration limit and, on some data, never converges: its adding-and-skimming loop can cycle between two model orders forever (3 of 20 ORCA inductors tested at its default order limit). COBRA stops such a fit after 1000 pole relocations (a converging fit needs about 20 to 120), logs a warning and penalises that trial, for the Xyce and the VACASK backend alike.
+`VectorFitting.auto_fit` has no iteration limit and, on some data, never converges: its adding-and-skimming loop can cycle between two model orders forever (3 of 20 ORCA inductors tested at its default order limit). COBRA stops such a fit after 1000 pole relocations (a converging fit needs about 20 to 120), logs a warning and penalises that trial. The VACASK backend's fitter, snp2le, has its own limit (250 relocations) and refits a stuck fit instead, so there the trial keeps a model.
 
 The generated subcircuit is automatically included in the patched netlist via a `.INCLUDE` directive, so Xyce sees a fully self-contained netlist on every iteration.
 
