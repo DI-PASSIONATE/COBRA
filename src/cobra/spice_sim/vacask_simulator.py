@@ -116,8 +116,8 @@ class VacaskSimulator(BaseSimulator):
             description=(
                 "Add the thermal noise of the vector-fitted surrogates (kT(I - S S^H) at\n"
                 "their ports), so noise figures include their losses. Requires\n"
-                "enforce_passivity. A fit that is not strictly passive stays noiseless\n"
-                "and COBRA warns."
+                "enforce_passivity. A fit that is not strictly passive is retried at\n"
+                "lower orders; if none gets the noise, the trial is penalised."
             ),
         ),
     ]

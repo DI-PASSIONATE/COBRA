@@ -69,7 +69,8 @@ class GradientDescentOptimizer(BaseOptimizer):
         super().__init__(multi_objective=multi_objective)
         self.learning_rate = learning_rate
         self.exploration_scale = exploration_scale
-        self._rng = np.random.default_rng(random_seed)
+        # -1 is the setting's "no seed", as in the GUI.
+        self._rng = np.random.default_rng(None if random_seed == -1 else random_seed)
         self._master_properties: dict[str, OptimizationProperty] = {}
         self._master_order: list[str] = []
         self._alias_to_master: dict[str, str] = {}
