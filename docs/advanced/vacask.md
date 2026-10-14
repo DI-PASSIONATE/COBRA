@@ -359,11 +359,14 @@ drives a spectral factor of the fit, so the ports emit the noise of a passive
 at the simulation temperature, kT(I - S S^H) (Bosma). The S-parameters and the
 operating point stay unchanged. The generator exists only for a strictly passive
 fit, so the setting requires `"enforce_passivity": true` and COBRA rejects the
-configuration otherwise. When enforcement cannot make a fit strictly passive,
-that surrogate stays noiseless for the trial and COBRA logs a warning with
-snp2le's reason ("... stays noiseless: thermal noise NOT added: ..."). This is
-common for fits of de-embedded EM data at high orders; try another
-`vector_fit_max_order`. A matched passive two-port at T0 then has NF = 1/G_av,
+configuration otherwise. Fits of de-embedded EM data at high orders often miss
+strict passivity, and whether one does scatters across orders. A fit without the
+generator is therefore refitted at lower max orders, 3/4 and then 1/2 of
+`vector_fit_max_order` (40, 30, 20), each kept below the order the previous fit
+stopped at; COBRA logs each retry with snp2le's reason ("thermal noise NOT
+added: ...") and the order that succeeded. If no order gets the generator, the
+trial is penalised like a failed fit, because a noiseless surrogate would make
+the noise figure optimistic. A matched passive two-port at T0 then has NF = 1/G_av,
 checked against VACASK to 1e-3 dB. Xyce surrogates stay noiseless.
 
 ### Mixers (`hbnoise`)

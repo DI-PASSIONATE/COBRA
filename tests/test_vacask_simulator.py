@@ -301,19 +301,58 @@ def test_surrogate_thermal_noise_adds_a_noisy_generator(tmp_path, thermal_noise)
         assert "nz_" not in text
 
 
-def test_a_refused_noise_generator_warns_and_keeps_the_model(tmp_path, monkeypatch, caplog):
-    from snp2le.core import noise
+def _noise_failing_at(monkeypatch, failing_caps, model_order=None):
+    """Make snp2le refuse the noise generator at *failing_caps*; return the caps it was called with."""
+    from snp2le.core import engine
+    from snp2le.core.noise import NoiseHealth
 
+    convert = engine.convert
+    caps = []
+
+    def fake_convert(state, network):
+        caps.append(state.max_order)
+        result = convert(state, network)
+        if state.max_order in failing_caps:
+            result.noise = NoiseHealth(False, "thermal noise NOT added: test")
+        if model_order is not None:
+            result.model_order = model_order
+        return result
+
+    monkeypatch.setattr(engine, "convert", fake_convert)
+    return caps
+
+
+def test_a_refused_noise_generator_is_retried_at_lower_orders(tmp_path, monkeypatch, caplog):
     from cobra.spice_sim.vector_fit import vector_fit_vacask
 
-    monkeypatch.setattr(
-        noise, "add_thermal_noise", lambda *_args, **_kwargs: noise.NoiseHealth(False, "thermal noise NOT added: test")
-    )
-    with caplog.at_level("WARNING", logger="cobra.spice_sim.vector_fit"):
-        path = vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, thermal_noise=True)
-    assert "X1 stays noiseless (passivity enforcement: " in caplog.text
-    assert "thermal noise NOT added: test" in caplog.text
-    assert "nz_" not in Path(path).read_text(encoding="utf-8")
+    caps = _noise_failing_at(monkeypatch, {40}, model_order=40)
+    with caplog.at_level("INFO", logger="cobra.spice_sim.vector_fit"):
+        path = vector_fit_vacask(
+            _lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, max_order=40, thermal_noise=True
+        )
+    assert caps == [40, 30]
+    assert "X1 gets its thermal noise at max order 30" in caplog.text
+    assert "Rnz_e1" in Path(path).read_text(encoding="utf-8")
+
+
+def test_a_noise_retry_stays_below_the_order_the_fit_stopped_at(tmp_path, monkeypatch):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    caps = _noise_failing_at(monkeypatch, {40}, model_order=16)
+    vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, max_order=40, thermal_noise=True)
+    assert caps == [40, 14]
+
+
+def test_no_noisy_fit_at_any_order_raises(tmp_path, monkeypatch):
+    from cobra.spice_sim.vector_fit import VectorFitError, vector_fit_vacask
+
+    caps = _noise_failing_at(monkeypatch, {40, 30, 20}, model_order=40)
+    with pytest.raises(VectorFitError, match=r"X1 gets its thermal noise \(max orders tried: 40, 30, 20"):
+        vector_fit_vacask(
+            _lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, max_order=40, thermal_noise=True
+        )
+    assert caps == [40, 30, 20]
+    assert not (tmp_path / "X1.inc").exists()
 
 
 # ---------------------------------------------------------------------------

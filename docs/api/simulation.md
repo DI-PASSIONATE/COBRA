@@ -44,7 +44,8 @@ Settings: `vacask_command`, `vacask_threads`, `vector_fit_max_order`, `enforce_p
   `vacask_include(subcircuit_text)` makes that text self-contained: `ground GND`, the
   `load` lines it needs, and `model` bindings inside the subcircuit. All resistors are
   `noisy=0`; with `thermal_noise` snp2le adds a generator of the passive's thermal noise
-  (strictly passive fits only, otherwise a warning is logged). The Xyce path still uses
+  (strictly passive fits only; a fit without it is retried at 3/4 and 1/2 of `max_order`,
+  then `VectorFitError` is raised). The Xyce path still uses
   scikit-rf's SPICE writer.
 - `add_port_signals(frame, resistances)` (`cobra.spice_sim.vacask_simulator`) adds
   `V(<src>) = R*I(<src>)` and `I(V<src>) = I(<src>)` to an HB or transient table, so
