@@ -295,7 +295,7 @@ requires-dist = [
     { name = "pyqtgraph", specifier = ">=0.13.7" },
     { name = "pyside6", specifier = ">=6.8.0.2" },
     { name = "qtawesome", specifier = ">=1.4.2" },
-    { name = "scikit-rf", specifier = ">=1.0" },
+    { name = "scikit-rf", specifier = ">=2.1" },
     { name = "snp2le", specifier = ">=0.1.13" },
     { name = "threadpoolctl", specifier = ">=3.5" },
     { name = "tqdm", specifier = ">=4.66" },

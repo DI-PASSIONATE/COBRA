@@ -181,36 +181,72 @@ def vector_fit_vacask(
     macromodel whose resistors are noiseless (``noisy=0``): they realise poles,
     not losses.  With *thermal_noise* snp2le appends a generator of the
     passive's thermal noise, kT(I - S S^H) at the ports.  It exists only for a
-    strictly passive fit; otherwise the model stays noiseless and a warning is
-    logged.  *max_order* bounds the model order of the fit.  The file is
-    self-contained, see :func:`vacask_include`.
+    strictly passive fit, which an order often misses where a lower one does
+    not, so a fit without it is retried at lower orders (see
+    :data:`_NOISE_RETRY_FRACTIONS`).  If none gets the generator, a
+    :class:`VectorFitError` is raised: a noiseless surrogate would make the
+    noise figure optimistic.  *max_order* bounds the model order of the fit.
+    The file is self-contained, see :func:`vacask_include`.
     """
     # Imported here: snp2le is only needed by the VACASK backend.
     from snp2le.core.engine import convert
     from snp2le.core.netlist import render_vacask
     from snp2le.core.state import ConverterState
 
-    state = ConverterState(
-        mode="universal", enforce_passivity=enforce_passivity, max_order=max_order, thermal_noise=thermal_noise
-    )
-    result = convert(state, nw)
-    if not result.ok:
-        raise VectorFitError(f"snp2le could not model {os.path.basename(name)}: {result.error}")
-    for message in result.messages:
-        logger.debug("snp2le %s: %s", os.path.basename(name), message)
-    noise = cast("NoiseHealth | None", result.noise)
-    if noise is not None and not noise.ok:
-        logger.warning(
-            "Surrogate %s stays noiseless (passivity enforcement: %s): %s",
-            os.path.basename(name),
-            result.passivity_path,
-            noise.message,
+    surrogate = os.path.basename(name)
+    caps = [max_order]
+    while True:
+        state = ConverterState(
+            mode="universal", enforce_passivity=enforce_passivity, max_order=caps[-1], thermal_noise=thermal_noise
+        )
+        result = convert(state, nw)
+        if not result.ok:
+            raise VectorFitError(f"snp2le could not model {surrogate}: {result.error}")
+        for message in result.messages:
+            logger.debug("snp2le %s: %s", surrogate, message)
+        noise = cast("NoiseHealth | None", result.noise)
+        if noise is None or noise.ok:
+            break
+        cap = _next_noise_cap(max_order, len(caps), result.model_order)
+        if cap is None:
+            raise VectorFitError(
+                f"no fit of surrogate {surrogate} gets its thermal noise (max orders tried: "
+                f"{', '.join(map(str, caps))}; passivity enforcement: {result.passivity_path}): "
+                f"{noise.message}"
+            )
+        logger.info(
+            "Surrogate %s has no thermal noise at max order %d (%s); refitting at max order %d",
+            surrogate, caps[-1], noise.message, cap,
+        )
+        caps.append(cap)
+    if len(caps) > 1:
+        logger.info(
+            "Surrogate %s gets its thermal noise at max order %d (model order %d, RMS %.2e)",
+            surrogate, caps[-1], result.model_order, result.rms_error,
         )
     circuit = cast("CircuitIR", result.ir)
     circuit.name = os.path.basename(name) + "_subct"
     netlist_filename = name + ".inc"
     Path(netlist_filename).write_text(vacask_include(render_vacask(circuit)), encoding="utf-8")
     return netlist_filename
+
+
+#: Max orders, as fractions of the configured one, at which a fit without its thermal
+#: noise generator is retried.  Whether a fit is strictly passive scatters across
+#: orders: of 24 inductor geometries at orders 20/30/40, 3 to 6 failed per order, 1 at all.
+_NOISE_RETRY_FRACTIONS = (0.75, 0.5)
+
+
+def _next_noise_cap(max_order: int, attempts: int, model_order: int) -> int | None:
+    """The max order of the next noise retry after *attempts* fits, or ``None`` when none is left.
+
+    A cap at or above *model_order*, the order the last fit stopped at, would repeat
+    that fit, so the cap stays at least 2 below it.
+    """
+    if attempts > len(_NOISE_RETRY_FRACTIONS):
+        return None
+    cap = min(int(max_order * _NOISE_RETRY_FRACTIONS[attempts - 1]), model_order - 2)
+    return cap if cap >= 2 else None
 
 
 #: Pole relocations one fit of the Xyce backend may run (snp2le bounds its own fits).

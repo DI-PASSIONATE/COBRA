@@ -63,7 +63,8 @@ classifiers = [
 
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "scikit-rf>=1.0",
+    # 2.1 added the version argument of write_touchstone (VACASK results)
+    "scikit-rf>=2.1",
     "numpy>=2.1",
     "pandas>=2.2.3",
     "PySide6>=6.8.0.2",
