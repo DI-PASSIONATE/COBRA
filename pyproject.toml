@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobra-rfic"
-version = "3.0.0"
+version = "3.1.0"
 description = "COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer: an open-source EDA tool for AI-assisted RFIC design combining Xyce SPICE simulation, ORCA ONNX EM surrogate models, and Optuna goal-driven optimization"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -77,7 +77,7 @@ dependencies = [
     "huggingface-hub>=0.25",
     "qtawesome>=1.4.2",
     # Lumped-element models of the surrogates for VacaskSimulator
-    "snp2le>=0.1.13",
+    "snp2le>=0.1.17",
     "threadpoolctl>=3.5",
 ]
 

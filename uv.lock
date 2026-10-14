@@ -248,7 +248,7 @@ wheels = [
 
 [[package]]
 name = "cobra-rfic"
-version = "3.0.0"
+version = "3.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },
@@ -296,7 +296,7 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.8.0.2" },
     { name = "qtawesome", specifier = ">=1.4.2" },
     { name = "scikit-rf", specifier = ">=2.1" },
-    { name = "snp2le", specifier = ">=0.1.13" },
+    { name = "snp2le", specifier = ">=0.1.17" },
     { name = "threadpoolctl", specifier = ">=3.5" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
@@ -3031,7 +3031,7 @@ wheels = [
 
 [[package]]
 name = "snp2le"
-version = "0.1.13"
+version = "0.1.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -3044,9 +3044,9 @@ dependencies = [
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "threadpoolctl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/7f/c9c8b3c7b589140521c085a893d2fa7f28f391154c733a4725a38370a62f/snp2le-0.1.13.tar.gz", hash = "sha256:92cf5b542b3395d7306e8d592cb4c9fb612707abb3a2160cccff94c361826bf4", size = 503770, upload-time = "2026-10-12T12:26:55.729Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/06/544d20750abc6a6e0e3d866ed519d0fb1cb641c2f7d198bcf0e5416514e4/snp2le-0.1.17.tar.gz", hash = "sha256:921766f1646758cf1170f50c90bcd7f2eb835042d1ce685b76056df2fe5b122b", size = 534852, upload-time = "2026-10-13T20:26:39.256Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/1b/286c3f0f7324e602264bad457fee8ac72882e90c976400033d9d8ed56e56/snp2le-0.1.13-py3-none-any.whl", hash = "sha256:1135ca9fd4b28415adf46c63d6f649d6df312178632bfa9a90060f9d5e643154", size = 443082, upload-time = "2026-10-12T12:26:54.182Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/c4/b501d53eaf0f28026bc9687b980094ee8ad111c00a96f9135e8eb28f84a5/snp2le-0.1.17-py3-none-any.whl", hash = "sha256:148faa929ea59817476f1fc61b1ed224d5bf007018bea77195a416e2efc4f4fe", size = 459156, upload-time = "2026-10-13T20:26:37.555Z" },
 ]
 
 [[package]]
