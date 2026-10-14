@@ -12,6 +12,7 @@ or missing dependency must be reportable, not a crash.
 
 from __future__ import annotations
 
+import importlib.machinery
 import importlib.metadata
 import importlib.util
 import shutil
@@ -29,7 +30,8 @@ REQUIRED_MODULES = (
     ("tqdm", "progress reporting"),
 )
 OPTIONAL_MODULES = (
-    ("PySide6", "graphical interface"),
+    # The submodule: a partial install (only PySide6_Addons) has the package but no widgets.
+    ("PySide6.QtWidgets", "graphical interface"),
     ("pyqtgraph", "live plots in the GUI"),
     ("matplotlib", "result plots"),
     ("onnxruntime", "ONNX surrogate models"),
@@ -100,14 +102,18 @@ def module_version(name: str) -> str:
 
 
 def module_status(name: str) -> tuple[bool, str]:
-    """Whether *name* is importable, plus its version, without importing it."""
+    """Whether *name* (a module or ``package.submodule``) is importable, plus its version, without importing it."""
+    package, _, submodule = name.partition(".")
     try:
-        found = importlib.util.find_spec(name) is not None
+        spec = importlib.util.find_spec(package)
+        if spec is not None and submodule:
+            # find_spec("package.submodule") would import the package; search its directories instead.
+            spec = importlib.machinery.PathFinder.find_spec(submodule, spec.submodule_search_locations)
     except (ImportError, ValueError):  # a broken or partially removed install
         return False, "not usable"
-    if not found:
+    if spec is None:
         return False, "not installed"
-    return True, module_version(name)
+    return True, module_version(package)
 
 
 def executable_status(name: str) -> tuple[bool, str]:

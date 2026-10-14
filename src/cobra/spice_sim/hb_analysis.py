@@ -235,7 +235,7 @@ class HBAnalysis:
                 row[f"{name}_mag"] = abs(v)
                 row[f"{name}_phase_deg"] = np.degrees(np.angle(v))
 
-            row.update(self._quantity_row(signals, idx))
+            row.update(self._quantity_row(signals, idx, freq))
             rows.append(row)
 
         return pd.DataFrame(rows)
@@ -278,7 +278,7 @@ class HBAnalysis:
                 row[f"{name}_mag"] = abs(phasor)
                 row[f"{name}_phase_deg"] = np.degrees(np.angle(phasor))
 
-            row.update(self._quantity_row(fft_signals, k))
+            row.update(self._quantity_row(fft_signals, k, freq))
             rows.append(row)
 
         return pd.DataFrame(rows)
@@ -287,13 +287,14 @@ class HBAnalysis:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _quantity_row(self, signals: dict, idx: int) -> dict:
+    def _quantity_row(self, signals: dict, idx: int, freq: float) -> dict:
         q = self.plot_quantity
         if q == "power":
             vpk = signals[self.v_out][idx]
             ipk = signals[self.i_out][idx]
-            # Xyce records full amplitude profiles across positive/negative frequency lines
-            p_w = 2 * abs(vpk * ipk)
+            # Xyce records full amplitude profiles across positive/negative frequency lines;
+            # the DC line has no negative twin
+            p_w = (1 if freq == 0 else 2) * abs(vpk * ipk)
             return {
                 "P_out_W": p_w,
                 "P_out_dBm": 10 * np.log10(max(p_w / 1e-3, 1e-30)),

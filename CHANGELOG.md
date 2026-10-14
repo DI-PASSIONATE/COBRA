@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.1.0 - 2026-10-14
+
+### Added
+- `OptunaOptimizer` setting `random_seed` (default -1, no seed): seeds the sampler, so
+  a run with `parallel_trials` 1 repeats.
+
+### Changed
+- `surrogate_thermal_noise`: a VACASK surrogate fit that gets no thermal noise
+  generator is refitted at 3/4 and 1/2 of `vector_fit_max_order`; if none gets it,
+  the trial is penalised instead of continuing with a noiseless surrogate, whose
+  noise figure would be optimistic.
+- Requires scikit-rf 2.1 or newer (`write_touchstone(version=...)`; with 2.0 every
+  VACASK run failed).
+- Requires snp2le 0.1.17 or newer.
+
+### Fixed
+- `Power_dBm` at the DC line (0 Hz) was twice the DC power for HB and transient results:
+  the DC bin holds the DC value, not amplitude/2.
+- `cobra doctor` reported PySide6 as present for a partial install without
+  `PySide6.QtWidgets`; it now checks that submodule.
+- `GradientDescentOptimizer(random_seed=-1)` raised `ValueError` although the setting
+  documents -1 as no seed; it now means no seed, as in the GUI.
+
 ## 3.0.0 - 2026-10-12
 
 ### Added

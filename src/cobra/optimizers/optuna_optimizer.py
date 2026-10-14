@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -66,6 +67,16 @@ class OptunaOptimizer(BaseOptimizer):
                 ("HyperbandPruner", "hyperband"),
             ],
         ),
+        CobraSetting(
+            name="random_seed",
+            dtype=int,
+            default=-1,
+            description=(
+                "Seed of the sampler, for repeatable runs. Use -1 for a non-deterministic run.\n"
+                "A run repeats only with parallel_trials = 1: concurrent trials finish in\n"
+                "an order that varies."
+            ),
+        ),
     ]
 
     def __init__(
@@ -75,8 +86,15 @@ class OptunaOptimizer(BaseOptimizer):
         pruner: str | optuna.pruners.BasePruner | None = None,
         sampler_kwargs: dict[str, Any] | None = None,
         pruner_kwargs: dict[str, Any] | None = None,
+        random_seed: int | None = None,
     ):
         super().__init__(multi_objective=multi_objective)
+        if random_seed is not None and random_seed < -1:
+            # Imported here: cobra.configuration imports the optimizers.
+            from cobra.configuration.configuration import ConfigurationError
+
+            raise ConfigurationError(f"random_seed must be -1 (no seed) or at least 0, got {random_seed}")
+        self.random_seed = None if random_seed == -1 else random_seed
         self.sampler = sampler
         self.pruner = pruner
         self.sampler_kwargs = sampler_kwargs or {}
@@ -104,7 +122,13 @@ class OptunaOptimizer(BaseOptimizer):
         try:
             module = optunahub.load_module(package_name)
             sampler_cls = getattr(module, class_name)
-            return sampler_cls(**self.sampler_kwargs)
+            kwargs = dict(self.sampler_kwargs)
+            if self.random_seed is not None and "seed" not in kwargs:
+                if "seed" in inspect.signature(sampler_cls).parameters:
+                    kwargs["seed"] = self.random_seed
+                else:
+                    logger.warning("%s takes no seed; random_seed is ignored", class_name)
+            return sampler_cls(**kwargs)
         except Exception as exc:
             if class_name == "AutoSampler":
                 raise RuntimeError(
@@ -123,10 +147,12 @@ class OptunaOptimizer(BaseOptimizer):
         else:
             raise TypeError("sampler must be a string, an Optuna sampler instance, or None.")
 
+        # Explicit sampler_kwargs win over random_seed.
+        seeded = {"seed": self.random_seed, **self.sampler_kwargs} if self.random_seed is not None else self.sampler_kwargs
         if sampler_name in {"tpe", "tpesampler"}:
-            return optuna.samplers.TPESampler(**self.sampler_kwargs)
+            return optuna.samplers.TPESampler(**seeded)
         if sampler_name in {"random", "randomsampler"}:
-            return optuna.samplers.RandomSampler(**self.sampler_kwargs)
+            return optuna.samplers.RandomSampler(**seeded)
         if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
             return self._load_optunahub_sampler("samplers/simulated_annealing", "SimulatedAnnealingSampler")
         if sampler_name in {"auto", "autosampler"}:

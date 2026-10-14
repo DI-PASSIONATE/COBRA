@@ -134,6 +134,17 @@ def test_transient_power_goal_uses_the_hb_power_formula():
     assert np.asarray(goal.current_value)[0] == pytest.approx(10.0, abs=1e-3)
 
 
+def test_transient_power_at_dc_is_v_times_i():
+    """The DC bin holds the mean: 2 V x 5 mA = 10 mW = 10 dBm."""
+    table = _transient_table(dc=2.0)
+    table["I(VOUT)"] += 5e-3
+    result = SimulationResult(dataframes={"run.cir.TRAN.FD.csv": to_frequency_domain(table)})
+    goal = DesignGoal(make_power_dbm("OUT", SimulationType.TRAN), "0-1GHz", min_value=5.0)
+
+    goal.penalty(result)
+    assert np.asarray(goal.current_value)[0] == pytest.approx(10.0, abs=1e-3)
+
+
 def test_transient_goal_configuration():
     data = {
         "parameter": "TRAN:Power_dBm[OUT]",

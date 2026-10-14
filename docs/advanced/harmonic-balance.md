@@ -82,6 +82,8 @@ $$S = V_\mathrm{rms} \cdot I_\mathrm{rms} = 2 \cdot \lvert V_\mathrm{pk} \cdot I
 
 $$P[\mathrm{dBm}] = 10 \cdot \log_{10}\!\left(\frac{2 \cdot \lvert V_\mathrm{pk} \cdot I_\mathrm{pk} \rvert}{1\,\mathrm{mW}}\right)$$
 
+The DC line has no negative-frequency twin and holds the DC value itself, so its power is $\lvert V \cdot I \rvert$: with a 0 V probe in the supply, `Power_dBm[Vdd]` over `0-0.1GHz` is the DC supply power under the HB drive (the bias current changes with drive, so it is not the quiescent power).
+
 Because the real probe current is used instead of an assumed load resistance, the result stays valid for arbitrary and reactive loads, not just 50 Ω.
 
 Gain additionally needs the drive level. It is derived from the SIN source of the port nominated as the input, using its amplitude $A$ and port impedance $z_0$ from the netlist:

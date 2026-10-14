@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from cobra import __main__ as cli
-from cobra.configuration.config_runner import SIMULATOR_REGISTRY
+from cobra.configuration.config_runner import OPTIMIZER_REGISTRY, SIMULATOR_REGISTRY
 from cobra.configuration.configuration import (
     DesignGoalConfig,
     OptimizationParameterConfig,
@@ -144,6 +144,10 @@ def test_json_example_matches_the_schema(example: dict[str, Any], tmp_path: Path
     elif example.keys() <= {"simulator", "simulation_parameters"}:
         simulator = _check_simulator(example["simulator"]) if "simulator" in example else XyceSimulator
         _check_simulation_parameters(example.get("simulation_parameters", {}), simulator)
+    elif example.keys() == {"optimizer"}:
+        optimizer = OPTIMIZER_REGISTRY[example["optimizer"]["name"]]
+        names = {setting.name for setting in optimizer._settings}
+        assert set(example["optimizer"].get("settings", {})) <= names
     elif "parameter" in example:
         DesignGoalConfig.from_dict(example).validate()
     elif {"name", "type"} <= example.keys():

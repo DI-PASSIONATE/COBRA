@@ -197,6 +197,18 @@ apply to a run may use empty objects or arrays.
 }
 ```
 
+### Optimizer
+
+`optimizer.name` is `OptunaOptimizer`. Its settings are `multi_objective`,
+`sampler` (`tpe`, `random`, `simulated_annealing`), `pruner` and `random_seed`
+(default `-1`, no seed). A seed makes the run repeatable when `parallel_trials`
+is 1; it reaches the `tpe` and `random` samplers, and an optunahub sampler that
+accepts a seed.
+
+```json
+"optimizer": {"name": "OptunaOptimizer", "settings": {"sampler": "tpe", "random_seed": 42}}
+```
+
 ### Simulator
 
 `simulator.name` is `XyceSimulator` (default) or `VacaskSimulator`. Goals whose
@@ -209,7 +221,7 @@ analysis the chosen simulator cannot run are rejected before the run starts.
 | | `vacask_threads` | `1` | `vacask -n N`; `0` = auto (`OMP_NUM_THREADS`); keep `1` with `parallel_trials` above 1 |
 | | `vector_fit_max_order` | `12` | Highest model order snp2le may use when it fits a surrogate (integer, at least 2) |
 | | `enforce_passivity` | `false` | Enforce passivity on the vector fit |
-| | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity` |
+| | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity`. A fit without it is retried at lower orders, then the trial is penalised |
 
 VACASK netlists use VACASK analysis names as `simulation_parameters` keys
 (`"AC"`, `"HB"`, `"TRAN"`, `"NOISE"`, `"HBNOISE"`) and VACASK parameter names
