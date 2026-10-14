@@ -5,7 +5,8 @@ Works directly on the DataFrames stored in :class:`~cobra.spice_sim.base_simulat
 design-goal formulas and the GUI plot share one implementation.
 
 Phasor convention: Xyce stores two-sided spectra, i.e. each bin holds amplitude/2.
-The apparent power therefore is ``S = Vrms * Irms = 2 * |V_pk * I_pk|``.
+The apparent power therefore is ``S = Vrms * Irms = 2 * |V_pk * I_pk|``. The DC bin
+holds the DC value itself, so its power is ``|V * I|``.
 
 A transient result reaches the same layout through
 :func:`cobra.spice_sim.tran_spectrum.to_frequency_domain`, so everything here
@@ -213,7 +214,9 @@ def spectrum(
         return real + 1j * imag
 
     if quantity in ("power", "gain"):
-        p_w = 2 * np.abs(phasor(f"V({node})") * phasor(f"I(V{node})"))
+        # Every bin but DC holds amplitude/2 (see the module docstring).
+        factor = np.where(freqs[mask] == 0.0, 1.0, 2.0)
+        p_w = factor * np.abs(phasor(f"V({node})") * phasor(f"I(V{node})"))
         values = 10 * np.log10(np.maximum(p_w / 1e-3, _FLOOR))
         if quantity == "gain":
             values = values - pin_dbm

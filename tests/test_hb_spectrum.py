@@ -93,6 +93,15 @@ def test_spectrum_power_uses_the_two_sided_convention():
     assert gain[0] == pytest.approx(power[0] - 3.0)
 
 
+def test_the_dc_line_power_is_v_times_i():
+    """The DC bin holds the DC value itself, not half of it: 2.5 V x 7.79 mA = 19.5 mW."""
+    df = pd.DataFrame({"FREQ": [0.0, 10e9], "Re(V(VDD))": [2.5, 0.5], "Re(I(VVDD))": [7.79e-3, 0.01]})
+    _, power = spectrum(df, "VDD", "power")
+
+    assert power[0] == pytest.approx(10 * np.log10(2.5 * 7.79e-3 / 1e-3))
+    assert power[1] == pytest.approx(10 * np.log10(2 * 0.5 * 0.01 / 1e-3))
+
+
 def test_frequency_range_filters_bins_and_a_single_frequency_snaps_to_the_nearest():
     assert spectrum(_hb_frame(), "OUT", frequency_range=(5e9, 25e9))[0].tolist() == [10e9, 20e9]
     assert spectrum(_hb_frame(), "OUT", frequency_range=(11e9, 11e9))[0].tolist() == [10e9]
