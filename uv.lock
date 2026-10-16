@@ -290,7 +290,7 @@ requires-dist = [
     { name = "onnxruntime", specifier = ">=1.20" },
     { name = "optuna", specifier = ">=5.0" },
     { name = "optunahub", specifier = ">=0.1" },
-    { name = "orca-rfic", marker = "extra == 'orca'", specifier = ">=2.1,<3" },
+    { name = "orca-rfic", marker = "extra == 'orca'", specifier = ">=2.2,<3" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pyqtgraph", specifier = ">=0.13.7" },
     { name = "pyside6", specifier = ">=6.8.0.2" },
@@ -304,7 +304,7 @@ provides-extras = ["orca"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "orca-rfic", specifier = ">=2.1,<3" },
+    { name = "orca-rfic", specifier = ">=2.2,<3" },
     { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -1736,7 +1736,7 @@ wheels = [
 
 [[package]]
 name = "orca-rfic"
-version = "2.1.0"
+version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorlog" },
@@ -1757,9 +1757,9 @@ dependencies = [
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/51/850f2dee2f84322bddae869c6c892144b0f0daeb7bd41981ffe8459990e9/orca_rfic-2.1.0.tar.gz", hash = "sha256:10d18fbd5d1a1734ef5888264cd11e73350c62e0eb9b434c3cd20383f6cbbd8d", size = 185840, upload-time = "2026-10-06T19:19:25.938Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/ea/b503b14d3646841bc889b04c4eec3d9b85fdca3a22ca67c09a4d7f11d960/orca_rfic-2.2.0.tar.gz", hash = "sha256:6b48a4b11cbab005ead4e161ea9a4372d69d6c68f617aa48fec04c1287436661", size = 184509, upload-time = "2026-10-16T10:21:30.612Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/30/afebea7657809dd3fe8b805ff022cfaad4e96712f3c28c6ab1cb74cc61ab/orca_rfic-2.1.0-py3-none-any.whl", hash = "sha256:2f6b757969e46011d3070ccad998ec302a2754996edf4981b55f91a744af4003", size = 190312, upload-time = "2026-10-06T19:19:24.852Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/57/39753efe8b77d583e1e3cf9584a595b90e6328175a3e097e7f860e5e1a89/orca_rfic-2.2.0-py3-none-any.whl", hash = "sha256:eb5236f7ce7a9f80ad25378d8f792cad0048d9baf7247003b54370a98e68a628", size = 190661, upload-time = "2026-10-16T10:21:29.474Z" },
 ]
 
 [[package]]

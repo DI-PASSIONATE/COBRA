@@ -57,6 +57,8 @@ class EMFineTuningStage(COBRABaseStage):
             parameters = all_parameters
 
         try:
+            # Without ORCA's 0 Hz point: it is extrapolated, and pinning the fit to it can break
+            # the DC operating point (e.g. of transformers in VACASK); the fit spans DC itself.
             ntwk = simulate_geometry(
                 orca_geometry,
                 parameters,
@@ -64,6 +66,8 @@ class EMFineTuningStage(COBRABaseStage):
                 name,
                 palace_executable=self.palace_executable,
                 num_processes=self.num_processes,
+                # TODO: fixme
+                result_type="deembedded",
             )
         except SimulationError as exc:
             raise SimulatorError(f"EM fine-tuning of {comp_name or name} failed: {exc}") from exc

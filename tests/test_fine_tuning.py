@@ -262,7 +262,11 @@ def test_stage_simulates_the_components_parameters_through_orca(fake_simulate_ge
     assert parameters == {"turns": 2, "width": 6.0, "space": 3.0}
     assert output_dir == str(Path("results").resolve())
     assert name == "cobra_result_ft_1_2_X1"
-    assert fake_simulate_geometry.call_args.kwargs == {"palace_executable": "palace", "num_processes": 4}
+    assert fake_simulate_geometry.call_args.kwargs == {
+        "palace_executable": "palace",
+        "num_processes": 4,
+        "result_type": "deembedded",
+    }
     [network] = context.predicted_networks
     assert network.name == "X1"
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+- Requires ORCA 2.2 or newer (`simulate_geometry(result_type=...)`) for EM fine-tuning.
+
+### Fixed
+- EM fine-tuning fits the de-embedded Palace result instead of the one with ORCA's
+  extrapolated 0 Hz point; pinned to that point, the VACASK fit of a transformer broke the
+  circuit's DC operating point, so its AC and noise analyses failed.
+
 ## 3.1.0 - 2026-10-14
 
 ### Added

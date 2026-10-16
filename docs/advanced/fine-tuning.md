@@ -15,7 +15,7 @@ Surrogate optimization is fast. Fine-tuning adds higher-fidelity EM verification
 ## Requirements
 
 - Palace installed and callable.
-- ORCA 2.1 or newer, installed with `pip install "cobra-rfic[orca]"`, and an ORCA geometry
+- ORCA 2.2 or newer, installed with `pip install "cobra-rfic[orca]"`, and an ORCA geometry
   for every ONNX component.
 
 ## Enabling Fine-Tuning
@@ -38,7 +38,10 @@ Key options:
 1. The first iteration verifies the parameters the surrogate optimization ended with.
 2. For each ONNX component, ORCA's `simulate_geometry` draws the geometry from the current
    parameters, meshes it with that sample's own ports and runs Palace, exactly as for the
-   model's training data. Touchstone (`.snp`) components keep their file.
+   model's training data. COBRA uses the de-embedded result (`_deembedded.sNp`), without
+   the 0 Hz point ORCA adds by extrapolation, which can break the circuit's DC operating
+   point; the circuit model's fit covers DC itself. Touchstone (`.snp`) components keep
+   their file.
 3. Simulate the circuit with the Palace results and check the design goals.
 4. Stop when the goals are met or the iteration budget is exhausted. Otherwise the
    fine-tuning optimizer suggests the next parameters, geometry and netlist values alike.
