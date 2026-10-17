@@ -8,8 +8,15 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import skrf as rf
+from skrf.network import s2y
 
-from cobra.stages.em_surrogate_stage import LOW_FREQUENCIES, EMSurrogateStage, inference_frequencies
+from cobra.stages.em_surrogate_stage import (
+    LOW_FREQUENCIES,
+    EMSurrogateStage,
+    clean_dc_point,
+    inference_frequencies,
+)
 
 FREQUENCIES = np.array([1e9, 2e9, 3e9])
 
@@ -76,3 +83,45 @@ def test_grid_above_the_low_frequencies_is_unchanged() -> None:
 
 def test_grid_keeps_the_low_frequencies_inside_the_band() -> None:
     np.testing.assert_array_equal(inference_frequencies((0.0, 0.3e9)), [0.0, 10e6, 20e6, 100e6, 200e6, 300e6])
+
+
+def _transformer_with_dc_errors() -> rf.Network:
+    """A 4-port of two 1 Ohm windings (ports 1-2 and 3-4) whose 0 Hz point leaks 1e-4 S to
+    ground at every port and couples the windings by 0.5 S, as a surrogate predicts it.
+    """
+    y_dc = np.zeros((4, 4))
+    for a, b in ((0, 1), (2, 3)):
+        y_dc[np.ix_([a, b], [a, b])] = [[1.0, -1.0], [-1.0, 1.0]]
+    y_dc += np.eye(4) * 1e-4
+    y_dc[0, 2] = y_dc[2, 0] = -0.5
+    y_dc[0, 0] += 0.5
+    y_dc[2, 2] += 0.5
+    s_dc = np.linalg.solve(np.eye(4) + 50 * y_dc, np.eye(4) - 50 * y_dc)  # Y commutes with I + 50 Y
+    s = np.repeat(s_dc[np.newaxis], 3, axis=0).astype(complex)
+    s[1:] *= 0.9j
+    return rf.Network(frequency=rf.Frequency.from_f(np.array([0, 1e9, 2e9]), unit="Hz"), s=s)
+
+
+def test_clean_dc_point_keeps_only_the_conductance_inside_each_winding() -> None:
+    network = _transformer_with_dc_errors()
+    cleaned = clean_dc_point(network, [[1, 2], [3, 4]])
+
+    y_dc = np.real(s2y(cleaned.s[:1], cleaned.z0[:1])[0])
+    expected = np.zeros((4, 4))
+    for a, b in ((0, 1), (2, 3)):
+        expected[np.ix_([a, b], [a, b])] = [[1.0, -1.0], [-1.0, 1.0]]
+    np.testing.assert_allclose(y_dc, expected, atol=1e-9)
+    np.testing.assert_array_equal(cleaned.s[1:], network.s[1:])
+
+
+def test_clean_dc_point_leaves_a_port_in_no_winding_open() -> None:
+    cleaned = clean_dc_point(_transformer_with_dc_errors(), [[1, 2]])
+
+    y_dc = np.real(s2y(cleaned.s[:1], cleaned.z0[:1])[0])
+    np.testing.assert_allclose(y_dc[2:], 0.0, atol=1e-9)
+    np.testing.assert_allclose(y_dc[:, 2:], 0.0, atol=1e-9)
+
+
+def test_clean_dc_point_needs_a_0_hz_point() -> None:
+    network = _transformer_with_dc_errors()[1:]
+    assert clean_dc_point(network, [[1, 2], [3, 4]]) is network

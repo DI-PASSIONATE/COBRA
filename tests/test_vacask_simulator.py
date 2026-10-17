@@ -331,7 +331,8 @@ def test_a_refused_noise_generator_is_retried_at_lower_orders(tmp_path, monkeypa
             _lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, max_order=40, thermal_noise=True
         )
     assert caps == [40, 30]
-    assert "X1 gets its thermal noise at max order 30" in caplog.text
+    assert "X1: kept the fit with model order" in caplog.text
+    assert "max orders tried: 40: no thermal noise; 30: RMS" in caplog.text
     assert "Rnz_e1" in Path(path).read_text(encoding="utf-8")
 
 
@@ -346,13 +347,69 @@ def test_a_noise_retry_stays_below_the_order_the_fit_stopped_at(tmp_path, monkey
 def test_no_noisy_fit_at_any_order_raises(tmp_path, monkeypatch):
     from cobra.spice_sim.vector_fit import VectorFitError, vector_fit_vacask
 
-    caps = _noise_failing_at(monkeypatch, {40, 30, 20}, model_order=40)
-    with pytest.raises(VectorFitError, match=r"X1 gets its thermal noise \(max orders tried: 40, 30, 20"):
+    all_caps = {40, 30, 20, 15, 12, 10}
+    caps = _noise_failing_at(monkeypatch, all_caps, model_order=40)
+    with pytest.raises(VectorFitError, match=r"X1 gets its thermal noise .*max orders tried: 40: no thermal noise; 30"):
         vector_fit_vacask(
             _lossy_two_port(), str(tmp_path / "X1"), enforce_passivity=True, max_order=40, thermal_noise=True
         )
-    assert caps == [40, 30, 20]
+    assert caps == [40, 30, 20, 15, 12, 10]
     assert not (tmp_path / "X1.inc").exists()
+
+
+def _rms_at(monkeypatch, rms_by_cap):
+    """Make snp2le report the RMS error *rms_by_cap* gives per max order; return the caps it was called with."""
+    from snp2le.core import engine
+
+    convert = engine.convert
+    caps = []
+
+    def fake_convert(state, network):
+        caps.append(state.max_order)
+        result = convert(state, network)
+        result.rms_error = rms_by_cap[state.max_order]
+        result.model_order = state.max_order
+        return result
+
+    monkeypatch.setattr(engine, "convert", fake_convert)
+    return caps
+
+
+def test_a_poor_fit_is_retried_at_lower_orders_and_the_best_kept(tmp_path, monkeypatch, caplog):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    caps = _rms_at(monkeypatch, {40: 4e-2, 30: 2e-2, 20: 5e-3, 15: 8e-3, 12: 1e-2, 10: 9e-3})
+    with caplog.at_level("INFO", logger="cobra.spice_sim.vector_fit"):
+        vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"), max_order=40)
+    assert caps == [40, 30, 20, 15, 12, 10]
+    assert "RMS 5.00e-03" in caplog.text
+
+
+def test_a_good_fit_stops_the_retries(tmp_path, monkeypatch):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    caps = _rms_at(monkeypatch, {40: 4e-2, 30: 1e-3})
+    vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"), max_order=40)
+    assert caps == [40, 30]
+
+
+def test_a_skipped_dc_pin_is_reported(tmp_path, monkeypatch, caplog):
+    from snp2le.core import engine
+    from snp2le.core.dcpin import DCPinHealth
+
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    convert = engine.convert
+
+    def fake_convert(state, network):
+        result = convert(state, network)
+        result.dc_pin = DCPinHealth(False, "DC pin skipped: test")
+        return result
+
+    monkeypatch.setattr(engine, "convert", fake_convert)
+    with caplog.at_level("WARNING", logger="cobra.spice_sim.vector_fit"):
+        vector_fit_vacask(_lossy_two_port(), str(tmp_path / "X1"))
+    assert "X1 does not meet its 0 Hz point: DC pin skipped: test" in caplog.text
 
 
 # ---------------------------------------------------------------------------

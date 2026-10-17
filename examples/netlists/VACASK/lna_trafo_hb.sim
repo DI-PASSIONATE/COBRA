@@ -21,15 +21,16 @@ include "X1.inc"
 X1 (ip Vdd op on _net9 _net10) trafo
 
 // Ideal transformer, as Qucs-S's xfmr.cir: V(p3,p4) = ratio * V(p1,p2).
+// Without xfmr.cir's 1 uOhm series resistor: with almost no DC current through
+// the balun, VACASK's residual check failed on rounding at its node.
 subckt xfmr (p1 p2 p3 p4)
   parameters ratio=1
   model vcvs vcvs
   model cccs cccs
   e (n5 p4 p1 p2) vcvs gain=ratio
   f (p1 p2) cccs ctlinst="vm" gain=ratio
-  vm (n5 n6) vsource dc=0
+  vm (n5 p3) vsource dc=0
   rp (p1 p2) r r=1M
-  rs (n6 p3) r r=1u
 ends
 
 subckt ideal_balun (n1 n4 n3 n0 n2)

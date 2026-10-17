@@ -265,7 +265,7 @@ def test_stage_simulates_the_components_parameters_through_orca(fake_simulate_ge
     assert fake_simulate_geometry.call_args.kwargs == {
         "palace_executable": "palace",
         "num_processes": 4,
-        "result_type": "deembedded",
+        "result_type": "dc",
     }
     [network] = context.predicted_networks
     assert network.name == "X1"
