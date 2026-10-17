@@ -22,6 +22,8 @@ class OptimizationProperty:
     step: float | None = None
     unit: str | None = None
     linked_to: str | None = None
+    initial_value: float | None = None
+    """Value the optimizer evaluates first; ``None`` leaves it to the optimizer."""
 
 def resolve_linked_master(
     param: OptimizationProperty, by_name: Mapping[str, OptimizationProperty]

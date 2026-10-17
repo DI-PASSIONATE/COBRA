@@ -353,6 +353,13 @@ class OptimizationParamDialog(QDialog):
 
         self.unit_edit = QLineEdit()
         self.unit_edit.setPlaceholderText("Optional (e.g. F (=femto)) for Xyce")
+        # Its minimum stands for "no start value": the optimizer chooses the first point.
+        self.start_spin = QDoubleSpinBox()
+        self.start_spin.setRange(-1e15, 1e15)
+        self.start_spin.setDecimals(15)
+        self.start_spin.setSpecialValueText("None")
+        self.start_spin.setValue(self.start_spin.minimum())
+        self.start_spin.setToolTip(tooltip("param_start_spin"))
         self.link_to_combo = QComboBox()
         self.link_to_combo.addItem("None", None)
 
@@ -365,6 +372,8 @@ class OptimizationParamDialog(QDialog):
                 self.step_spin.setValue(param.step)
             if param.unit:
                 self.unit_edit.setText(param.unit)
+            if param.initial_value is not None:
+                self.start_spin.setValue(param.initial_value)
             if param.linked_to:
                 self.link_to_combo.addItem(param.linked_to, param.linked_to)
                 self.link_to_combo.setCurrentIndex(self.link_to_combo.count() - 1)
@@ -400,6 +409,7 @@ class OptimizationParamDialog(QDialog):
         self.form_layout.addRow("Max", self.max_spin)
         self.form_layout.addRow("Step", self.step_spin)
         self.form_layout.addRow("Unit", self.unit_edit)
+        self.form_layout.addRow("Start value", self.start_spin)
         self.form_layout.addRow("Link to", self.link_to_combo)
 
         self._refresh_link_targets(self.name_combo.currentText() if self.use_combo_name else self.name_edit.text())
@@ -432,6 +442,8 @@ class OptimizationParamDialog(QDialog):
                         self.min_spin.setValue(float(params["min"]))
                     if "max" in params:
                         self.max_spin.setValue(float(params["max"]))
+                    if "step" in params:
+                        self.step_spin.setValue(float(params["step"]))
             except (json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.warning("Could not read ONNX metadata: %s", e)
 
@@ -457,6 +469,7 @@ class OptimizationParamDialog(QDialog):
         self.max_spin.setEnabled(not linked)
         self.step_spin.setEnabled(not linked)
         self.unit_edit.setEnabled(not linked)
+        self.start_spin.setEnabled(not linked)
 
     def get_data(self):
         name = self.name_combo.currentText() if self.use_combo_name else self.name_edit.text()
@@ -464,6 +477,7 @@ class OptimizationParamDialog(QDialog):
         t = OptimizationType(t_str)
         unit = self.unit_edit.text().strip() or None
         linked_to = self.link_to_combo.currentData()
+        start = self.start_spin.value()
         return OptimizationProperty(
             name,
             t,
@@ -472,5 +486,6 @@ class OptimizationParamDialog(QDialog):
             self.step_spin.value() or None,
             unit=unit,
             linked_to=linked_to,
+            initial_value=None if linked_to or start == self.start_spin.minimum() else start,
         )
 

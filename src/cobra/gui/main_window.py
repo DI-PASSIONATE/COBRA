@@ -61,6 +61,7 @@ from cobra.optimizers.design_goal_collection import (
     make_isolation_db,
     make_power_dbm,
 )
+from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.simulation_type import SimulationType
@@ -285,6 +286,7 @@ class MainWindow(QMainWindow):
         # ---- Optimizer selection + dynamic per-optimizer options ----
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
+        self.optimizer_combo.addItem("GradientDescentOptimizer", GradientDescentOptimizer)
         self.config_form_layout.addRow("Optimizer", self.optimizer_combo)
         self.optimizer_widgets: dict[str, QWidget] = {}
         self.optimizer_combo.currentIndexChanged.connect(self.update_optimizer_options)
@@ -1272,6 +1274,7 @@ class MainWindow(QMainWindow):
                     step=parameter.step,
                     unit=parameter.unit,
                     linked_to=parameter.linked_to,
+                    initial_value=parameter.initial_value,
                 )
                 for parameter in self.opt_params
             ],
@@ -1361,6 +1364,7 @@ class MainWindow(QMainWindow):
                     step=item.step,
                     unit=item.unit,
                     linked_to=item.linked_to,
+                    initial_value=item.initial_value,
                 )
             )
 

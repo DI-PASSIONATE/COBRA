@@ -101,6 +101,7 @@ class OptunaOptimizer(BaseOptimizer):
         self.pruner_kwargs = pruner_kwargs or {}
         self.study: optuna.study.Study | None = None
         self._param_to_trial_name: dict[str, str] = {}
+        self._start_point_queued = False
 
     @staticmethod
     def _normalize_name(name: str) -> str:
@@ -203,6 +204,7 @@ class OptunaOptimizer(BaseOptimizer):
             sampler=self._create_sampler(),
             pruner=self._create_pruner(),
         )
+        self._start_point_queued = False
 
     def tell(self, context: "OptimizationContext", penalty: list[float] | float):
         trial = context.trial
@@ -213,7 +215,16 @@ class OptunaOptimizer(BaseOptimizer):
         # completed one without a made-up objective value distorting the study.
         self._get_study().tell(context.trial, state=optuna.trial.TrialState.PRUNED)
 
+    def _queue_start_point(self, params: list[OptimizationProperty]) -> None:
+        """Make the first trial evaluate the parameters' ``initial_value``s; the others are sampled."""
+        self._start_point_queued = True
+        start = {param.name: param.initial_value for param in params if param.initial_value is not None}
+        if start:
+            self._get_study().enqueue_trial(start)
+
     def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+        if not self._start_point_queued:
+            self._queue_start_point(model_input_ranges + netlist_property_ranges)
         trial = self._get_study().ask()
         context.trial = trial
         self._param_to_trial_name = {}

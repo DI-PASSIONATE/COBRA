@@ -103,7 +103,7 @@ def test_the_best_parameter_netlist_keeps_the_inherited_unit(
 ):
     """Regression: the best-parameter re-run wrote ``19.0`` where every trial
     had written ``19.0F``, so the design COBRA reported was not the one it
-    evaluated.
+    evaluated. The run's own netlist holds the reported design.
     """
     monkeypatch.chdir(tmp_path)
     netlist = tmp_path / "circuit.cir"
@@ -123,7 +123,7 @@ def test_the_best_parameter_netlist_keeps_the_inherited_unit(
             formula=lambda _result, _freq=None: np.array([50.0]),
             loss=calculate_array_penalty,
         ),
-        max_value=10.0,  # never satisfied, so the best-parameter re-run happens
+        max_value=10.0,  # never satisfied, so the run reports its closest trial
     )
 
     context = cobra.run(
@@ -135,7 +135,8 @@ def test_the_best_parameter_netlist_keeps_the_inherited_unit(
     )
 
     assert not context.goal_achieved
-    trial_netlist, final_netlist = simulator.netlists[0], simulator.netlists[-1]
+    trial_netlist = simulator.netlists[0]
+    final_netlist = Path(context.netlist).read_text(encoding="utf-8")
 
     # The follower is written the same way in a trial and in the final netlist.
     assert _value_of(trial_netlist, "L1").endswith("p")

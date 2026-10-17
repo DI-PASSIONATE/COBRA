@@ -346,3 +346,13 @@ def test_stage_cleans_the_0_hz_point_of_a_model_with_windings(monkeypatch, tmp_p
     [network] = context.predicted_networks
     np.testing.assert_allclose(np.real(s2y(network.s[:1], network.z0[:1])[0]).sum(axis=1), 0.0, atol=1e-12)
     np.testing.assert_array_equal(network.s[1], leaky[1])
+
+
+def test_steps_of_discrete_inputs_are_read():
+    ranges = {"turns": {"min": 1, "max": 5, "step": 1}, "width": {"min": 2.0, "max": 15.0}, "space": {"min": 2, "max": 6, "step": 0}}
+    session = _session({"input_parameter_ranges": json.dumps(ranges)})
+
+    metadata = SurrogateMetadata.from_session(session)
+
+    assert metadata.input_steps == {"turns": 1.0}
+    assert metadata.input_ranges["turns"] == (1.0, 5.0)

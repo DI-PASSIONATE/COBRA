@@ -103,8 +103,12 @@ def test_invalid_configuration_is_rejected(config_dir: Path, overrides, match):
         ({"min_value": 5.0, "max_value": 1.0}, "min_value greater than max_value"),
         ({"step": 0}, "step must be positive"),
         ({"type": "magic"}, "Unsupported optimization type"),
+        ({"initial_value": 3.0}, r"initial_value 3 is outside \[1, 2\]"),
+        ({"initial_value": 1.25, "step": 0.5}, "not on its grid"),
+        ({"initial_value": "1.5"}, "initial_value must be a finite number"),
+        ({"initial_value": 1.5, "linked_to": "C1"}, "give the initial_value there"),
     ],
-    ids=["min-above-max", "zero-step", "unknown-type"],
+    ids=["min-above-max", "zero-step", "unknown-type", "start-outside", "start-off-grid", "start-text", "start-linked"],
 )
 def test_invalid_optimization_parameter_is_rejected(overrides, match):
     with pytest.raises(ConfigurationError, match=match):
@@ -174,3 +178,17 @@ def test_custom_geometry_file_is_resolved_and_checked(config_dir: Path):
     resolved = config.fine_tuning.geometries["X1"].file
     assert resolved is not None
     assert Path(resolved) == (config_dir / "geom.py").resolve()
+
+
+@pytest.mark.parametrize("overrides", [{}, {"initial_value": 1.5, "step": 0.5}, {"initial_value": 1.7}])
+def test_valid_initial_value_is_accepted(overrides):
+    OptimizationParameterConfig.from_dict(_parameter(**overrides)).validate()
+
+
+def test_initial_value_round_trips(config_dir: Path, config_data):
+    config_data["optimization_parameters"] = [_parameter(initial_value=1.5)]
+    config = RunConfiguration.from_dict(config_data, config_dir)
+
+    reloaded = RunConfiguration.load(config.save(config_dir / "run.json"))
+
+    assert reloaded.optimization_parameters[0].initial_value == 1.5

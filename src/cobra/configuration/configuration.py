@@ -83,11 +83,13 @@ class OptimizationParameterConfig:
     step: float | None = None
     unit: str | None = None
     linked_to: str | None = None
+    initial_value: float | None = None
+    """Value the optimizer evaluates first, e.g. a known design; ``None`` leaves it to the optimizer."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OptimizationParameterConfig:
         data = _mapping(data, "optimization parameter")
-        allowed = {"name", "type", "min_value", "max_value", "step", "unit", "linked_to"}
+        allowed = {"name", "type", "min_value", "max_value", "step", "unit", "linked_to", "initial_value"}
         _require_keys(data, allowed, "optimization parameter")
         try:
             return cls(**data)
@@ -117,6 +119,28 @@ class OptimizationParameterConfig:
             )
         if self.step is not None and self.step <= 0:
             raise ConfigurationError(f"Optimization parameter '{self.name}' step must be positive")
+        if self.initial_value is not None:
+            self._validate_initial_value(self.initial_value)
+
+    def _validate_initial_value(self, value: float) -> None:
+        _number(value, f"Optimization parameter '{self.name}' initial_value")
+        if self.linked_to:
+            raise ConfigurationError(
+                f"Optimization parameter '{self.name}' is linked to '{self.linked_to}', which "
+                "sets its value; give the initial_value there"
+            )
+        if not self.min_value <= value <= self.max_value:
+            raise ConfigurationError(
+                f"Optimization parameter '{self.name}' initial_value {value:g} is outside "
+                f"[{self.min_value:g}, {self.max_value:g}]"
+            )
+        if self.step is not None:
+            steps = (value - self.min_value) / self.step
+            if abs(steps - round(steps)) > 1e-6:
+                raise ConfigurationError(
+                    f"Optimization parameter '{self.name}' initial_value {value:g} is not on its "
+                    f"grid min_value + k * step ({self.min_value:g} + k * {self.step:g})"
+                )
 
 
 @dataclass(slots=True)

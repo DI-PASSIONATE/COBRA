@@ -20,9 +20,7 @@ from cobra.optimizers import OptunaOptimizer
 from cobra.optimizers.base_optimizer import (
     BaseOptimizer,
     OptimizationProperty,
-    OptimizationType,
     aggregate_penalty,
-    netlist_unit,
 )
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
 from cobra.spice_sim.base_simulator import BaseSimulator
@@ -207,7 +205,8 @@ class COBRA:
         - orca_geometries: Optional dict mapping component names to ORCA geometry objects for EM
                            fine-tuning. Only required for ONNX-based (non-Touchstone) components.
         - callback: An optional callback function that takes the current context as an argument.
-                    If the callback returns False, the optimization is stopped.
+                    If the callback returns False, the optimization is stopped. Trials still in
+                    flight are finished and reported to it as well, unless one met the goals.
         - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
         - parallel_trials: How many trials to evaluate at the same time, each in its own
                            working directory. Once a stopping condition is reached the
@@ -296,12 +295,16 @@ class COBRA:
         )
 
         # Trials run concurrently, so each gets its own working directory. Only the
-        # most recently finished one is kept — the earlier ones have already been
-        # reported to the optimizer and the callback.
+        # most recently finished one, the best so far and a winner are kept — the
+        # others have already been reported to the optimizer and the callback.
         trials_dir = results_dir / "trials"
         kept_trial_dir: Path | None = None
         winning_trial: OptimizationContext | None = None
         winning_trial_dir: Path | None = None
+        # The trial with the lowest penalty, the result when no trial meets the goals.
+        best_trial: OptimizationContext | None = None
+        best_trial_dir: Path | None = None
+        best_penalty = math.inf
 
         asked = 0
         completed = 0
@@ -368,6 +371,10 @@ class COBRA:
                     if trial_context.goal_achieved and winning_trial is None:
                         winning_trial = trial_context
                         winning_trial_dir = trial_dir
+                    previous_best_dir = best_trial_dir
+                    penalty = aggregate_penalty(OptimizerStage.losses(trial_context))
+                    if best_trial is None or penalty < best_penalty:
+                        best_trial, best_trial_dir, best_penalty = trial_context, trial_dir, penalty
 
                     logger.debug(
                         "Iteration %d/%d: goals achieved=%s, parameters=%s",
@@ -378,12 +385,14 @@ class COBRA:
                     )
 
                     # Callback. Once a stopping condition has been reached the
-                    # trials still in flight are drained and told to the optimizer,
-                    # but their results are discarded — reporting them would leave
-                    # the caller, and the GUI, displaying a trial that lost.
-                    if callback and not stop:
+                    # trials still in flight are drained and told to the optimizer.
+                    # After a winner their results are discarded — reporting them
+                    # would leave the caller, and the GUI, displaying a trial that
+                    # lost. Without one, a drained trial may be the best, so the
+                    # callback sees it; it can no longer stop anything.
+                    if callback and (not stop or winning_trial is None):
                         should_continue = callback(context)
-                        if should_continue is False:
+                        if should_continue is False and not stop:
                             logger.info("Optimization stopped by the callback at iteration %d", completed)
                             stop = True
 
@@ -395,8 +404,9 @@ class COBRA:
                     # Tells the optimizer about the current state and saves it to the context for logging
                     self.optimizer_stage.tell(context)
 
-                    if kept_trial_dir is not None and kept_trial_dir != winning_trial_dir:
-                        shutil.rmtree(kept_trial_dir, ignore_errors=True)
+                    for stale in {kept_trial_dir, previous_best_dir} - {trial_dir, winning_trial_dir, best_trial_dir}:
+                        if stale is not None:
+                            shutil.rmtree(stale, ignore_errors=True)
                     kept_trial_dir = trial_dir
 
                     # If design goals are achieved, stop submitting; the trials still
@@ -411,20 +421,24 @@ class COBRA:
         if rejected:
             logger.info("Skipped %d unbuildable geometries without simulating them", rejected)
 
-        # A trial drained after the successful one leaves its own (failing) result
-        # in the context, so reinstate the winner. Its time was already counted.
-        if winning_trial is not None:
-            context.absorb_trial(winning_trial, include_times=False)
-
-        # If goals not achieved, try to retrieve best parameters from optimizer and use those for final context
-        if not context.goal_achieved:
-            context = self.re_run_best_parameters(netlist, optimization_parameters, design_goal_checker, parsed_netlist, context)
-        else:
-            # The winning parameters live in a trial directory; put them into the
-            # run's own netlist so the saved file, and any fine-tuning, use them.
+        # The context holds the last trial to finish. Reinstate the winner, or without
+        # one the trial that missed the goals by the least: over-fulfilled goals do not
+        # make up for a missed one (see aggregate_penalty). Its time was already counted.
+        final_trial = winning_trial or best_trial
+        if final_trial is not None:
+            context.absorb_trial(final_trial, include_times=False)
+            # Its parameters live in a trial directory; put them into the run's own
+            # netlist so the saved file, and any fine-tuning, use them.
             parsed_netlist.update_parameters(context.netlist_parameters)
             parsed_netlist.save(netlist)
+        if context.goal_achieved:
             logger.info("Design goals achieved at iteration %s", context.iteration)
+        elif final_trial is not None:
+            logger.info(
+                "Design goals not achieved; the closest result is iteration %s (%s)",
+                context.iteration,
+                final_trial.results_dir,
+            )
 
         # Save the surrogate model's predicted S-parameters to the results directory for the user
         ntwks: list[rf.Network] = context.predicted_networks
@@ -527,47 +541,6 @@ class COBRA:
         netlist.update_parameters(context.netlist_parameters)
         Path(context.results_dir).mkdir(parents=True, exist_ok=True)
         netlist.save(context.netlist)  # The circuit simulator reads the netlist from disk
-
-    def re_run_best_parameters(self, netlist, optimization_parameters, design_goal_checker, parsed_netlist, context: OptimizationContext) -> OptimizationContext:
-        logger.info("Maximum iterations reached without achieving the design goals")
-
-            # If not MOO, retrieve best parameters and update context to reflect them
-        if not self.optimizer_stage.optimizer.multi_objective:
-            best_params_flat = self.optimizer_stage.optimizer.get_best_parameters()
-
-            # Split best_params_flat into model parameters and netlist parameters based on optimization_parameters list
-            model_params = {}
-            netlist_params = {}
-            by_name = {prop.name: prop for prop in optimization_parameters}
-
-            for prop in optimization_parameters:
-                if prop.name in best_params_flat:
-                    val = best_params_flat[prop.name]
-                    if prop.type == OptimizationType.NETLIST_VARIABLE:
-                        # Must match how the optimizers wrote this value during the
-                        # run, or the best-parameter netlist is a different circuit.
-                        unit = netlist_unit(prop, by_name)
-                        netlist_params[prop.name] = f"{val}{unit}"
-                    elif prop.type == OptimizationType.MODEL_INPUT:
-                        model_params[prop.name] = val
-
-            context.netlist_parameters = netlist_params
-            context.model_parameters = model_params
-
-            # Update netlist
-            parsed_netlist.update_parameters(netlist_params)
-            parsed_netlist.save(netlist)
-
-            # Rerun simulation to update context with best result
-            logger.info("Re-simulating with the best parameters found")
-            if self.em_surrogate_stage is not None:
-                context = self.em_surrogate_stage.run(context)
-            context = self.circuit_simulation_stage.run(context)
-            context = design_goal_checker.check_goals(context)
-
-        return context
-
-
 
     def fine_tuning(self, context: OptimizationContext, callback=None) -> OptimizationContext:
         """Perform EM fine-tuning using the EM fine-tuning stage."""
