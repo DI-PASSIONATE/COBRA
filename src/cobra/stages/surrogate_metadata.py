@@ -11,6 +11,12 @@ ORCA writes three ``metadata_props`` entries into every model it exports:
 - ``physics_guarantees``: ``{"passive": bool, "reciprocal": bool, ...}``, the
   properties the model enforces by construction.
 
+A model may also declare ``windings``: the ports (1-based, as in the
+``S<i><j>`` outputs) at the terminals of each winding, e.g. ``[[1, 2, 5],
+[3, 4, 6]]`` for a transformer with center taps. COBRA then replaces the
+predicted 0 Hz point by a physical one, see
+:func:`cobra.stages.em_surrogate_stage.clean_dc_point`.
+
 The constraints are evaluated without ``eval``: an expression is parsed with
 :func:`ast.parse` and interpreted node by node over the small grammar ORCA
 defines in ``orca.geometry.constraints`` (numbers, input names, arithmetic,
@@ -124,6 +130,8 @@ class SurrogateMetadata:
     """Feasibility expressions over the inputs; empty means the whole range box."""
     guarantees: dict[str, bool] = field(default_factory=dict)
     """Physical properties the model enforces by construction."""
+    windings: list[list[int]] = field(default_factory=list)
+    """Ports (1-based) at the terminals of each winding; empty if the model declares none."""
 
     @classmethod
     def from_session(cls, session: InferenceSession) -> SurrogateMetadata:
@@ -132,12 +140,14 @@ class SurrogateMetadata:
         Missing entries read as empty, and a malformed range or guarantee is
         skipped. Malformed constraints raise :class:`ConfigurationError`: without
         them COBRA cannot tell a buildable geometry from one the model never saw.
+        So do malformed windings, which would make a wrong DC point.
         """
         props = session.get_modelmeta().custom_metadata_map
         return cls(
             input_ranges=_parse_ranges(props.get("input_parameter_ranges")),
             constraints=_parse_constraints(props.get("input_constraints")),
             guarantees=_parse_guarantees(props.get("physics_guarantees")),
+            windings=_parse_windings(props.get("windings")),
         )
 
     @property
@@ -204,6 +214,24 @@ def _parse_guarantees(raw: str | None) -> dict[str, bool]:
     if not isinstance(data, dict):
         return {}
     return {name: value for name, value in data.items() if isinstance(value, bool)}
+
+
+def _parse_windings(raw: str | None) -> list[list[int]]:
+    if raw is None:
+        return []
+    data = _load_json(raw)
+    windings = isinstance(data, list) and data and all(isinstance(winding, list) and winding for winding in data)
+    ports = [port for winding in data for port in winding] if windings else []
+    if not (
+        windings
+        and all(type(port) is int and port >= 1 for port in ports)
+        and len(set(ports)) == len(ports)
+    ):
+        raise ConfigurationError(
+            f"Its windings metadata {raw!r} is not a JSON list of disjoint, non-empty lists of "
+            "port numbers (1-based); re-export the model with ORCA."
+        )
+    return data
 
 
 class FeasibilityConstraints:

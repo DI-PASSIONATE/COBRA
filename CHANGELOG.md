@@ -7,13 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- An ONNX surrogate may declare `windings` metadata (ports of each winding); COBRA then
+  replaces its predicted 0 Hz point by that of ideal windings, without the leak to ground and
+  the coupling between windings the prediction has at DC.
+- The VACASK backend logs a warning when snp2le cannot pin a fit to the 0 Hz point.
+
 ### Changed
 - Requires ORCA 2.2 or newer (`simulate_geometry(result_type=...)`) for EM fine-tuning.
+- The VACASK backend refits a surrogate with an RMS error above 3e-3 at lower max orders
+  (30, 20, 15, 12, 10) and keeps the best fit, as it already did for a fit without its
+  thermal noise; high-order fits that snp2le's passivity enforcement perturbed were
+  exploited by the optimizer.
 
 ### Fixed
-- EM fine-tuning fits the de-embedded Palace result instead of the one with ORCA's
-  extrapolated 0 Hz point; pinned to that point, the VACASK fit of a transformer broke the
-  circuit's DC operating point, so its AC and noise analyses failed.
+- EM fine-tuning uses the raw Palace result with ORCA's 0 Hz point (`_dc`), the variant the
+  surrogates are trained on. The de-embedded one removes the feed lines (-9 to -10 % top
+  winding inductance of small transformers), so fine-tuning and surrogate optimization
+  evaluated different networks.
+- `examples/netlists/VACASK/lna_trafo_hb.sim`: the ideal balun has no 1 uOhm series
+  resistor. With almost no DC current through it, VACASK's residual check failed on rounding,
+  so the operating point failed with EM (Palace) transformer models.
 
 ## 3.1.0 - 2026-10-14
 

@@ -210,6 +210,18 @@ at order 40 by 0.02, and orders 40 and 60 give the same circuit results, so
 `examples/configs/vacask_lna_inductor.json` sets 40. Check a new model by
 re-simulating one design at two orders.
 
+A high max order is no guarantee of a good fit, though: snp2le's passivity
+enforcement can perturb a high-order fit, or fall back to a reduced order, and
+the optimizer then finds designs whose performance exists only in the fit. A fit
+with an RMS error above 3e-3 is therefore refitted at lower max orders (30, 20,
+15, 12, 10, those below `vector_fit_max_order`) until one reaches 3e-3, and the
+fit with the lowest RMS error is kept; COBRA logs the orders tried. On 40 + 40
+random geometries of ORCA's inductor and transformer models this cut the worst
+in-band error from 0.080 to 0.027 and from 0.065 to 0.014. When snp2le cannot
+pin a fit to the surrogate's 0 Hz point (its passivity check below the band
+rejects the pin), COBRA logs a warning: the model then keeps the fit's own,
+extrapolated DC admittance.
+
 A fit that does not converge is stopped by snp2le after 250 pole
 relocations and refitted at the pole counts it was cycling at, so the trial keeps
 a model. The Xyce backend fits with scikit-rf directly; there COBRA stops such a
@@ -361,10 +373,9 @@ operating point stay unchanged. The generator exists only for a strictly passive
 fit, so the setting requires `"enforce_passivity": true` and COBRA rejects the
 configuration otherwise. Fits of de-embedded EM data at high orders often miss
 strict passivity, and whether one does scatters across orders. A fit without the
-generator is therefore refitted at lower max orders, 3/4 and then 1/2 of
-`vector_fit_max_order` (40, 30, 20), each kept below the order the previous fit
-stopped at; COBRA logs each retry with snp2le's reason ("thermal noise NOT
-added: ...") and the order that succeeded. If no order gets the generator, the
+generator is therefore refitted at the same lower max orders as a poor fit
+(above), each kept below the order the previous fit stopped at; COBRA logs the
+orders tried and the one kept. If no order gets the generator, the
 trial is penalised like a failed fit, because a noiseless surrogate would make
 the noise figure optimistic. A matched passive two-port at T0 then has NF = 1/G_av,
 checked against VACASK to 1e-3 dB. Xyce surrogates stay noiseless.

@@ -24,6 +24,36 @@ FREQUENCY_STEP = 1e9
 LOW_FREQUENCIES = (10e6, 20e6, 100e6, 200e6, 300e6, 500e6, 700e6)
 
 
+def clean_dc_point(ntwk: rf.Network, windings: list[list[int]]) -> rf.Network:
+    """A copy of *ntwk* whose 0 Hz point is that of ideal windings: resistive, with no path to
+    ground and no connection between windings.
+
+    At DC a winding is a resistance between its terminals, *windings* (ports, 1-based), and
+    a port in no winding is open. The prediction's own 0 Hz point is not: windings are near
+    shorts there, so a small S error is a large admittance error, which leaks to ground
+    (enough to shift a bias current) or couples windings by up to 1 S. The clean point keeps
+    the predicted conductances inside each winding, every row summing to zero. *ntwk* comes
+    back unchanged without a 0 Hz point or with a port shorted at DC.
+    """
+    if not len(ntwk.f) or ntwk.f[0] != 0:
+        return ntwk
+    s0 = np.real(ntwk.s[0])
+    s0 = (s0 + s0.T) / 2
+    if np.linalg.cond(np.eye(ntwk.nports) + s0) > 1e12:
+        return ntwk
+    z0 = ntwk.z0[:1]
+    y0 = np.real(rf.network.s2y(s0[np.newaxis], z0)[0])
+    clean = np.zeros_like(y0)
+    for winding in windings:
+        ports = np.array(winding) - 1
+        clean[np.ix_(ports, ports)] = y0[np.ix_(ports, ports)]
+    np.fill_diagonal(clean, 0.0)
+    np.fill_diagonal(clean, -clean.sum(axis=1))
+    out = ntwk.copy()
+    out.s[0] = rf.network.y2s(clean[np.newaxis], z0)[0]
+    return out
+
+
 def inference_frequencies(frequency_range: tuple[float, float]) -> np.ndarray:
     """The frequencies (Hz) the surrogate is evaluated at: *frequency_range* in ``FREQUENCY_STEP`` steps,
     plus the ``LOW_FREQUENCIES`` that fall between its lower end and the first step.
@@ -50,12 +80,15 @@ class EMSurrogateStage(COBRABaseStage):
         self.frequency_ranges: list[tuple[float, float] | None] = []
         # Geometries each ONNX model was trained on; None for Touchstone components.
         self.constraints: list[FeasibilityConstraints | None] = []
+        # Ports of each winding an ONNX model declares, to clean its 0 Hz point; empty if none.
+        self.windings: list[list[list[int]]] = []
         for model_path in em_surrogate_model:
             if str(model_path).lower().endswith((*tuple(f".s{i}p" for i in range(1, 10)), ".snp")):
                 self.session.append(model_path)
                 self.is_touchstone.append(True)
                 self.frequency_ranges.append(None)
                 self.constraints.append(None)
+                self.windings.append([])
             else:
                 session = InferenceSession(model_path)
                 geometry_inputs = [node.name for node in session.get_inputs() if node.name != "frequency"]
@@ -71,10 +104,17 @@ class EMSurrogateStage(COBRABaseStage):
                         "input_parameter_ranges.frequency (0 <= min < max, in Hz, as written by ORCA) "
                         "to know the band the surrogate is valid over."
                     )
+                if metadata.windings:
+                    n_ports = surrogate_port_count(node.name for node in session.get_outputs()) or 0
+                    if any(port > n_ports for winding in metadata.windings for port in winding):
+                        raise ConfigurationError(
+                            f"{model_path} declares windings {metadata.windings} beyond its {n_ports} ports."
+                        )
                 self.session.append(session)
                 self.is_touchstone.append(False)
                 self.frequency_ranges.append(frequency_range)
                 self.constraints.append(constraints)
+                self.windings.append(metadata.windings)
 
         self.component_names = component_names or []
 
@@ -120,14 +160,16 @@ class EMSurrogateStage(COBRABaseStage):
         params = context.model_parameters
         results_dir = context.results_dir
         context.predicted_networks = []
-        for session, is_ts, frequency_range, comp_name in zip(
-            self.session, self.is_touchstone, self.frequency_ranges, self.component_names, strict=True
+        for session, is_ts, frequency_range, windings, comp_name in zip(
+            self.session, self.is_touchstone, self.frequency_ranges, self.windings, self.component_names, strict=True
         ):
             if is_ts or frequency_range is None:  # both mean a Touchstone component
                 ntwk = rf.Network(str(session))
             else:
                 comp_params = self._component_parameters(params, comp_name)
                 ntwk = self.inference_snp(session, comp_params, frequency_range)
+                if windings:
+                    ntwk = clean_dc_point(ntwk, windings)
 
             ntwk.name = comp_name
             context.predicted_networks.append(ntwk)

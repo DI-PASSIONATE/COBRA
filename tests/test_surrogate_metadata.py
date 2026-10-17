@@ -25,18 +25,29 @@ from cobra.stages.surrogate_metadata import (
 if TYPE_CHECKING:
     from onnxruntime import InferenceSession
 
+    from cobra.optimization_context import OptimizationContext
+
 INPUTS = ["bottom_linewidth", "bottom_winding_diameter", "turns"]
 
 
 class _FakeSession:
     """The part of an ``InferenceSession`` COBRA reads when it loads a model."""
 
-    def __init__(self, metadata: dict[str, str], inputs: list[str] | None = None):
+    def __init__(self, metadata: dict[str, str], inputs: list[str] | None = None, n_ports: int = 3):
         self._metadata = metadata
         self._inputs = [*(inputs or INPUTS), "frequency"]
+        self._n_ports = n_ports
 
     def get_inputs(self):
         return [SimpleNamespace(name=name) for name in self._inputs]
+
+    def get_outputs(self):
+        return [
+            SimpleNamespace(name=f"S{i}{j}_{part}")
+            for i in range(1, self._n_ports + 1)
+            for j in range(i, self._n_ports + 1)
+            for part in ("real", "imag")
+        ]
 
     def get_modelmeta(self):
         return SimpleNamespace(custom_metadata_map=self._metadata)
@@ -283,3 +294,55 @@ def test_summary_lists_what_the_model_declares():
         "Constraints: turns <= 3",
         "Guarantees: reciprocal",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Windings
+# ---------------------------------------------------------------------------
+
+
+def test_windings_are_read_as_declared():
+    metadata = SurrogateMetadata.from_session(_session(_metadata(windings=[[1, 2, 5], [3, 4, 6]])))
+    assert metadata.windings == [[1, 2, 5], [3, 4, 6]]
+
+
+def test_a_model_without_windings_declares_none():
+    assert SurrogateMetadata.from_session(_session(_metadata())).windings == []
+
+
+@pytest.mark.parametrize(
+    "windings",
+    [[1, 2], [[1, 2], []], [[0, 1]], [[1, 2], [2, 3]], [[1.5, 2]], [[True, 2]], {"top": [1, 2]}, []],
+    ids=["flat", "empty-winding", "zero-based", "shared-port", "float", "bool", "dict", "empty"],
+)
+def test_malformed_windings_are_refused(windings):
+    with pytest.raises(ConfigurationError, match="windings metadata"):
+        SurrogateMetadata.from_session(_session(_metadata(windings=windings)))
+
+
+def test_stage_refuses_windings_beyond_the_ports(monkeypatch):
+    with pytest.raises(ConfigurationError, match=r"X1\.onnx declares windings \[\[1, 2, 4\]\] beyond its 3 ports"):
+        _stage(monkeypatch, _metadata(windings=[[1, 2, 4]]))
+
+
+def test_stage_keeps_the_windings_of_each_component(monkeypatch):
+    assert _stage(monkeypatch, _metadata(windings=[[1, 2, 3]])).windings == [[[1, 2, 3]]]
+
+
+def test_stage_cleans_the_0_hz_point_of_a_model_with_windings(monkeypatch, tmp_path):
+    import numpy as np
+    import skrf as rf
+    from skrf.network import s2y
+
+    leaky = np.full((2, 3, 3), 0.1, dtype=complex)
+    stage = _stage(monkeypatch, _metadata(windings=[[1, 2, 3]]))
+    monkeypatch.setattr(
+        stage, "inference_snp", lambda *_: rf.Network(frequency=rf.Frequency.from_f(np.array([0, 1e9]), unit="Hz"), s=leaky)
+    )
+    context = SimpleNamespace(model_parameters={}, results_dir=str(tmp_path))
+
+    stage.run(cast("OptimizationContext", context))
+
+    [network] = context.predicted_networks
+    np.testing.assert_allclose(np.real(s2y(network.s[:1], network.z0[:1])[0]).sum(axis=1), 0.0, atol=1e-12)
+    np.testing.assert_array_equal(network.s[1], leaky[1])
