@@ -514,6 +514,8 @@ class ComponentModelReport:
     """Band (Hz) an ONNX model declares in its metadata; the surrogate is evaluated over it."""
     model_input_ranges: dict[str, tuple[float, float]] = field(default_factory=dict)
     """Range each geometry input of an ONNX model was trained on, from its metadata."""
+    model_input_steps: dict[str, float] = field(default_factory=dict)
+    """Grid step of the geometry inputs that only take discrete values (e.g. turns)."""
     model_constraints: list[str] = field(default_factory=list)
     """Feasibility expressions an ONNX model declares; trials that violate one are skipped."""
     model_guarantees: dict[str, bool] = field(default_factory=dict)
@@ -792,6 +794,7 @@ def _inspect_onnx(path: Path, entry: ComponentModelReport) -> str | None:
     entry.model_input_ranges = {
         name: bounds for name, bounds in metadata.input_ranges.items() if name in geometry_inputs
     }
+    entry.model_input_steps = {name: step for name, step in metadata.input_steps.items() if name in geometry_inputs}
     entry.model_guarantees = metadata.guarantees
     entry.model_constraints = FeasibilityConstraints(metadata.constraints, geometry_inputs).expressions
     outputs = [node.name for node in session.get_outputs()]
@@ -1006,6 +1009,11 @@ def _check_optimization_parameters(
         for entry in report.component_models
         if entry.kind == "onnx"
     }
+    model_steps = {
+        entry.component: entry.model_input_steps
+        for entry in report.component_models
+        if entry.kind == "onnx"
+    }
     by_name = {parameter.name: parameter for parameter in configuration.optimization_parameters}
 
     for parameter in configuration.optimization_parameters:
@@ -1138,9 +1146,13 @@ def _check_optimization_parameters(
                         )
                     )
                 elif input_name in model_ranges[component]:
-                    _check_trained_range(
-                        parameter, by_name, component, input_name, model_ranges[component][input_name], location, report
-                    )
+                    trained = model_ranges[component][input_name]
+                    _check_trained_range(parameter, by_name, component, input_name, trained, location, report)
+                    model_step = model_steps[component].get(input_name)
+                    if model_step is not None:
+                        _check_model_grid(
+                            parameter, by_name, component, input_name, (trained[0], model_step), location, report
+                        )
         report.optimization_parameters.append(entry)
 
     for component, names in model_inputs.items():
@@ -1195,6 +1207,43 @@ def _check_trained_range(
             location,
             f"Bounds {bounds}{source} reach beyond [{low:g}, {high:g}], the range the model for "
             f"'{component}' was trained on for '{input_name}'; the surrogate extrapolates there.",
+        )
+    )
+
+
+def _check_model_grid(
+    parameter: OptimizationParameterConfig,
+    by_name: dict[str, OptimizationParameterConfig],
+    component: str,
+    input_name: str,
+    grid: tuple[float, float],
+    location: str,
+    report: ConfigurationReport,
+) -> None:
+    """Warn when *parameter* can take values off the grid ``(origin, step)`` its model input takes.
+
+    A geometry such as whole turns is built only on that grid: the model was trained there
+    alone, and EM fine-tuning rounds the value, so an off-grid trial evaluates a design that
+    is never built.
+    """
+    master = parameter
+    while master.linked_to and master.linked_to in by_name:  # links were checked for cycles on load
+        master = by_name[master.linked_to]
+    origin, step = grid
+
+    def on_grid(value: float) -> bool:
+        return abs(value / step - round(value / step)) < 1e-6
+
+    if master.step is not None and on_grid(master.step) and on_grid(master.min_value - origin):
+        return
+    source = f" (from '{master.name}')" if master is not parameter else ""
+    report.issues.append(
+        Issue(
+            Severity.WARNING,
+            location,
+            f"The model for '{component}' takes '{input_name}' only in steps of {step:g} from {origin:g}, "
+            f"but min_value {master.min_value:g} and step {master.step}{source} allow other values; "
+            f"set a step that is a multiple of {step:g} and a min_value on that grid.",
         )
     )
 

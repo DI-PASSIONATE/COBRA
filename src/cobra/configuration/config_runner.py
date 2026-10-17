@@ -19,6 +19,7 @@ from cobra.optimizers.design_goal_collection import (
     make_isolation_db,
     make_power_dbm,
 )
+from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vacask_simulator import VacaskSimulator
@@ -31,7 +32,10 @@ if TYPE_CHECKING:
     from cobra.spice_sim.base_simulator import BaseSimulator
     from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
-OPTIMIZER_REGISTRY = {"OptunaOptimizer": OptunaOptimizer}
+OPTIMIZER_REGISTRY = {
+    "OptunaOptimizer": OptunaOptimizer,
+    "GradientDescentOptimizer": GradientDescentOptimizer,
+}
 SIMULATOR_REGISTRY: dict[str, type[BaseSimulator]] = {
     "XyceSimulator": XyceSimulator,
     "VacaskSimulator": VacaskSimulator,
@@ -185,6 +189,11 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
             f"Unsupported optimizer '{configuration.optimizer.name}'. Supported: "
             f"{', '.join(OPTIMIZER_REGISTRY)}"
         ) from exc
+    if configuration.parallel_trials > 1 and not optimizer_class.supports_parallel_trials:
+        raise ConfigurationError(
+            f"{configuration.optimizer.name} needs the result of one trial before it can suggest "
+            "the next, so parallel_trials must be 1 for it."
+        )
     try:
         simulator_class = SIMULATOR_REGISTRY[configuration.simulator.name]
     except KeyError as exc:
@@ -234,6 +243,7 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
             step=item.step,
             unit=item.unit,
             linked_to=item.linked_to,
+            initial_value=item.initial_value,
         )
         for item in configuration.optimization_parameters
     ]

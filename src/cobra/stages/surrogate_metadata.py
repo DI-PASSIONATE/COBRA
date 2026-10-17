@@ -4,7 +4,9 @@ ORCA writes three ``metadata_props`` entries into every model it exports:
 
 - ``input_parameter_ranges``: ``{input: {"min": ..., "max": ...}}`` for every
   input, ``frequency`` included. The ``frequency`` entry is the band the
-  surrogate is valid over; the others are the ranges it was trained on.
+  surrogate is valid over; the others are the ranges it was trained on. An
+  input that only takes the values ``min + k * step`` (e.g. whole turns) may
+  add ``"step"``.
 - ``input_constraints``: boolean expressions over the inputs, such as
   ``"bottom_linewidth <= bottom_winding_diameter / 3"``, that every buildable
   geometry satisfies. The model was only trained inside them.
@@ -126,6 +128,8 @@ class SurrogateMetadata:
 
     input_ranges: dict[str, tuple[float, float]] = field(default_factory=dict)
     """Trained ``(min, max)`` of every input, ``frequency`` (Hz) included."""
+    input_steps: dict[str, float] = field(default_factory=dict)
+    """Grid step of the inputs that only take the values ``min + k * step``."""
     constraints: list[str] = field(default_factory=list)
     """Feasibility expressions over the inputs; empty means the whole range box."""
     guarantees: dict[str, bool] = field(default_factory=dict)
@@ -145,6 +149,7 @@ class SurrogateMetadata:
         props = session.get_modelmeta().custom_metadata_map
         return cls(
             input_ranges=_parse_ranges(props.get("input_parameter_ranges")),
+            input_steps=_parse_steps(props.get("input_parameter_ranges")),
             constraints=_parse_constraints(props.get("input_constraints")),
             guarantees=_parse_guarantees(props.get("physics_guarantees")),
             windings=_parse_windings(props.get("windings")),
@@ -195,6 +200,18 @@ def _parse_ranges(raw: str | None) -> dict[str, tuple[float, float]]:
         except (KeyError, TypeError, ValueError):
             continue
     return ranges
+
+
+def _parse_steps(raw: str | None) -> dict[str, float]:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return {}
+    steps = {}
+    for name, bounds in data.items():
+        step = bounds.get("step") if isinstance(bounds, dict) else None
+        if isinstance(step, (int, float)) and not isinstance(step, bool) and step > 0:
+            steps[name] = float(step)
+    return steps
 
 
 def _parse_constraints(raw: str | None) -> list[str]:

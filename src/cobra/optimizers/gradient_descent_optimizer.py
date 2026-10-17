@@ -13,12 +13,29 @@ from cobra.optimizers.base_optimizer import (
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
 
+#: Decay exponents of the step and probe gains over the steps k (Spall's SPSA values).
+_STEP_DECAY = 0.602
+_PROBE_DECAY = 0.101
+#: Probe distance at exploration_scale 1, as a fraction of each parameter's range.
+_PROBE_FRACTION = 0.1
+
 
 class GradientDescentOptimizer(BaseOptimizer):
     """
-    GradientDescentOptimizer - A lightweight local optimizer that uses paired
-    finite-difference probes to approximate gradients and refine the current
-    solution.
+    GradientDescentOptimizer - A lightweight local optimizer: simultaneous-perturbation
+    (SPSA) gradient descent.
+
+    It works in coordinates normalised to [0, 1] per parameter. Each step probes the
+    current point at ± a small distance along a random ±1 direction, one probe per
+    trial, estimates the gradient from the two penalties, and moves against it: by
+    ``learning_rate`` of the range along its largest component. Both distances shrink
+    with every step, so the search settles. The current point is kept unrounded, and
+    only the proposals are rounded to each parameter's step, so steps smaller than a
+    grid step still add up.
+
+    It starts at the context's values (in EM fine-tuning, the design that was just
+    evaluated), else at each parameter's ``initial_value``, else at the middle of its
+    range; a start not taken from the context is evaluated first.
     """
 
     _settings: ClassVar[list[CobraSetting]] = [
@@ -36,7 +53,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             dtype=float,
             default=0.2,
             description=(
-                "Gradient-descent step size (fraction of parameter range).\n"
+                "First step, as a fraction of the parameter range; later steps shrink.\n"
                 "Smaller values give finer convergence; larger values explore faster."
             ),
         ),
@@ -45,8 +62,8 @@ class GradientDescentOptimizer(BaseOptimizer):
             dtype=float,
             default=0.5,
             description=(
-                "Scale of finite-difference probe offsets relative to the parameter range.\n"
-                "Increase to explore wider areas; decrease for fine local refinement."
+                "Distance of the gradient probes: 1 probes at 10 % of the parameter range,\n"
+                "at least one step. Increase to smooth out noise; decrease for fine refinement."
             ),
         ),
         CobraSetting(
@@ -74,14 +91,19 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._master_properties: dict[str, OptimizationProperty] = {}
         self._master_order: list[str] = []
         self._alias_to_master: dict[str, str] = {}
-        self._current_point: dict[str, float] = {}
+        self._reset()
+
+    def _reset(self) -> None:
+        self._point: dict[str, float] = {}
+        """Current point, normalised to [0, 1] per master parameter and not rounded."""
+        self._steps = 0
+        self._phase: str | None = None
+        """What the last proposal was: ``"start"``, ``"plus"`` or ``"minus"``."""
+        self._proposal: dict[str, float] = {}
+        self._probes: dict[str, dict[str, float]] = {}
+        self._plus_penalty = float("nan")
         self._best_parameters: dict[str, float] = {}
         self._best_penalty = float("inf")
-        self._pending_probe: dict[str, Any] | None = None
-
-    @staticmethod
-    def _normalize_name(name: str) -> str:
-        return name.replace("_", "").replace("-", "").lower()
 
     @staticmethod
     def _round_to_step(value: float, prop: OptimizationProperty) -> float:
@@ -92,6 +114,19 @@ class GradientDescentOptimizer(BaseOptimizer):
     @staticmethod
     def _clip(value: float, prop: OptimizationProperty) -> float:
         return float(min(max(value, prop.min_value), prop.max_value))
+
+    @staticmethod
+    def _span(prop: OptimizationProperty) -> float:
+        return prop.max_value - prop.min_value
+
+    def _normalised(self, value: float, prop: OptimizationProperty) -> float:
+        span = self._span(prop)
+        return (self._clip(value, prop) - prop.min_value) / span if span > 0 else 0.0
+
+    def _raw(self, normalised: float, prop: OptimizationProperty) -> float:
+        """The value on *prop*'s grid nearest the normalised coordinate *normalised*."""
+        value = self._clip(prop.min_value + normalised * self._span(prop), prop)
+        return self._clip(self._round_to_step(value, prop), prop)
 
     def _collect_masters(self, params: list[OptimizationProperty]) -> list[OptimizationProperty]:
         by_name = {param.name: param for param in params}
@@ -108,23 +143,19 @@ class GradientDescentOptimizer(BaseOptimizer):
 
         return masters
 
-    def _seed_from_context(self, context: "OptimizationContext", masters: list[OptimizationProperty]) -> dict[str, float]:
-        seed: dict[str, float] = {}
-        model_parameters = context.model_parameters
-        netlist_parameters = context.netlist_parameters
-
+    def _start(self, context: "OptimizationContext", masters: list[OptimizationProperty]) -> tuple[dict[str, float], bool]:
+        """The normalised start point, and whether it was taken from *context*, i.e. already evaluated."""
+        values = {**context.model_parameters, **context.netlist_parameters}
+        start = {}
         for master in masters:
-            if master.name in model_parameters:
-                seed[master.name] = self._clip(float(model_parameters[master.name]), master)
-                continue
-
-            if master.name in netlist_parameters:
-                seed[master.name] = self._clip(parse_netlist_value(netlist_parameters[master.name]), master)
-                continue
-
-            seed[master.name] = self._clip((master.min_value + master.max_value) / 2.0, master)
-
-        return seed
+            if master.name in values:
+                value = parse_netlist_value(values[master.name])
+            elif master.initial_value is not None:
+                value = master.initial_value
+            else:
+                value = (master.min_value + master.max_value) / 2
+            start[master.name] = self._normalised(value, master)
+        return start, all(master.name in values for master in masters)
 
     def _format_values(self, master_values: dict[str, float], params: list[OptimizationProperty], with_unit: bool) -> dict[str, Any]:
         values: dict[str, Any] = {}
@@ -139,30 +170,35 @@ class GradientDescentOptimizer(BaseOptimizer):
                 values[param.name] = value
         return values
 
-    def _make_direction(self) -> dict[str, float]:
-        return {name: float(self._rng.choice([-1.0, 1.0])) for name in self._master_order}
-
-    def _step_sizes(self) -> dict[str, float]:
-        step_sizes: dict[str, float] = {}
+    def _probe_pair(self) -> dict[str, dict[str, float]]:
+        """The two probes around the current point along a random ±1 direction, in raw values."""
+        distance = self.exploration_scale * _PROBE_FRACTION / (self._steps + 1) ** _PROBE_DECAY
+        plus: dict[str, float] = {}
+        minus: dict[str, float] = {}
         for name in self._master_order:
             prop = self._master_properties[name]
-            if prop.step is not None and prop.step > 0:
-                step_sizes[name] = prop.step
-            else:
-                span = prop.max_value - prop.min_value
-                step_sizes[name] = max(span * 0.05, 1e-6)
-        return step_sizes
+            span = self._span(prop)
+            # At least one grid step, or rounding puts both probes on the current point.
+            offset = max(distance, prop.step / span) if prop.step and span > 0 else distance
+            offset *= float(self._rng.choice([-1.0, 1.0]))
+            plus[name] = self._raw(self._point[name] + offset, prop)
+            minus[name] = self._raw(self._point[name] - offset, prop)
+        return {"plus": plus, "minus": minus}
 
-    def _propose(self, base_point: dict[str, float], direction: dict[str, float], sign: float) -> dict[str, float]:
-        step_sizes = self._step_sizes()
-        candidate: dict[str, float] = {}
+    def _descend(self, minus_penalty: float) -> None:
+        """Move the current point against the gradient the two probes estimate."""
+        gradient: dict[str, float] = {}
         for name in self._master_order:
             prop = self._master_properties[name]
-            raw_value = base_point[name] + sign * self.exploration_scale * step_sizes[name] * direction[name]
-            clipped_value = self._clip(raw_value, prop)
-            candidate[name] = self._round_to_step(clipped_value, prop)
-            candidate[name] = self._clip(candidate[name], prop)
-        return candidate
+            # The probes' actual half-distance, after rounding and clipping.
+            half = (self._normalised(self._probes["plus"][name], prop) - self._normalised(self._probes["minus"][name], prop)) / 2
+            gradient[name] = (self._plus_penalty - minus_penalty) / (2 * half) if half else 0.0
+        largest = max((abs(component) for component in gradient.values()), default=0.0)
+        if largest > 0:
+            step = self.learning_rate / (self._steps + 1) ** _STEP_DECAY
+            for name, component in gradient.items():
+                self._point[name] = float(np.clip(self._point[name] - step * component / largest, 0.0, 1.0))
+        self._steps += 1
 
     def initialize(self, num_goals: int, parallel_trials: int = 1):  # noqa: ARG002 - part of the BaseOptimizer interface
         if self.multi_objective:
@@ -170,112 +206,55 @@ class GradientDescentOptimizer(BaseOptimizer):
         self._master_properties = {}
         self._master_order = []
         self._alias_to_master = {}
-        self._current_point = {}
-        self._best_parameters = {}
-        self._best_penalty = float("inf")
-        self._pending_probe = None
+        self._reset()
 
     def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
 
-        params = model_input_ranges + netlist_property_ranges
-        masters = self._collect_masters(params)
+        masters = self._collect_masters(model_input_ranges + netlist_property_ranges)
         self._master_properties = {param.name: param for param in masters}
         self._master_order = [param.name for param in masters]
 
-        if not self._current_point:
-            self._current_point = self._seed_from_context(context, masters)
+        if not self._point:
+            self._point, evaluated = self._start(context, masters)
+            if not evaluated:
+                self._phase = "start"
+                self._proposal = {name: self._raw(self._point[name], self._master_properties[name]) for name in self._master_order}
+                self._propose(context, model_input_ranges, netlist_property_ranges)
+                return
 
-        if self._pending_probe is None:
-            direction = self._make_direction()
-            candidate = self._propose(self._current_point, direction, sign=1.0)
-            self._pending_probe = {
-                "base": dict(self._current_point),
-                "direction": direction,
-                "plus_candidate": candidate,
-                "plus_penalty": None,
-                "side": "plus",
-            }
-        elif self._pending_probe["side"] == "plus":
-            candidate = self._propose(self._pending_probe["base"], self._pending_probe["direction"], sign=-1.0)
-            self._pending_probe["minus_candidate"] = candidate
-            self._pending_probe["side"] = "minus"
+        if self._phase == "plus":
+            self._phase = "minus"
         else:
-            # If the probe state is stale, restart from the latest point.
-            self._pending_probe = None
-            self.step(context, model_input_ranges, netlist_property_ranges)
-            return
+            self._phase = "plus"
+            self._probes = self._probe_pair()
+        self._proposal = self._probes[self._phase]
+        self._propose(context, model_input_ranges, netlist_property_ranges)
 
-        current_candidate = self._pending_probe["plus_candidate"] if self._pending_probe["side"] == "plus" else self._pending_probe["minus_candidate"]
-        context.model_parameters = self._format_values(current_candidate, model_input_ranges, with_unit=False)
-        context.netlist_parameters = self._format_values(current_candidate, netlist_property_ranges, with_unit=True)
+    def _propose(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+        context.model_parameters = self._format_values(self._proposal, model_input_ranges, with_unit=False)
+        context.netlist_parameters = self._format_values(self._proposal, netlist_property_ranges, with_unit=True)
 
-    def tell(self, context: "OptimizationContext", penalty: list[float] | float):
+    def tell(self, context: "OptimizationContext", penalty: list[float] | float):  # noqa: ARG002 - part of the BaseOptimizer interface
         if self.multi_objective:
             raise NotImplementedError("GradientDescentOptimizer currently supports single-objective optimization only.")
 
         penalty_value = float(np.sum(penalty)) if isinstance(penalty, list) else float(penalty)
-
-        if not np.isfinite(penalty_value):
-            return
-
-        if self._pending_probe is None:
-            current_point = self._extract_point(context)
-            if current_point is not None and penalty_value < self._best_penalty:
-                self._best_penalty = penalty_value
-                self._best_parameters = current_point
-            return
-
-        candidate = self._pending_probe["plus_candidate"] if self._pending_probe["side"] == "plus" else self._pending_probe.get("minus_candidate")
-        if candidate is not None and penalty_value < self._best_penalty:
+        if np.isfinite(penalty_value) and penalty_value < self._best_penalty:
             self._best_penalty = penalty_value
-            self._best_parameters = dict(candidate)
+            self._best_parameters = dict(self._proposal)
 
-        if self._pending_probe["side"] == "plus":
-            self._pending_probe["plus_penalty"] = penalty_value
-            return
-
-        plus_penalty = self._pending_probe.get("plus_penalty")
-        if plus_penalty is None or not np.isfinite(plus_penalty):
-            self._pending_probe = None
-            return
-
-        direction = self._pending_probe["direction"]
-        base_point = self._pending_probe["base"]
-        step_sizes = self._step_sizes()
-
-        updated_point: dict[str, float] = {}
-        for name in self._master_order:
-            prop = self._master_properties[name]
-            # The probes sit at base ± exploration_scale·step along the direction.
-            denominator = 2.0 * max(self.exploration_scale * step_sizes[name], 1e-9)
-            gradient = ((plus_penalty - penalty_value) / denominator) * direction[name]
-            next_value = base_point[name] - self.learning_rate * gradient
-            next_value = self._round_to_step(self._clip(next_value, prop), prop)
-            updated_point[name] = self._clip(next_value, prop)
-
-        self._current_point = updated_point
-        self._pending_probe = None
-
-    def _extract_point(self, context: "OptimizationContext") -> dict[str, float] | None:
-        if not self._master_order:
-            return None
-
-        point: dict[str, float] = {}
-        model_parameters = context.model_parameters
-        netlist_parameters = context.netlist_parameters
-
-        for name in self._master_order:
-            if name in model_parameters:
-                point[name] = float(model_parameters[name])
-                continue
-            if name in netlist_parameters:
-                point[name] = parse_netlist_value(netlist_parameters[name])
-                continue
-            return None
-
-        return point
+        if self._phase == "plus":
+            self._plus_penalty = penalty_value
+            if not np.isfinite(penalty_value):
+                self._phase = None  # no estimate from this pair; the next step draws a new one
+        elif self._phase == "minus":
+            if np.isfinite(penalty_value):
+                self._descend(penalty_value)
+            self._phase = None
+        else:
+            self._phase = None
 
     def get_moo_results(self) -> Any:
         if self.multi_objective:
@@ -283,7 +262,10 @@ class GradientDescentOptimizer(BaseOptimizer):
         raise ValueError("GradientDescentOptimizer does not produce MOO results.")
 
     def get_best_parameters(self) -> dict[str, float]:
-        best = dict(self._best_parameters) if self._best_parameters else dict(self._current_point)
+        if self._best_parameters:
+            best = dict(self._best_parameters)
+        else:
+            best = {name: self._raw(value, self._master_properties[name]) for name, value in self._point.items()}
         for alias_name, master_name in self._alias_to_master.items():
             if master_name in best:
                 best[alias_name] = best[master_name]

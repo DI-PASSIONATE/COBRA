@@ -67,6 +67,10 @@ TOOLTIPS = {
     "sim_type_tabs": "Design parameters grouped by the analysis that produces them. A goal on another tab adds that analysis to the run.",
     "freq_mode_combo": "Whole sweep/spectrum: the goal applies everywhere. Single frequency: the nearest sweep point or spectral line. Range: every point or line inside the band.",
     "freq_unit_combo": "Unit for the goal frequency.",
+    "param_start_spin": (
+        "Value the optimizer evaluates first, e.g. a known design (on the step grid).\n"
+        "None: the optimizer chooses its first point."
+    ),
 }
 
 TUTORIAL_HTML = """
