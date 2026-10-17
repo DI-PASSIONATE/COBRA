@@ -70,6 +70,17 @@ configuration file that sets `parallel_trials` above 1 *and* `parallel_xyce`
 is rejected when loaded into the GUI; headless runs still accept it with a
 warning.
 
+## Optimization Parameters
+
+The parameter dialog sets a parameter's bounds, step, unit and link, and an
+optional **Start value** (`initial_value`): the value the optimizer evaluates
+first, for example a known design you want to retune. *None* lets the optimizer
+choose. For an ONNX model input, the dialog takes the bounds, and the step of
+an input such as whole turns, from the model's metadata.
+
+The **Optimizer** row offers `OptunaOptimizer` (the default, a global search)
+and `GradientDescentOptimizer`, a local search that runs one trial at a time.
+
 ## Design Goals in Practice
 
 Use goal constraints with optional frequency ranges, for example:
@@ -101,8 +112,9 @@ The GUI displays:
   of the run.
 
 When the run ends, the parameters, goals and plots switch to its final result:
-the trial that met the goals or, if none did, the best parameters found,
-re-simulated (single-objective runs). The loss plot keeps one point per iteration.
+the trial that met the goals or, if none did, the trial that missed them by the
+least. The loss plot keeps one point per iteration, including the trials that
+were still running when the run stopped.
 
 When a run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. See **Advanced -> Harmonic Balance** for the spectrum markers and mixing-product labels, and **Advanced -> Transient Analysis** for the FFT window.
 

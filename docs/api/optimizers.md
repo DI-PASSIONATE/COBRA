@@ -19,6 +19,7 @@ Fields include:
 - `step`
 - optional `unit`
 - optional `linked_to`
+- optional `initial_value`: the value the optimizer evaluates first
 
 ## OptimizationType
 
@@ -58,9 +59,28 @@ Typical options:
 - `pruner`: `median`, `successive_halving`, `hyperband`
 - `multi_objective`: boolean
 
+A parameter's `initial_value` makes the first trial evaluate it; the others
+are sampled.
+
 ## GradientDescentOptimizer
 
 Used for local refinement workflows, including optional fine-tuning mode in COBRA.
+It is simultaneous-perturbation (SPSA) gradient descent in coordinates
+normalised to each parameter's range: every step probes the current point at
+± a small distance along a random direction (two trials), then moves against
+the estimated gradient. Both distances shrink with every step. The point is kept
+unrounded, so steps below a parameter's grid still add up; only the proposals
+are rounded to it.
+
+- `learning_rate`: first step as a fraction of the range (default `0.2`)
+- `exploration_scale`: probe distance; `1` probes at 10 % of the range, at least
+  one grid step (default `0.5`)
+- `random_seed`
+
+It starts at the context's values (in EM fine-tuning, the design just
+evaluated), else at each parameter's `initial_value`, else in the middle of the
+range; a start not taken from the context is evaluated first. It needs the
+result of one trial before it suggests the next, so `parallel_trials` must be 1.
 
 !!! tip
     Start with `OptunaOptimizer` and move to gradient descent only when you are refining near a known good region.

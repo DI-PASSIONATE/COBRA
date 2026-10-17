@@ -199,15 +199,34 @@ apply to a run may use empty objects or arrays.
 
 ### Optimizer
 
-`optimizer.name` is `OptunaOptimizer`. Its settings are `multi_objective`,
-`sampler` (`tpe`, `random`, `simulated_annealing`), `pruner` and `random_seed`
-(default `-1`, no seed). A seed makes the run repeatable when `parallel_trials`
-is 1; it reaches the `tpe` and `random` samplers, and an optunahub sampler that
-accepts a seed.
+`optimizer.name` is `OptunaOptimizer` or `GradientDescentOptimizer`.
+
+`OptunaOptimizer`'s settings are `multi_objective`, `sampler` (`tpe`, `random`,
+`simulated_annealing`), `pruner` and `random_seed` (default `-1`, no seed). A
+seed makes the run repeatable when `parallel_trials` is 1; it reaches the `tpe`
+and `random` samplers, and an optunahub sampler that accepts a seed.
 
 ```json
 "optimizer": {"name": "OptunaOptimizer", "settings": {"sampler": "tpe", "random_seed": 42}}
 ```
+
+`GradientDescentOptimizer` refines a design locally, one trial at a time
+(`parallel_trials` must be 1). Its settings are `learning_rate` (first step as a
+fraction of each parameter's range, default `0.2`; later steps shrink),
+`exploration_scale` (distance of its gradient probes: `1` probes at 10 % of the
+range, default `0.5`) and `random_seed`. Give it a start point with the
+parameters' `initial_value`; otherwise it starts in the middle of the ranges.
+
+```json
+"optimizer": {"name": "GradientDescentOptimizer", "settings": {"learning_rate": 0.05}}
+```
+
+When no trial meets every goal, the run ends at the trial that misses them by
+the least: once a goal is missed, over-fulfilling the others does not count.
+That trial's netlist is the run's netlist, and its folder under `trials/` is
+kept. To aim past the specification rather than at its edge (the first trial
+that meets every goal often meets one of them by a hair), tighten the goals'
+`min_value` and `max_value` by the margin you want.
 
 ### Simulator
 
@@ -253,6 +272,16 @@ ports are the subcircuit's pins in order. See
 | `step` | Grid the values snap to; `null` for continuous |
 | `unit` | Scale suffix appended verbatim to `netlist_variable` values: `"p"` writes `1.5` as `1.5p`. `null` for `model_input`. VACASK prefixes are case-sensitive: use `"f"`, not `"F"`, for femto (`cobra parse` warns) |
 | `linked_to` | Name of another parameter this one mirrors, e.g. for symmetric windings. Links must not form a cycle |
+| `initial_value` | Optional value the optimizer evaluates first, e.g. a known design to retune: Optuna's first trial uses it (parameters without one are sampled), gradient descent starts there. Must lie within the bounds and on the `step` grid; a linked parameter takes its master's |
+
+A model may declare that an input only takes values on a grid, such as whole
+turns. `cobra parse` then warns when a `model_input` parameter's `step` and
+`min_value` allow values off that grid: the model never saw them, and EM
+fine-tuning would round them to a different geometry.
+
+```json
+{"name": "C5", "type": "netlist_variable", "min_value": 300, "max_value": 400, "step": 1, "unit": "f", "initial_value": 377}
+```
 
 ### Design Goals
 

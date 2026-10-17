@@ -6,6 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from cobra.configuration.inspection import (
     ComponentModelReport,
     ConfigurationReport,
@@ -150,6 +152,8 @@ def _onnx_config(
     trained_w: tuple[float, float] | None = None,
     constraints: list[str] | None = None,
     bounds: tuple[float, float] = (1.0, 2.0),
+    step: float | None = 0.1,
+    model_step: float | None = None,
 ) -> Path:
     """A configuration whose X1 is an ONNX model declaring *band*, on *netlist*.
 
@@ -163,6 +167,7 @@ def _onnx_config(
         entry.model_inputs = ["w", "frequency"]
         entry.model_frequency_range = band
         entry.model_input_ranges = {"w": trained_w} if trained_w else {}
+        entry.model_input_steps = {"w": model_step} if model_step else {}
         entry.model_constraints = constraints or []
         entry.model_guarantees = {"passive": False, "reciprocal": True}
 
@@ -178,7 +183,7 @@ def _onnx_config(
                 "type": "model_input",
                 "min_value": bounds[0],
                 "max_value": bounds[1],
-                "step": 0.1,
+                "step": step,
                 "unit": None,
                 "linked_to": None,
             },
@@ -242,6 +247,28 @@ def test_bounds_outside_the_trained_range_are_a_warning(config_dir: Path, monkey
     assert "[0.5, 2] reach beyond [1, 2]" in message
     assert "'w'" in message
     assert not has_errors(report)
+
+
+def _grid_warnings(path: Path) -> list[str]:
+    return [issue.message for issue in all_issues(inspect_path(path, check_models=True)) if "only in steps" in issue.message]
+
+
+@pytest.mark.parametrize(
+    ("bounds", "step", "warned"),
+    [((1.0, 5.0), 1.0, False), ((1.0, 5.0), 2.0, False), ((1.0, 5.0), 0.25, True), ((1.0, 5.0), None, True), ((1.5, 5.0), 1.0, True)],
+    ids=["on-grid", "coarser-grid", "fractional-step", "continuous", "shifted-min"],
+)
+def test_parameters_off_the_models_grid_are_a_warning(config_dir: Path, monkeypatch, bounds, step, warned):
+    """Regression: turns in 0.25 steps evaluated geometries the model never saw and nobody builds."""
+    path = _onnx_config(
+        config_dir, "minimal_ac", (1e9, 10e9), monkeypatch, trained_w=(1.0, 5.0), bounds=bounds, step=step, model_step=1.0
+    )
+
+    messages = _grid_warnings(path)
+
+    assert bool(messages) is warned
+    if warned:
+        assert "'w' only in steps of 1 from 1" in messages[0]
 
 
 def test_report_lists_the_model_metadata(config_dir: Path, monkeypatch):

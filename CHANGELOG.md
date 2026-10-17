@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaces its predicted 0 Hz point by that of ideal windings, without the leak to ground and
   the coupling between windings the prediction has at DC.
 - The VACASK backend logs a warning when snp2le cannot pin a fit to the 0 Hz point.
+- `optimization_parameters[].initial_value`: a start point the optimizer evaluates first,
+  e.g. a known design to retune. Optuna enqueues it as its first trial; gradient descent
+  starts there. In the GUI: the parameter dialog's *Start value*.
+- `GradientDescentOptimizer` can be selected as the run's optimizer, in configs and the GUI.
+- `cobra parse` warns when a model input that only takes values on a grid (an optional
+  `step` in the model's `input_parameter_ranges`, e.g. whole turns) is optimized off it.
 
 ### Changed
 - Requires ORCA 2.2 or newer (`simulate_geometry(result_type=...)`) for EM fine-tuning.
@@ -19,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (30, 20, 15, 12, 10) and keeps the best fit, as it already did for a fit without its
   thermal noise; high-order fits that snp2le's passivity enforcement perturbed were
   exploited by the optimizer.
+- `GradientDescentOptimizer` works in coordinates normalised to each range, as its settings
+  describe, with decaying SPSA gains. It keeps its point unrounded and evaluates a start
+  point not taken from the context; before, an update below the parameter step was rounded
+  away and the point never moved.
+- A run that meets no goal ends at its closest trial (lowest penalty, which counts only the
+  missed goals) instead of re-simulating the optimizer's best; multi-objective runs ended
+  at their last trial. That trial's folder is kept.
+- Trials still in flight when the callback stops a run are reported to the callback too,
+  unless one met the goals: they can be the run's result.
 
 ### Fixed
 - EM fine-tuning uses the raw Palace result with ORCA's 0 Hz point (`_dc`), the variant the

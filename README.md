@@ -302,7 +302,11 @@ Each goal accepts an optional `frequency_range` string (e.g., `"125-135ghz"`), a
 - **Pruners**: `None` (default), `"median"`, `"successive_halving"`, `"hyperband"`
 - **Multi-objective mode**: set `multi_objective=True` to optimize for a Pareto front instead of a single aggregated loss
 
-For EM fine-tuning, a `GradientDescentOptimizer` is also available by passing `fine_tuning_optimizer="gradient_descent"` to `COBRA`.
+`GradientDescentOptimizer` is a local search (SPSA gradient descent in normalised coordinates, one trial at a time). Select it as the run's optimizer, or for EM fine-tuning by passing `fine_tuning_optimizer="gradient_descent"` to `COBRA`.
+
+A parameter's `initial_value` is evaluated first: Optuna's first trial uses it, gradient descent starts there. Use it to retune around a known design.
+
+When no trial meets every goal, the run ends at the trial that misses them by the least (over-fulfilled goals do not make up for a missed one), without simulating it again. If the callback stops the run, the trials still in flight are finished and reported to it as well.
 
 ### Optimization parameter types
 
@@ -442,6 +446,8 @@ Before each simulation the netlist is updated in two ways:
 The ONNX model (produced by ORCA) receives the current geometry parameters and a frequency sweep as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
 
 Before inference, the geometry is checked against the feasibility constraints the model declares in its `input_constraints` metadata (written by ORCA). A trial that violates one is not simulated at all, since the surrogate was never trained on that geometry, and it does not count as an iteration: Optuna records it as pruned and suggests a replacement (optimizers without a pruned state get the failed-simulation penalty instead).
+
+A model input that only takes values on a grid (e.g. whole turns) may declare its `step` in `input_parameter_ranges`; `cobra parse` then warns when a parameter allows values off that grid.
 
 A model may declare its `windings` metadata: the ports (1-based, as in its `S<i><j>` outputs) at the terminals of each winding, for example `[[1, 2, 5], [3, 4, 6]]` for a transformer with center taps. COBRA then replaces the predicted 0 Hz point by that of ideal windings: the predicted resistance inside each winding, no path to ground and no connection between windings. Windings are near shorts at DC, so a small error in the predicted S-parameters is a large admittance error there; uncleaned, it leaks bias current to ground or couples the windings by up to 1 S, and shifts the DC operating point (in an LNA, P_DC 12.5 instead of 16.1 mW). A model without the key keeps its prediction.
 
