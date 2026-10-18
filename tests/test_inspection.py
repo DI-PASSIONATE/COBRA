@@ -170,6 +170,7 @@ def _onnx_config(
         entry.model_input_steps = {"w": model_step} if model_step else {}
         entry.model_constraints = constraints or []
         entry.model_guarantees = {"passive": False, "reciprocal": True}
+        entry.model_orca_version = "2.3.0"
 
     shutil.copy(netlist_path(netlist), config_dir / "circuit.cir")
     (config_dir / "model.onnx").write_bytes(b"")
@@ -281,6 +282,7 @@ def test_report_lists_the_model_metadata(config_dir: Path, monkeypatch):
     assert "trained ranges: w=[1, 2]" in text
     assert "constraints: w <= 2" in text
     assert "guarantees: reciprocal" in text
+    assert "exported by: ORCA 2.3.0" in text
     [entry] = report.to_dict()["component_models"]
     assert entry["model_constraints"] == ["w <= 2"]
 

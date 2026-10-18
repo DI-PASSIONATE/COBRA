@@ -685,8 +685,8 @@ class COBRA:
             return
 
         networks = []
-        for comp_name, is_ts in zip(
-            surrogate_stage.component_names, surrogate_stage.is_touchstone, strict=True
+        for comp_name, is_ts, touchstone_type in zip(
+            surrogate_stage.component_names, surrogate_stage.is_touchstone, surrogate_stage.touchstone_types, strict=True
         ):
             if is_ts:
                 ntwk = touchstone_networks.get(comp_name)
@@ -697,6 +697,7 @@ class COBRA:
                     trial,
                     orca_geometry=trial.orca_geometries[comp_name],
                     comp_name=comp_name,
+                    result_type=touchstone_type,
                 )
                 networks.append(trial.predicted_networks[0])
         trial.predicted_networks = networks

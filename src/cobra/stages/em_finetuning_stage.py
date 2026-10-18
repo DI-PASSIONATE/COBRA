@@ -11,6 +11,12 @@ from cobra.stages.base_stage import COBRABaseStage
 if TYPE_CHECKING:
     from cobra.optimization_context import OptimizationContext
 
+#: Palace result a model is verified against when its metadata names none. The models ORCA
+#: exported before it wrote ``touchstone_type`` match the raw result with ORCA's 0 Hz point
+#: (``_dc``): the de-embedded one removes the feed lines (-9 to -10 % top-winding inductance
+#: of small transformers), and without the 0 Hz point the fit's DC resistance is off by up to 2x.
+DEFAULT_RESULT_TYPE = "dc"
+
 
 class EMFineTuningStage(COBRABaseStage):
     """
@@ -27,10 +33,18 @@ class EMFineTuningStage(COBRABaseStage):
         self.num_processes = num_processes
 
 
-    def run(self, context: "OptimizationContext", orca_geometry=None, comp_name: str | None = None) -> "OptimizationContext":
+    def run(
+        self,
+        context: "OptimizationContext",
+        orca_geometry=None,
+        comp_name: str | None = None,
+        result_type: str | None = None,
+    ) -> "OptimizationContext":
         """
         Simulates the geometry with its current parameters in Palace through ORCA.
         If comp_name is provided, only parameters for that component are forwarded.
+        *result_type* is the Palace result variant to use, the one the component's model was
+        trained on; ``None`` uses :data:`DEFAULT_RESULT_TYPE`.
         """
         # ORCA is optional: only EM fine-tuning needs it
         from orca import BaseGeometry, SimulationError, simulate_geometry
@@ -57,9 +71,7 @@ class EMFineTuningStage(COBRABaseStage):
             parameters = all_parameters
 
         try:
-            # The raw result with ORCA's 0 Hz point, the variant the surrogates are trained on:
-            # the de-embedded one removes the feed lines (-9 to -10 % top-winding inductance of
-            # small transformers), and without the 0 Hz point the fit's DC resistance is off by up to 2x.
+            # The variant the surrogate was trained on, so both see the same reference plane
             ntwk = simulate_geometry(
                 orca_geometry,
                 parameters,
@@ -67,7 +79,7 @@ class EMFineTuningStage(COBRABaseStage):
                 name,
                 palace_executable=self.palace_executable,
                 num_processes=self.num_processes,
-                result_type="dc",
+                result_type=result_type or DEFAULT_RESULT_TYPE,
             )
         except SimulationError as exc:
             raise SimulatorError(f"EM fine-tuning of {comp_name or name} failed: {exc}") from exc

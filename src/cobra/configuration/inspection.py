@@ -520,6 +520,8 @@ class ComponentModelReport:
     """Feasibility expressions an ONNX model declares; trials that violate one are skipped."""
     model_guarantees: dict[str, bool] = field(default_factory=dict)
     """Physical properties an ONNX model enforces by construction."""
+    model_orca_version: str | None = None
+    """The ORCA release (and commit) that exported an ONNX model, if it says."""
     detail: str | None = None
 
 
@@ -796,6 +798,7 @@ def _inspect_onnx(path: Path, entry: ComponentModelReport) -> str | None:
     }
     entry.model_input_steps = {name: step for name, step in metadata.input_steps.items() if name in geometry_inputs}
     entry.model_guarantees = metadata.guarantees
+    entry.model_orca_version = metadata.orca_version
     entry.model_constraints = FeasibilityConstraints(metadata.constraints, geometry_inputs).expressions
     outputs = [node.name for node in session.get_outputs()]
     entry.model_ports = surrogate_port_count(outputs)
@@ -1841,6 +1844,7 @@ def _model_metadata_text(entry: ComponentModelReport) -> str:
         f"{indent}trained ranges: {ranges or 'not declared'}"
         f"{indent}constraints: {'; '.join(entry.model_constraints) or 'none'}"
         f"{indent}guarantees: {', '.join(guarantees) or 'none'}"
+        f"{indent}exported by: {'ORCA ' + entry.model_orca_version if entry.model_orca_version else 'not declared'}"
     )
 
 

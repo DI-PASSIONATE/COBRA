@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GradientDescentOptimizer` can be selected as the run's optimizer, in configs and the GUI.
 - `cobra parse` warns when a model input that only takes values on a grid (an optional
   `step` in the model's `input_parameter_ranges`, e.g. whole turns) is optimized off it.
+- EM fine-tuning simulates the Palace result variant an ONNX model's `touchstone_type`
+  metadata names, the one it was trained on; `dc` for a model without it. ORCA writes this
+  key, the `windings` and the integer `step`s from its next release on.
+- The model summary (GUI tooltip) and `cobra parse` show the ORCA version that exported a
+  model, from its `orca_version` metadata.
 
 ### Changed
 - Requires ORCA 2.2 or newer (`simulate_geometry(result_type=...)`) for EM fine-tuning.

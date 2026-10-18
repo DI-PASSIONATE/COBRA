@@ -13,7 +13,9 @@ ORCA writes three ``metadata_props`` entries into every model it exports:
 - ``physics_guarantees``: ``{"passive": bool, "reciprocal": bool, ...}``, the
   properties the model enforces by construction.
 
-A model may also declare ``windings``: the ports (1-based, as in the
+A model may also declare ``touchstone_type``: the Palace result it was trained
+on (``normal``, ``dc``, ``deembedded`` or ``dc_deembedded``), which EM
+fine-tuning then simulates too. And it may declare ``windings``: the ports (1-based, as in the
 ``S<i><j>`` outputs) at the terminals of each winding, e.g. ``[[1, 2, 5],
 [3, 4, 6]]`` for a transformer with center taps. COBRA then replaces the
 predicted 0 Hz point by a physical one, see
@@ -136,6 +138,10 @@ class SurrogateMetadata:
     """Physical properties the model enforces by construction."""
     windings: list[list[int]] = field(default_factory=list)
     """Ports (1-based) at the terminals of each winding; empty if the model declares none."""
+    touchstone_type: str | None = None
+    """The Palace result variant the model was trained on; ``None`` if it declares none."""
+    orca_version: str | None = None
+    """The ORCA release (and commit) that exported the model, for reports; not interpreted."""
 
     @classmethod
     def from_session(cls, session: InferenceSession) -> SurrogateMetadata:
@@ -144,7 +150,8 @@ class SurrogateMetadata:
         Missing entries read as empty, and a malformed range or guarantee is
         skipped. Malformed constraints raise :class:`ConfigurationError`: without
         them COBRA cannot tell a buildable geometry from one the model never saw.
-        So do malformed windings, which would make a wrong DC point.
+        So do malformed windings, which would make a wrong DC point, and an unknown
+        ``touchstone_type``, which would verify against the wrong reference plane.
         """
         props = session.get_modelmeta().custom_metadata_map
         return cls(
@@ -153,6 +160,8 @@ class SurrogateMetadata:
             constraints=_parse_constraints(props.get("input_constraints")),
             guarantees=_parse_guarantees(props.get("physics_guarantees")),
             windings=_parse_windings(props.get("windings")),
+            touchstone_type=_parse_touchstone_type(props.get("touchstone_type")),
+            orca_version=props.get("orca_version"),
         )
 
     @property
@@ -164,7 +173,7 @@ class SurrogateMetadata:
         return band
 
     def summary(self) -> str:
-        """The band, trained ranges, constraints and guarantees, one line each."""
+        """The band, trained ranges, constraints, guarantees and ORCA version, one line each."""
         band = self.frequency_range
         ranges = ", ".join(
             f"{name} [{low:g}, {high:g}]" for name, (low, high) in self.input_ranges.items() if name != "frequency"
@@ -176,6 +185,7 @@ class SurrogateMetadata:
                 f"Trained ranges: {ranges or 'not declared'}",
                 f"Constraints: {'; '.join(self.constraints) or 'none'}",
                 f"Guarantees: {guarantees or 'none'}",
+                f"Exported by: ORCA {self.orca_version}" if self.orca_version else "Exported by: not declared",
             ]
         )
 
@@ -231,6 +241,21 @@ def _parse_guarantees(raw: str | None) -> dict[str, bool]:
     if not isinstance(data, dict):
         return {}
     return {name: value for name, value in data.items() if isinstance(value, bool)}
+
+
+#: The Palace result variants ORCA writes, as its ``simulate_geometry`` names them.
+TOUCHSTONE_TYPES: Final = ("normal", "dc", "deembedded", "dc_deembedded")
+
+
+def _parse_touchstone_type(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    if raw not in TOUCHSTONE_TYPES:
+        raise ConfigurationError(
+            f"Its touchstone_type metadata {raw!r} is not one of {', '.join(TOUCHSTONE_TYPES)}; "
+            "re-export the model with ORCA."
+        )
+    return raw
 
 
 def _parse_windings(raw: str | None) -> list[list[int]]:

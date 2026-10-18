@@ -82,6 +82,8 @@ class EMSurrogateStage(COBRABaseStage):
         self.constraints: list[FeasibilityConstraints | None] = []
         # Ports of each winding an ONNX model declares, to clean its 0 Hz point; empty if none.
         self.windings: list[list[list[int]]] = []
+        # Palace result each ONNX model was trained on, for EM fine-tuning; None if undeclared.
+        self.touchstone_types: list[str | None] = []
         for model_path in em_surrogate_model:
             if str(model_path).lower().endswith((*tuple(f".s{i}p" for i in range(1, 10)), ".snp")):
                 self.session.append(model_path)
@@ -89,6 +91,7 @@ class EMSurrogateStage(COBRABaseStage):
                 self.frequency_ranges.append(None)
                 self.constraints.append(None)
                 self.windings.append([])
+                self.touchstone_types.append(None)
             else:
                 session = InferenceSession(model_path)
                 geometry_inputs = [node.name for node in session.get_inputs() if node.name != "frequency"]
@@ -115,6 +118,7 @@ class EMSurrogateStage(COBRABaseStage):
                 self.frequency_ranges.append(frequency_range)
                 self.constraints.append(constraints)
                 self.windings.append(metadata.windings)
+                self.touchstone_types.append(metadata.touchstone_type)
 
         self.component_names = component_names or []
 
