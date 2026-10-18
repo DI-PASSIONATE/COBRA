@@ -73,9 +73,10 @@ class _FakePalaceStage(EMFineTuningStage):
         self.model = model
         self.calls: list[dict[str, Any]] = []
 
-    def run(self, context, orca_geometry=None, comp_name=None):
+    def run(self, context, orca_geometry=None, comp_name=None, result_type=None):
         self.calls.append(
             {
+                "result_type": result_type,
                 "iteration": context.fine_tuning_iteration,
                 "results_dir": context.results_dir,
                 "model_parameters": dict(context.model_parameters),
@@ -108,6 +109,7 @@ def _run_with_fine_tuning(
     monkeypatch: pytest.MonkeyPatch,
     fine_tuning_optimizer: str = "reuse",
     callback: Callable[[OptimizationContext], bool | None] | None = None,
+    touchstone_type: str | None = None,
 ) -> tuple[COBRA, OptimizationContext, _RecordingSimulator, _FakePalaceStage]:
     monkeypatch.chdir(tmp_path)
     model = tmp_path / "model.s2p"
@@ -129,6 +131,7 @@ def _run_with_fine_tuning(
     # Treat X1 as an ONNX component, so fine-tuning simulates it with "Palace".
     assert cobra.em_surrogate_stage is not None
     cobra.em_surrogate_stage.is_touchstone = [False]
+    cobra.em_surrogate_stage.touchstone_types = [touchstone_type]
     palace = _FakePalaceStage(model)
     cobra.em_fine_tuning_stage = palace
 
@@ -238,7 +241,7 @@ def fake_simulate_geometry(monkeypatch):
     return stub
 
 
-def _run_stage(geometry: Any = None) -> OptimizationContext:
+def _run_stage(geometry: Any = None, result_type: str | None = None) -> OptimizationContext:
     from orca.geometry.presets import InductorOcta
 
     context = make_context(
@@ -248,7 +251,7 @@ def _run_stage(geometry: Any = None) -> OptimizationContext:
         iteration=2,
     )
     return EMFineTuningStage("palace", 4).run(
-        context, orca_geometry=geometry or InductorOcta(), comp_name="X1"
+        context, orca_geometry=geometry or InductorOcta(), comp_name="X1", result_type=result_type
     )
 
 
@@ -269,6 +272,12 @@ def test_stage_simulates_the_components_parameters_through_orca(fake_simulate_ge
     }
     [network] = context.predicted_networks
     assert network.name == "X1"
+
+
+def test_stage_simulates_the_variant_the_model_was_trained_on(fake_simulate_geometry):
+    _run_stage(result_type="dc_deembedded")
+
+    assert fake_simulate_geometry.call_args.kwargs["result_type"] == "dc_deembedded"
 
 
 def test_stage_reports_orcas_simulation_error_for_the_component(fake_simulate_geometry):
@@ -341,3 +350,11 @@ def test_infeasible_fine_tuning_trial_never_reaches_palace(tmp_path):
     assert palace.calls == []
     assert simulator.simulated == []
     assert [goal.current_penalty for goal in trial.goals] == [FAILED_SIMULATION_PENALTY]
+
+
+@pytest.mark.parametrize("touchstone_type", ["deembedded", None])
+def test_fine_tuning_simulates_the_variant_each_model_declares(tmp_path, monkeypatch, touchstone_type):
+    """None, for a model without the metadata, leaves the choice to the stage's default."""
+    _, _, _, palace = _run_with_fine_tuning(tmp_path, monkeypatch, touchstone_type=touchstone_type)
+
+    assert {call["result_type"] for call in palace.calls} == {touchstone_type}

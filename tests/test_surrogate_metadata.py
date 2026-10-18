@@ -293,6 +293,7 @@ def test_summary_lists_what_the_model_declares():
         "Trained ranges: turns [1, 4]",
         "Constraints: turns <= 3",
         "Guarantees: reciprocal",
+        "Exported by: not declared",
     ]
 
 
@@ -356,3 +357,29 @@ def test_steps_of_discrete_inputs_are_read():
 
     assert metadata.input_steps == {"turns": 1.0}
     assert metadata.input_ranges["turns"] == (1.0, 5.0)
+
+
+def test_the_training_variant_is_read_as_declared():
+    session = _session({**_metadata(), "touchstone_type": "dc"})
+
+    assert SurrogateMetadata.from_session(session).touchstone_type == "dc"
+    assert SurrogateMetadata.from_session(_session(_metadata())).touchstone_type is None
+
+
+def test_an_unknown_training_variant_is_refused():
+    with pytest.raises(ConfigurationError, match="touchstone_type metadata 'raw'"):
+        SurrogateMetadata.from_session(_session({**_metadata(), "touchstone_type": "raw"}))
+
+
+def test_stage_keeps_the_training_variant_of_each_component(monkeypatch):
+    stage = _stage(monkeypatch, {**_metadata(), "touchstone_type": "dc_deembedded"})
+
+    assert stage.touchstone_types == ["dc_deembedded"]
+
+
+def test_the_orca_version_is_kept_as_written():
+    version = "2.2.0 (git v2.2.0-1-gccf1103-dirty)"
+    metadata = SurrogateMetadata.from_session(_session({**_metadata(), "orca_version": version}))
+
+    assert metadata.orca_version == version
+    assert metadata.summary().splitlines()[-1] == f"Exported by: ORCA {version}"
