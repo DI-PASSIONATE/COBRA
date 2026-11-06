@@ -1,19 +1,67 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
-title: "GitHub Repository for COBRA - AI-Assisted RFIC Optimization Framework"
+message: "If you use COBRA in your research, please cite the SBCCI 2026 paper: https://doi.org/10.1109/SBCCI69725.2026.11706804"
+type: software
+title: "COBRA: A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer"
+abstract: >-
+  COBRA is an open-source, AI-assisted circuit-level optimizer for RF integrated
+  circuit design. It combines circuit simulation with Xyce or VACASK, S-parameter
+  prediction from ONNX surrogate models built with ORCA, goal-driven optimization
+  with Optuna and optional full-wave fine-tuning with Palace.
 authors:
 - family-names: "Simone"
   given-names: "Gianluca"
   orcid: "https://orcid.org/0009-0002-6315-1538"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
 - family-names: "Lurz"
   given-names: "David"
   orcid: "https://orcid.org/0009-0003-6526-5464"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
+- family-names: "Grund"
+  given-names: "Martin"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
+- family-names: "Schneider"
+  given-names: "Fabian"
+  orcid: "https://orcid.org/0009-0007-5891-7582"
+  affiliation: "Chair of Integrated Electronic Systems, Otto-von-Guericke-University Magdeburg"
+- family-names: "Loose"
+  given-names: "Michael"
+  orcid: "https://orcid.org/0000-0002-8422-5391"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
+- family-names: "Breun"
+  given-names: "Sascha"
+  orcid: "https://orcid.org/0000-0002-9600-2988"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
+- family-names: "Koch"
+  given-names: "Manuel"
+  orcid: "https://orcid.org/0009-0002-7827-7205"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
+- family-names: "Weigel"
+  given-names: "Robert"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
 - family-names: "Franchi"
   given-names: "Norman"
   orcid: "https://orcid.org/0000-0002-2777-4722"
-version: 3.1.0
-date-released: 2026-10-14
-url: "https://github.com/DI-PASSIONATE/COBRA"
+  affiliation: "Institute for Smart Electronics and Systems (LITES), Friedrich-Alexander-Universität Erlangen-Nürnberg"
+version: 3.2.0
+date-released: 2026-11-06
+repository-code: "https://github.com/DI-PASSIONATE/COBRA"
+url: "https://di-passionate.github.io/COBRA/"
+license: Apache-2.0
+keywords:
+  - RFIC
+  - circuit optimization
+  - surrogate model
+  - machine learning
+  - SPICE
+  - Xyce
+  - VACASK
+  - S-parameters
+  - ONNX
+  - Optuna
+  - electromagnetic simulation
+  - Palace
+  - design automation
+  - open-source EDA
 preferred-citation:
   type: conference-paper
   authors:

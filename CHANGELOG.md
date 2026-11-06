@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 3.2.0 - 2026-11-06
 
 ### Added
 - An ONNX surrogate may declare `windings` metadata (ports of each winding); COBRA then
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `step` in the model's `input_parameter_ranges`, e.g. whole turns) is optimized off it.
 - EM fine-tuning simulates the Palace result variant an ONNX model's `touchstone_type`
   metadata names, the one it was trained on; `dc` for a model without it. ORCA writes this
-  key, the `windings` and the integer `step`s from its next release on.
+  key, the `windings` and the integer `step`s from its 2.3.0 release on.
 - The model summary (GUI tooltip) and `cobra parse` show the ORCA version that exported a
   model, from its `orca_version` metadata.
 
