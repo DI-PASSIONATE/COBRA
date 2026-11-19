@@ -94,7 +94,9 @@ Penalties are aggregated as:
 
 $$L = \sum_i w_i \cdot p_i$$
 
-where $p_i$ is each goal penalty and $w_i$ is the goal weight.
+where $p_i$ is each goal penalty and $w_i$ is the goal weight. A goal's penalty is the
+mean over its frequency points of the squared miss of its bound, divided by the goal's
+`scale`: by default the bound itself (a relative miss), or 1 for a bound of 0.
 
 ## Inputs and Outputs
 

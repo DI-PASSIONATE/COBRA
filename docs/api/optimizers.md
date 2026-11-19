@@ -33,9 +33,12 @@ Fields include:
 - parameter enum (`DesignParameter`),
 - optional min/max bounds,
 - optional `frequency_range`,
-- optional weight.
+- optional weight,
+- optional `scale`, the unit a miss of a bound is measured in.
 
-Penalty is computed from normalized squared bound violations.
+Penalty is the mean over the goal's points of the squared bound violations, each divided by
+`scale`; without one, by the bound (`|bound|`, or 1 for a bound of 0; see
+`deviation_scale`). The mean keeps a band goal's share independent of its point count.
 
 Each `DesignParameter` declares the analysis it needs, so goals are grouped by simulation type and evaluated against the matching result. Small-signal parameters (S-parameters, `Lp`, `Qs`, `k`, `mu`, `SRF`, …) read the `.AC` network; the spectrum parameters read the HB or transient spectrum:
 
