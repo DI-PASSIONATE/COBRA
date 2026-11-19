@@ -104,6 +104,13 @@ class DesignGoalDialog(QDialog):
             _number_validator(0.0, 1e15, self, QDoubleValidator.Notation.ScientificNotation)
         )
 
+        self.scale_edit = QLineEdit()
+        self.scale_edit.setPlaceholderText("Default: relative to the limit")
+        self.scale_edit.setToolTip(tooltip("goal_scale_edit"))
+        self.scale_edit.setValidator(
+            _number_validator(0.0, 1e15, self, QDoubleValidator.Notation.ScientificNotation)
+        )
+
         self.min_edit = QLineEdit()
         self.max_edit = QLineEdit()
         self.min_edit.setPlaceholderText("Optional")
@@ -135,6 +142,7 @@ class DesignGoalDialog(QDialog):
         self.form_layout.addRow(self.sim_type_tabs)
         self.form_layout.addRow("Parameter", self.param_combo)
         self.form_layout.addRow("Weight", self.weight_edit)
+        self.form_layout.addRow("Scale", self.scale_edit)
         self.form_layout.addRow("Min value", self.min_edit)
         self.form_layout.addRow("Max value", self.max_edit)
         self.form_layout.addRow("Frequency", self.freq_mode_combo)
@@ -166,6 +174,8 @@ class DesignGoalDialog(QDialog):
                 self.max_edit.setText(str(goal.max_value))
             if goal.weight is not None:
                 self.weight_edit.setText(str(goal.weight))
+            if goal.scale is not None:
+                self.scale_edit.setText(str(goal.scale))
             self._set_frequency(goal.frequency_range)
 
     def _on_sim_type_changed(self):
@@ -231,7 +241,10 @@ class DesignGoalDialog(QDialog):
 
     @property
     def _edits(self) -> tuple[QLineEdit, ...]:
-        return (self.weight_edit, self.min_edit, self.max_edit, self.freq_min_edit, self.freq_max_edit)
+        return (
+            self.weight_edit, self.scale_edit, self.min_edit, self.max_edit,
+            self.freq_min_edit, self.freq_max_edit,
+        )
 
     def _validate(self) -> tuple[str, QLineEdit | None] | None:
         """The first problem with the current inputs and the field it concerns, or ``None``."""
@@ -246,6 +259,9 @@ class DesignGoalDialog(QDialog):
             return "Max value must be numeric.", self.max_edit
         if self.weight_edit.text().strip() and not self.weight_edit.hasAcceptableInput():
             return "Weight must be numeric.", self.weight_edit
+        scale_text = self.scale_edit.text().strip()
+        if scale_text and not (self.scale_edit.hasAcceptableInput() and float(scale_text) > 0):
+            return "Scale must be a positive number.", self.scale_edit
         if not min_text and not max_text:
             if param.inputs.max_value:
                 return "At least one of min value or max value must be set.", self.min_edit
@@ -308,8 +324,10 @@ class DesignGoalDialog(QDialog):
         except ValueError:
             weight = 1.0
 
+        scale = float(self.scale_edit.text()) if self.scale_edit.text().strip() else None
+
         return DesignGoal(parameter=param, frequency_range=self._frequency_range(),
-                          min_value=min_val, max_value=max_val, weight=weight)
+                          min_value=min_val, max_value=max_val, weight=weight, scale=scale)
 
     def accept(self):
         problem = self._validate()

@@ -97,6 +97,7 @@ def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
         min_value=config.min_value,
         max_value=config.max_value,
         weight=config.weight,
+        scale=config.scale,
     )
 
 

@@ -150,6 +150,8 @@ class DesignGoalConfig:
     min_value: float | None = None
     max_value: float | None = None
     weight: float = 1.0
+    scale: float | None = None
+    """Unit of a deviation from a bound; ``None`` measures it relative to the bound."""
     kind: str = "catalogue"
     node: str | None = None
     port: str | None = None
@@ -165,7 +167,7 @@ class DesignGoalConfig:
     def from_dict(cls, data: dict[str, Any]) -> DesignGoalConfig:
         data = _mapping(data, "design goal")
         allowed = {
-            "parameter", "frequency_range", "min_value", "max_value", "weight",
+            "parameter", "frequency_range", "min_value", "max_value", "weight", "scale",
             "kind", "node", "port", "source_amplitude", "impedance", "analysis",
         }
         _require_keys(data, allowed, "design goal")
@@ -191,6 +193,9 @@ class DesignGoalConfig:
         _number(self.max_value, f"Design goal '{self.parameter}' max_value", allow_none=True)
         if self.weight <= 0:
             raise ConfigurationError(f"Design goal '{self.parameter}' weight must be positive")
+        _number(self.scale, f"Design goal '{self.parameter}' scale", allow_none=True)
+        if self.scale is not None and self.scale <= 0:
+            raise ConfigurationError(f"Design goal '{self.parameter}' scale must be positive")
         if self.kind in {"power_dbm", "gain_db", "isolation_db"} and not self.node:
             raise ConfigurationError(f"Design goal '{self.parameter}' requires an output node")
         if self.kind == "gain_db":

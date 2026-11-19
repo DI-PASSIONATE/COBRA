@@ -121,12 +121,17 @@ def test_invalid_optimization_parameter_is_rejected(overrides, match):
         ({"parameter": "S11_dB"}, "needs a minimum or maximum"),
         ({"parameter": "S11_dB", "max_value": -10.0, "kind": "vibes"}, "Unsupported design goal kind"),
         ({"parameter": "P", "max_value": 0.0, "kind": "power_dbm"}, "requires an output node"),
+        ({"parameter": "S21_dB", "min_value": 0.0, "scale": 0.0}, "scale must be positive"),
+        ({"parameter": "S21_dB", "min_value": 0.0, "scale": "1 dB"}, "scale must be a finite number"),
         (
             {"parameter": "G", "min_value": 0.0, "kind": "gain_db", "node": "OUT"},
             "requires port and source_amplitude",
         ),
     ],
-    ids=["no-bound", "unknown-kind", "power-without-node", "gain-without-port"],
+    ids=[
+        "no-bound", "unknown-kind", "power-without-node", "zero-scale", "text-scale",
+        "gain-without-port",
+    ],
 )
 def test_invalid_design_goal_is_rejected(data, match):
     with pytest.raises(ConfigurationError, match=match):
@@ -192,3 +197,12 @@ def test_initial_value_round_trips(config_dir: Path, config_data):
     reloaded = RunConfiguration.load(config.save(config_dir / "run.json"))
 
     assert reloaded.optimization_parameters[0].initial_value == 1.5
+
+
+def test_goal_scale_round_trips(config_dir: Path, config_data):
+    config_data["design_goals"] = [{"parameter": "S21_dB", "min_value": 0.0, "scale": 1.0}]
+    config = RunConfiguration.from_dict(config_data, config_dir)
+
+    reloaded = RunConfiguration.load(config.save(config_dir / "run.json"))
+
+    assert reloaded.design_goals[0].scale == 1.0

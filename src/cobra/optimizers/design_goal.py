@@ -55,7 +55,8 @@ class DesignParameter:
     formula:
         Callable ``(SimulationResult) -> np.ndarray | float`` that extracts the parameter value(s) from the simulation result.
     loss:
-        Callable ``(min_value, max_value, current_value) -> float`` that computes the penalty for the current value relative to the goal range.
+        Callable ``(min_value, max_value, current_value, scale) -> float`` that computes the penalty for the current value relative to the goal range;
+        ``scale`` is the goal's unit of deviation, ``None`` for one relative to the bound.
     description:
         Human-readable explanation shown as a tooltip in the GUI.
     inputs:
@@ -65,7 +66,7 @@ class DesignParameter:
     name: str
     simulation_type: SimulationType
     formula: Callable[[SimulationResult, str | None], np.ndarray | float]
-    loss: Callable[[float | None, float | None, np.ndarray | float], float]
+    loss: Callable[[float | None, float | None, np.ndarray | float, float | None], float]
     description: str = ""
     min_ports: int = 1
     """Minimum number of netlist ports required to evaluate this parameter."""
@@ -85,6 +86,10 @@ class DesignGoal:
     """
     A single optimisation goal: ``parameter`` must satisfy ``[min_value, max_value]``
     within the given ``frequency_range``.
+
+    ``scale`` is the unit a deviation from a bound is measured in, e.g. ``1.0`` for one dB
+    of a dB goal. ``None`` measures it relative to the bound, or in units of 1 for a
+    bound of 0 (see :func:`~cobra.optimizers.design_goal_collection.deviation_scale`).
     """
 
     def __init__(
@@ -94,6 +99,7 @@ class DesignGoal:
         min_value: float | None = None,
         max_value: float | None = None,
         weight: float = 1.0,
+        scale: float | None = None,
     ):
         if not isinstance(parameter, DesignParameter):
             raise TypeError(
@@ -105,7 +111,9 @@ class DesignGoal:
         self.min_value = min_value
         self.max_value = max_value
         self.weight = weight
-        self._eps = 1e-9
+        if scale is not None and not scale > 0:
+            raise ValueError(f"Design goal '{parameter.name}' scale must be positive, got {scale}")
+        self.scale = scale
         self._current_value = None
         self._current_penalty = None
 
@@ -142,7 +150,7 @@ class DesignGoal:
         self.current_value = values
 
         # Calculate the penalty using the parameter's loss function and the goal's min/max values
-        penalty_value = self.parameter.loss(self.min_value, self.max_value, values) * self.weight
+        penalty_value = self.parameter.loss(self.min_value, self.max_value, values, self.scale) * self.weight
         self.current_penalty = penalty_value
         return penalty_value
 
@@ -152,7 +160,7 @@ class DesignGoal:
             f"DesignGoal(parameter={self.parameter.name}, "
             f"frequency_range={freq_range_str}, "
             f"min_value={self.min_value}, max_value={self.max_value}, "
-            f"weight={self.weight}, "
+            f"weight={self.weight}, scale={self.scale}, "
             f"current_penalty={self.current_penalty}"
         )
 

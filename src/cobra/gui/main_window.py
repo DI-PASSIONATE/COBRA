@@ -1189,6 +1189,7 @@ class MainWindow(QMainWindow):
                 min_value=goal.min_value,
                 max_value=goal.max_value,
                 weight=goal.weight,
+                scale=goal.scale,
                 **extra,
             )
 
