@@ -40,7 +40,7 @@ Penalty is the mean over the goal's points of the squared bound violations, each
 `scale`; without one, by the bound (`|bound|`, or 1 for a bound of 0; see
 `deviation_scale`). The mean keeps a band goal's share independent of its point count.
 
-Each `DesignParameter` declares the analysis it needs, so goals are grouped by simulation type and evaluated against the matching result. Small-signal parameters (S-parameters, `Lp`, `Qs`, `k`, `mu`, `SRF`, …) read the `.AC` network; the spectrum parameters read the HB or transient spectrum:
+Each `DesignParameter` declares the analysis it needs, so goals are grouped by analysis and evaluated against the matching result. `with_variant(parameter, variant)` reads a parameter from an `AnalysisVariant` (the analysis run on the netlist with some values changed) instead, under the name `<variant>:<name>`. `make_expression_parameter(name, expression, terms)` builds an `ExpressionParameter`: a formula such as `"a - b"` over named terms (other parameters, possibly expressions themselves, possibly from different analyses), read at the goal's frequency and parsed by `GoalExpression` from a restricted grammar. Small-signal parameters (S-parameters, `Lp`, `Qs`, `k`, `mu`, `SRF`, …) read the `.AC` network; the spectrum parameters read the HB or transient spectrum:
 
 | Factory | Parameter name | Description |
 |---------|----------------|-------------|

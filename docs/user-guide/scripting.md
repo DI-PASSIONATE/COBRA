@@ -77,6 +77,33 @@ A goal binds one `DesignParameter` to min/max limits. Look parameters up by name
     Power and gain parameters depend on the nodes and ports of the circuit, so they are
     built per netlist instead of being looked up by name. See **Advanced -> Harmonic Balance**.
 
+=== "Analysis variant and expression"
+
+    ```python
+    from cobra import AnalysisVariant, SimulationType
+    from cobra.optimizers.design_goal_collection import (
+        make_expression_parameter,
+        make_gain_db,
+        with_variant,
+    )
+
+    # The HB once more, with the RF source at a test drive
+    test_drive = AnalysisVariant.create("HB_m15", SimulationType.HB, {"vp_rf:ampl": 0.112})
+    gain = make_gain_db("vp_rf", 0.0894, 100.0, "Out")
+    gain_at_test = with_variant(make_gain_db("vp_rf", 0.112, 100.0, "Out"), test_drive)
+    goals += [
+        DesignGoal(gain, min_value=0.0, frequency_range="35ghz"),
+        DesignGoal(gain_at_test, min_value=-100.0, frequency_range="35ghz"),
+    ]
+    # Compression at the test drive: at most 1 dB
+    compression = make_expression_parameter("Compression_dB", "g - g_test", {"g": gain, "g_test": gain_at_test})
+    goals.append(DesignGoal(compression, max_value=1.0, frequency_range="35ghz"))
+    ```
+
+    A goal on a variant makes each trial run that variant too, on a copy of the netlist
+    with its values set. An expression reads its terms' analyses; a term may be another
+    expression parameter.
+
 === "OptimizationProperty"
 
     ```python
