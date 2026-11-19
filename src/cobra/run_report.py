@@ -64,7 +64,9 @@ def write_run_header(configured: ConfiguredRun, palette: Palette) -> None:
             ),
             (
                 "fine-tuning",
-                f"{fine_tuning.palace_command} ({fine_tuning.iterations} iterations)"
+                f"{fine_tuning.palace_command} ({fine_tuning.iterations} iterations"
+                + (f", retune {fine_tuning.retune_trials} trials" if fine_tuning.retune_trials else "")
+                + ")"
                 if fine_tuning.enabled
                 else "",
             ),
