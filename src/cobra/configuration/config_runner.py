@@ -6,27 +6,30 @@ from typing import TYPE_CHECKING, Any
 
 from cobra.cobra import COBRA
 from cobra.configuration.configuration import (
+    AnalysisVariantConfig,
     ConfigurationError,
     DesignGoalConfig,
     RunConfiguration,
 )
 from cobra.configuration.geometry_loader import create_geometry
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal
+from cobra.optimizers.design_goal import DesignGoal, DesignParameter
 from cobra.optimizers.design_goal_collection import (
     find_parameter,
+    make_expression_parameter,
     make_gain_db,
     make_isolation_db,
     make_power_dbm,
+    with_variant,
 )
 from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
-from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.simulation_type import AnalysisVariant, SimulationType, base_simulation_type
 from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from cobra.optimization_context import OptimizationContext
     from cobra.spice_sim.base_simulator import BaseSimulator
@@ -42,18 +45,72 @@ SIMULATOR_REGISTRY: dict[str, type[BaseSimulator]] = {
 }
 
 
-def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
+def build_analysis_variants(
+    configurations: Sequence[AnalysisVariantConfig],
+    netlist: Netlist,
+    simulator: type[BaseSimulator] | None = None,
+) -> dict[str, AnalysisVariant]:
+    """The run's analysis variants by name, each checked against *netlist* and *simulator*.
+
+    A value the netlist has no element or instance for would be skipped with a
+    warning at run time, leaving the variant a copy of the netlist's own analysis.
+    """
+    variants: dict[str, AnalysisVariant] = {}
+    for config in configurations:
+        simulation_type = config.simulation_type()
+        if simulator is not None and simulation_type not in simulator.supported_simulation_types:
+            raise ConfigurationError(
+                f"Analysis variant '{config.name}' runs {simulation_type.name}, which "
+                f"{simulator.__name__} cannot run"
+            )
+        for name in config.netlist_values:
+            element = name.split(":", 1)[0]
+            if not netlist.has_element(element):
+                raise ConfigurationError(
+                    f"Analysis variant '{config.name}' sets '{name}', but the netlist has no "
+                    f"element or instance '{element}'"
+                )
+        variants[config.name] = AnalysisVariant.create(config.name, simulation_type, config.netlist_values)
+    return variants
+
+
+def _variant_amplitude(variant: AnalysisVariant, port: str) -> float | None:
+    """The sine amplitude *variant* gives the source of *port*, if it sets one."""
+    value = variant.netlist_value(f"{port}:ampl")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"Analysis variant '{variant.name}' sets '{port}:ampl' to {value!r}; a gain goal on it "
+            "needs the amplitude as a plain number of volts"
+        ) from exc
+
+
+def _build_goal(
+    config: DesignGoalConfig, netlist: Netlist, variants: Mapping[str, AnalysisVariant]
+) -> DesignGoal:
+    variant = variants.get(config.analysis)
+    # A goal on a variant is named with the variant's prefix; its parameter is built
+    # without it and then moved onto the variant.
+    name = config.parameter.removeprefix(f"{variant.name}:") if variant is not None else config.parameter
     if config.kind == "catalogue":
-        parameter = find_parameter(config.parameter)
+        parameter = find_parameter(name)
         if parameter is None:
-            raise ConfigurationError(f"Unknown design parameter '{config.parameter}'")
+            raise ConfigurationError(f"Unknown design parameter '{name}'")
         if parameter.min_ports > netlist.num_ports:
             raise ConfigurationError(
-                f"Design parameter '{config.parameter}' requires at least "
+                f"Design parameter '{name}' requires at least "
                 f"{parameter.min_ports} ports; netlist has {netlist.num_ports}"
             )
+        if variant is not None and variant.simulation_type is not parameter.simulation_type:
+            raise ConfigurationError(
+                f"Design goal '{config.parameter}' needs a {parameter.simulation_type.name} analysis; "
+                f"its variant '{variant.name}' runs {variant.simulation_type.name}"
+            )
     elif config.kind in {"power_dbm", "isolation_db"}:
-        analysis = config.analysis_type()
+        analysis = variant.simulation_type if variant is not None else config.analysis_type()
         if config.node not in netlist.probe_nodes:
             raise ConfigurationError(
                 f"{analysis.value} goal node '{config.node}' is not available in the netlist"
@@ -69,23 +126,35 @@ def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
             else make_isolation_db(config.node or "", analysis)
         )
     else:
-        analysis = config.analysis_type()
+        analysis = variant.simulation_type if variant is not None else config.analysis_type()
         source = netlist.port_sources.get(config.port or "")
         if config.node not in netlist.probe_nodes:
             raise ConfigurationError(
-                f"{analysis.value} goal node '{config.node}' is not available in the netlist"
+                f"{analysis.value} gain goal node '{config.node}' is not available in the netlist"
             )
         if source is None:
             raise ConfigurationError(
                 f"{analysis.value} gain goal port '{config.port}' is not a driven netlist port"
             )
+        amplitude = config.source_amplitude if config.source_amplitude is not None else source["sin_amplitude"]
+        driven = _variant_amplitude(variant, config.port or "") if variant is not None else None
+        if driven is not None:
+            # The gain is referred to the drive the variant sets.
+            if config.source_amplitude is not None and config.source_amplitude != driven:
+                raise ConfigurationError(
+                    f"Gain goal '{config.parameter}' gives source_amplitude {config.source_amplitude}, "
+                    f"but its variant '{config.analysis}' drives '{config.port}' with {driven}"
+                )
+            amplitude = driven
         parameter = make_gain_db(
             config.port or "",
-            config.source_amplitude if config.source_amplitude is not None else source["sin_amplitude"],
+            amplitude,
             config.impedance if config.impedance is not None else source.get("z0", 50.0),
             config.node or "",
             analysis,
         )
+    if variant is not None:
+        parameter = with_variant(parameter, variant)
     if parameter.name != config.parameter:
         raise ConfigurationError(
             f"Design goal parameter '{config.parameter}' does not match its metadata "
@@ -101,24 +170,86 @@ def _build_goal(config: DesignGoalConfig, netlist: Netlist) -> DesignGoal:
     )
 
 
+def _build_expression_goal(
+    config: DesignGoalConfig, parameters: Mapping[str, DesignParameter]
+) -> DesignGoal:
+    terms = config.terms or {}
+    missing = [name for name in terms.values() if name not in parameters]
+    if missing:
+        raise ConfigurationError(
+            f"Expression goal '{config.parameter}' uses {', '.join(missing)}, which no other "
+            "design goal reads"
+        )
+    try:
+        parameter = make_expression_parameter(
+            config.parameter,
+            config.expression or "",
+            {variable: parameters[name] for variable, name in terms.items()},
+        )
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
+    if len(parameter.required_analyses) > 1:
+        low, high = DesignGoal.str_to_frequency_range(config.frequency_range)
+        if low is None or low != high:
+            raise ConfigurationError(
+                f"Expression goal '{config.parameter}' combines values of several analyses, whose "
+                "frequency points need not match; give it a single frequency, e.g. '35GHz'"
+            )
+    return DesignGoal(
+        parameter,
+        frequency_range=config.frequency_range,
+        min_value=config.min_value,
+        max_value=config.max_value,
+        weight=config.weight,
+        scale=config.scale,
+    )
+
+
 def build_design_goals(
     configurations: list[DesignGoalConfig],
     netlist: Netlist,
     simulator: type[BaseSimulator] | None = None,
+    variants: Mapping[str, AnalysisVariant] | None = None,
 ) -> list[DesignGoal]:
     """Reconstruct design goals using the same validation as a headless run.
 
+    *variants* are the run's analysis variants by name (:func:`build_analysis_variants`).
+    An expression goal's terms are the parameters of other goals in *configurations*,
+    possibly other expression goals, which are built first.
     With *simulator*, a goal whose analysis that simulator cannot run is rejected.
     """
-    goals = [_build_goal(config, netlist) for config in configurations]
+    variants = variants or {}
+    built = {
+        index: _build_goal(config, netlist, variants)
+        for index, config in enumerate(configurations)
+        if config.kind != "expression"
+    }
+    parameters = {goal.parameter.name: goal.parameter for goal in built.values()}
+    pending = {index: config for index, config in enumerate(configurations) if config.kind == "expression"}
+    while pending:
+        ready = [
+            index
+            for index, config in pending.items()
+            if all(name in parameters or name not in {c.parameter for c in pending.values()}
+                   for name in (config.terms or {}).values())
+        ]
+        if not ready:
+            names = ", ".join(config.parameter for config in pending.values())
+            raise ConfigurationError(f"Expression goals depend on each other in a cycle: {names}")
+        for index in ready:
+            goal = _build_expression_goal(pending.pop(index), parameters)
+            built[index] = goal
+            parameters[goal.parameter.name] = goal.parameter
+    goals = [built[index] for index in range(len(configurations))]
     if simulator is not None:
         for goal in goals:
-            simulation_type = goal.parameter.simulation_type
-            if simulation_type not in simulator.supported_simulation_types:
-                raise ConfigurationError(
-                    f"Design goal '{goal.parameter.name}' needs a {simulation_type.name} analysis, "
-                    f"which {simulator.__name__} cannot run"
-                )
+            for analysis in goal.required_analyses:
+                simulation_type = base_simulation_type(analysis)
+                if simulation_type not in simulator.supported_simulation_types:
+                    raise ConfigurationError(
+                        f"Design goal '{goal.parameter.name}' needs a {simulation_type.name} analysis, "
+                        f"which {simulator.__name__} cannot run"
+                    )
     return goals
 
 
@@ -234,7 +365,8 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
     simulation_parameters = _apply_simulation_parameters(
         netlist, configuration.simulation_parameters
     )
-    goals = build_design_goals(configuration.design_goals, netlist, simulator_class)
+    variants = build_analysis_variants(configuration.analysis_variants, netlist, simulator_class)
+    goals = build_design_goals(configuration.design_goals, netlist, simulator_class, variants)
     properties = [
         OptimizationProperty(
             name=item.name,

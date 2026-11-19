@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from cobra.configuration.configuration import (
     ConfigurationError,
+    DesignGoalConfig,
     OptimizationParameterConfig,
     RunConfiguration,
 )
@@ -586,6 +587,7 @@ class ConfigurationReport:
     parallel_trials: int | None = None
     component_models: list[ComponentModelReport] = field(default_factory=list)
     optimization_parameters: list[OptimizationParameterReport] = field(default_factory=list)
+    analysis_variants: dict[str, dict[str, Any]] = field(default_factory=dict)
     design_goals: list[DesignGoalReport] = field(default_factory=list)
     simulation_parameters: dict[str, dict[str, str]] = field(default_factory=dict)
     fine_tuning: dict[str, Any] = field(default_factory=dict)
@@ -626,6 +628,10 @@ def inspect_configuration(path: str | Path, *, check_models: bool = True) -> Con
     report.optimizer = {"name": configuration.optimizer.name, "settings": configuration.optimizer.settings}
     report.simulator = {"name": configuration.simulator.name, "settings": configuration.simulator.settings}
     report.simulation_parameters = configuration.simulation_parameters
+    report.analysis_variants = {
+        variant.name: {"analysis": variant.analysis, "netlist_values": dict(variant.netlist_values)}
+        for variant in configuration.analysis_variants
+    }
     report.fine_tuning = {
         "enabled": configuration.fine_tuning.enabled,
         "palace_command": configuration.fine_tuning.palace_command,
@@ -1258,10 +1264,32 @@ def _check_design_goals(
 ) -> None:
     """Rebuild every goal with the run-time validation and record what it needs."""
     # Imported here: both modules pull in the full COBRA pipeline.
-    from cobra.configuration.config_runner import SIMULATOR_REGISTRY, build_design_goals
+    from cobra.configuration.config_runner import (
+        SIMULATOR_REGISTRY,
+        build_analysis_variants,
+        build_design_goals,
+    )
     from cobra.optimizers.design_goal import DesignGoal
 
     simulator = SIMULATOR_REGISTRY.get(configuration.simulator.name)
+    variant_configs = configuration.variants_by_name()
+    variants = {}
+    if netlist is not None:
+        for variant in configuration.analysis_variants:
+            try:
+                variants.update(build_analysis_variants([variant], netlist, simulator))
+            except ConfigurationError as exc:
+                report.issues.append(Issue(Severity.ERROR, f"analysis_variants.{variant.name}", str(exc)))
+    # The goals an expression goal reads, by parameter, and through them their own terms.
+    by_parameter = {goal.parameter: goal for goal in configuration.design_goals}
+
+    def term_goals(goal: DesignGoalConfig, seen: frozenset[str] = frozenset()) -> list[DesignGoalConfig]:
+        found = []
+        for name in (goal.terms or {}).values():
+            term = by_parameter.get(name)
+            if term is not None and name not in seen:
+                found += [*term_goals(term, seen | {name}), term]
+        return list({id(item): item for item in found}.values())
 
     directives = (
         {item.simulation_type for item in netlist.simulation_directives}
@@ -1280,16 +1308,29 @@ def _check_design_goals(
             port=goal.port,
         )
         location = f"design_goals.{goal.parameter}"
-        simulation_type = (
-            goal.analysis_type()
-            if goal.kind in {"power_dbm", "gain_db", "isolation_db"}
-            else SimulationType.for_parameter(goal.parameter)
+        variant = variant_configs.get(goal.analysis) if goal.kind != "expression" else None
+        if goal.kind == "expression":
+            # Its terms are goals of their own, checked there.
+            simulation_type = SimulationType.UNKNOWN
+        elif goal.kind in goal.LARGE_SIGNAL_KINDS:
+            simulation_type = goal.analysis_type(variant_configs)
+        elif variant is not None:
+            simulation_type = variant.simulation_type()
+        else:
+            simulation_type = SimulationType.for_parameter(goal.parameter)
+        entry.simulation_type = (
+            "expression of its terms"
+            if goal.kind == "expression"
+            else f"{variant.name} ({simulation_type.value})"
+            if variant is not None
+            else simulation_type.value
         )
-        entry.simulation_type = simulation_type.value
         entry.directive_in_netlist = simulation_type in directives
-        if netlist is not None:
+        # A goal on a variant that failed its check is reported there.
+        if netlist is not None and (variant is None or variant.name in variants):
+            needed = term_goals(goal)
             try:
-                build_design_goals([goal], netlist, simulator)
+                build_design_goals([*needed, goal], netlist, simulator, variants)
             except ConfigurationError as exc:
                 report.issues.append(Issue(Severity.ERROR, location, str(exc)))
             else:
@@ -1906,6 +1947,18 @@ def render_configuration_report(report: ConfigurationReport, *, full: bool = Fal
             ],
             full=full,
         )
+
+        if report.analysis_variants:
+            _heading(lines, "Analysis variants")
+            _entries(
+                lines,
+                [
+                    f"{name:<28} analysis={variant['analysis']}  "
+                    + " ".join(f"{key}={value}" for key, value in variant["netlist_values"].items())
+                    for name, variant in report.analysis_variants.items()
+                ],
+                full=full,
+            )
 
         _heading(lines, "Design goals")
         _entries(

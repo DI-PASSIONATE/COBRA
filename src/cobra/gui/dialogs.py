@@ -13,17 +13,29 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QTabBar,
 )
 
+from cobra.configuration.configuration import AnalysisVariantConfig, ConfigurationError
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter, GoalInputs
+from cobra.optimizers.design_goal import (
+    DesignGoal,
+    DesignParameter,
+    ExpressionParameter,
+    GoalInputs,
+)
+from cobra.optimizers.design_goal_collection import make_expression_parameter
+from cobra.optimizers.goal_expression import FUNCTIONS, GoalExpression
 
 from .help_texts import tooltip
 from .theme import refresh_style
 
 if TYPE_CHECKING:
-    from cobra.spice_sim.simulation_type import SimulationType
+    from collections.abc import Collection
+
+    from cobra.spice_sim.simulation_type import Analysis, SimulationType
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +44,19 @@ _FREQUENCY_RE = re.compile(
     r"^\s*(?P<min>\d*\.?\d+)(?:-(?P<max>\d*\.?\d+))?\s*(?P<unit>[a-zA-Z]*)\s*$"
 )
 _FREQUENCY_UNITS = {"hz": "Hz", "khz": "kHz", "mhz": "MHz", "ghz": "GHz"}
+
+# The goal dialog's tab for an expression over other goals.
+_EXPRESSION = "Expression"
+
+
+def _variable_names(taken: set[str]):
+    """Short variable names a, b, ..., z, a1, b1, ... that are not in *taken* or functions."""
+    index = 0
+    while True:
+        name = chr(ord("a") + index % 26) + (str(index // 26) if index >= 26 else "")
+        index += 1
+        if name not in taken and name not in FUNCTIONS:
+            yield name
 
 # Frequency modes of the goal dialog: how the frequency_range string is built.
 _FREQ_ANY = "Whole sweep / spectrum"
@@ -67,34 +92,70 @@ def _ok_cancel_buttons(dialog: QDialog) -> QDialogButtonBox:
 class DesignGoalDialog(QDialog):
     """Create or edit a :class:`DesignGoal`.
 
-    The parameters are grouped by the analysis they need, one tab per analysis,
-    so the parameter list stays short for netlists with many ports and nodes.
-    The form adapts to the selected parameter's :class:`GoalInputs`: bounds the
-    goal cannot take are hidden, and the frequency mode is limited to what the
-    goal supports (a point, a range, or the whole sweep).
+    The parameters are grouped by the analysis they need, one tab per analysis
+    (an analysis variant gets its own), so the parameter list stays short for
+    netlists with many ports and nodes. The form adapts to the selected
+    parameter's :class:`GoalInputs`: bounds the goal cannot take are hidden, and
+    the frequency mode is limited to what the goal supports (a point, a range, or
+    the whole sweep). With *term_parameters* (the parameters of the other goals)
+    an *Expression* tab offers a goal on a formula over them, e.g. ``a - b``
+    (:class:`ExpressionParameter`); *taken_names* are the parameter names an
+    expression may not take.
     """
 
     def __init__(self, parent=None, goal: "DesignGoal | None" = None,
                  available_parameters: "list[DesignParameter] | None" = None,
-                 initial_simulation_type: "SimulationType | None" = None):
+                 initial_simulation_type: "SimulationType | None" = None,
+                 term_parameters: "list[DesignParameter] | None" = None,
+                 taken_names: "Collection[str]" = ()):
         super().__init__(parent)
         self.setWindowTitle("Design goal")
         self.setMinimumWidth(400)
         self.form_layout = QFormLayout(self)
 
         # Parameters per analysis, in order of first appearance.
-        self._parameters_by_type: dict[SimulationType, list[DesignParameter]] = {}
+        self._parameters_by_type: dict[Analysis | str, list[DesignParameter]] = {}
         for dp in available_parameters or []:
-            self._parameters_by_type.setdefault(dp.simulation_type, []).append(dp)
-        if goal and goal.parameter not in self._parameters_by_type.get(goal.parameter.simulation_type, []):
+            self._parameters_by_type.setdefault(dp.analysis, []).append(dp)
+        if (
+            goal
+            and not isinstance(goal.parameter, ExpressionParameter)
+            and goal.parameter not in self._parameters_by_type.get(goal.parameter.analysis, [])
+        ):
             # Not offered any more (netlist changed): keep it editable at the top of its tab.
-            self._parameters_by_type.setdefault(goal.parameter.simulation_type, []).insert(0, goal.parameter)
+            self._parameters_by_type.setdefault(goal.parameter.analysis, []).insert(0, goal.parameter)
+
+        # Terms an expression can use: the goal's own under their variables, then the
+        # parameters of the other goals under new ones.
+        self._taken_names = set(taken_names)
+        own = goal.parameter.terms if goal and isinstance(goal.parameter, ExpressionParameter) else {}
+        self._terms: dict[str, DesignParameter] = dict(own)
+        names = _variable_names(set(own))
+        for parameter in term_parameters or []:
+            if parameter not in self._terms.values():
+                self._terms[next(names)] = parameter
+        if self._terms:
+            self._parameters_by_type[_EXPRESSION] = []
 
         self.sim_type_tabs = QTabBar()
         self.sim_type_tabs.setToolTip(tooltip("sim_type_tabs"))
-        for sim_type in self._parameters_by_type:
-            self.sim_type_tabs.addTab(sim_type.value)
+        for analysis in self._parameters_by_type:
+            self.sim_type_tabs.addTab(analysis if isinstance(analysis, str) else analysis.display_name)
         self.param_combo = QComboBox()
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("e.g. Compression_dB")
+        self.name_edit.setToolTip(tooltip("expression_name_edit"))
+        self.terms_list = QListWidget()
+        self.terms_list.setToolTip(tooltip("expression_terms"))
+        self.terms_list.setMaximumHeight(96)
+        for variable, term in self._terms.items():
+            item = QListWidgetItem(f"{variable} = {term.name}")
+            item.setData(256, variable)  # Qt.UserRole
+            self.terms_list.addItem(item)
+        self.terms_list.itemDoubleClicked.connect(self._insert_variable)
+        self.expression_edit = QLineEdit()
+        self.expression_edit.setPlaceholderText("e.g. a - b")
+        self.expression_edit.setToolTip(tooltip("expression_edit"))
 
         self.weight_edit = QLineEdit()
         self.weight_edit.setPlaceholderText("Default: 1.0")
@@ -141,6 +202,9 @@ class DesignGoalDialog(QDialog):
 
         self.form_layout.addRow(self.sim_type_tabs)
         self.form_layout.addRow("Parameter", self.param_combo)
+        self.form_layout.addRow("Name", self.name_edit)
+        self.form_layout.addRow("Terms", self.terms_list)
+        self.form_layout.addRow("Expression", self.expression_edit)
         self.form_layout.addRow("Weight", self.weight_edit)
         self.form_layout.addRow("Scale", self.scale_edit)
         self.form_layout.addRow("Min value", self.min_edit)
@@ -161,10 +225,18 @@ class DesignGoalDialog(QDialog):
         self.freq_mode_combo.currentIndexChanged.connect(self._on_frequency_mode_changed)
 
         sim_types = list(self._parameters_by_type)
-        selected = goal.parameter.simulation_type if goal else initial_simulation_type
+        selected: Analysis | str | None = initial_simulation_type
+        if goal and isinstance(goal.parameter, ExpressionParameter):
+            selected = _EXPRESSION
+        elif goal:
+            selected = goal.parameter.analysis
         self.sim_type_tabs.setCurrentIndex(sim_types.index(selected) if selected in sim_types else 0)
         self._on_sim_type_changed()
-        if goal:
+        if goal and isinstance(goal.parameter, ExpressionParameter):
+            self.name_edit.setText(goal.parameter.name)
+            if goal.parameter.expression is not None:
+                self.expression_edit.setText(goal.parameter.expression.text)
+        elif goal:
             self.param_combo.setCurrentIndex(self.param_combo.findText(goal.parameter.name))
 
         if goal:
@@ -178,11 +250,26 @@ class DesignGoalDialog(QDialog):
                 self.scale_edit.setText(str(goal.scale))
             self._set_frequency(goal.frequency_range)
 
+    def _is_expression(self) -> bool:
+        """Whether the *Expression* tab is selected."""
+        sim_types = list(self._parameters_by_type)
+        index = self.sim_type_tabs.currentIndex()
+        return 0 <= index < len(sim_types) and sim_types[index] == _EXPRESSION
+
+    def _insert_variable(self, item: QListWidgetItem) -> None:
+        """Put the double-clicked term's variable into the expression at the cursor."""
+        self.expression_edit.insert(str(item.data(256)))
+        self.expression_edit.setFocus()
+
     def _on_sim_type_changed(self):
         """Offer the parameters of the analysis selected in the tab bar."""
         sim_types = list(self._parameters_by_type)
         index = self.sim_type_tabs.currentIndex()
         parameters = self._parameters_by_type[sim_types[index]] if 0 <= index < len(sim_types) else []
+        expression = self._is_expression()
+        self.form_layout.setRowVisible(self.param_combo, not expression)
+        for widget in (self.name_edit, self.terms_list, self.expression_edit):
+            self.form_layout.setRowVisible(widget, expression)
         self.param_combo.blockSignals(True)
         self.param_combo.clear()
         for dp in parameters:
@@ -196,10 +283,23 @@ class DesignGoalDialog(QDialog):
         param = self.param_combo.currentData()
         return param if isinstance(param, DesignParameter) else None
 
+    def _current_inputs(self) -> GoalInputs:
+        """The inputs a goal on the current selection takes; an expression takes any."""
+        param = self._current_parameter()
+        return param.inputs if param and not self._is_expression() else GoalInputs()
+
+    def _expression_parameter(self) -> ExpressionParameter:
+        """The expression typed in over the terms it uses; raises ValueError if it is not valid."""
+        expression = GoalExpression(self.expression_edit.text())
+        unknown = [variable for variable in expression.variables if variable not in self._terms]
+        if unknown:
+            raise ValueError(f"{', '.join(unknown)} is not a term; use the variables listed above.")
+        terms = {variable: self._terms[variable] for variable in expression.variables}
+        return make_expression_parameter(self.name_edit.text().strip(), expression, terms)
+
     def _on_parameter_changed(self):
         """Show the inputs the selected parameter's goals take."""
-        param = self._current_parameter()
-        inputs = param.inputs if param else GoalInputs()
+        inputs = self._current_inputs()
 
         self.form_layout.setRowVisible(self.max_edit, inputs.max_value)
         self.min_edit.setPlaceholderText("Required" if not inputs.max_value else "Optional")
@@ -242,17 +342,28 @@ class DesignGoalDialog(QDialog):
     @property
     def _edits(self) -> tuple[QLineEdit, ...]:
         return (
-            self.weight_edit, self.scale_edit, self.min_edit, self.max_edit,
-            self.freq_min_edit, self.freq_max_edit,
+            self.name_edit, self.expression_edit, self.weight_edit, self.scale_edit,
+            self.min_edit, self.max_edit, self.freq_min_edit, self.freq_max_edit,
         )
 
     def _validate(self) -> tuple[str, QLineEdit | None] | None:
         """The first problem with the current inputs and the field it concerns, or ``None``."""
-        param = self._current_parameter()
-        if param is None:
+        expression = None
+        if self._is_expression():
+            name = self.name_edit.text().strip()
+            if not name:
+                return "Give the expression a name.", self.name_edit
+            if name in self._taken_names:
+                return f"Another goal reads {name}; choose another name.", self.name_edit
+            try:
+                expression = self._expression_parameter()
+            except ValueError as exc:
+                return str(exc), self.expression_edit
+        elif self._current_parameter() is None:
             return "No valid parameter selected.", None
+        inputs = self._current_inputs()
         min_text = self.min_edit.text().strip()
-        max_text = self.max_edit.text().strip() if param.inputs.max_value else ""
+        max_text = self.max_edit.text().strip() if inputs.max_value else ""
         if min_text and not self.min_edit.hasAcceptableInput():
             return "Min value must be numeric.", self.min_edit
         if max_text and not self.max_edit.hasAcceptableInput():
@@ -263,7 +374,7 @@ class DesignGoalDialog(QDialog):
         if scale_text and not (self.scale_edit.hasAcceptableInput() and float(scale_text) > 0):
             return "Scale must be a positive number.", self.scale_edit
         if not min_text and not max_text:
-            if param.inputs.max_value:
+            if inputs.max_value:
                 return "At least one of min value or max value must be set.", self.min_edit
             return "Min value must be set.", self.min_edit
         if min_text and max_text and float(min_text) > float(max_text):
@@ -281,6 +392,8 @@ class DesignGoalDialog(QDialog):
                 return "Both min and max frequency are required for a range.", self.freq_max_edit
             if float(freq_min) >= float(freq_max):
                 return "Min frequency must be below max frequency.", self.freq_max_edit
+        if expression is not None and len(expression.required_analyses) > 1 and mode != _FREQ_POINT:
+            return "Terms from several analyses need a single frequency.", self.freq_min_edit
         return None
 
     def _show_error(self, message: str, field: QLineEdit | None) -> None:
@@ -308,15 +421,15 @@ class DesignGoalDialog(QDialog):
         return f"{self.freq_min_edit.text().strip()}-{self.freq_max_edit.text().strip()}{unit}"
 
     def get_data(self) -> DesignGoal:
-        param = self._current_parameter()
         problem = self._validate()
-        if problem or param is None:
-            raise ValueError(problem[0] if problem else "No valid parameter selected.")
+        if problem:
+            raise ValueError(problem[0])
+        param = self._expression_parameter() if self._is_expression() else self._current_parameter()
 
         min_val = float(self.min_edit.text()) if self.min_edit.text().strip() else None
         max_val = (
             float(self.max_edit.text())
-            if param.inputs.max_value and self.max_edit.text().strip()
+            if self._current_inputs().max_value and self.max_edit.text().strip()
             else None
         )
         try:
@@ -326,8 +439,136 @@ class DesignGoalDialog(QDialog):
 
         scale = float(self.scale_edit.text()) if self.scale_edit.text().strip() else None
 
+        if param is None:
+            raise ValueError("No valid parameter selected.")
         return DesignGoal(parameter=param, frequency_range=self._frequency_range(),
                           min_value=min_val, max_value=max_val, weight=weight, scale=scale)
+
+    def accept(self):
+        problem = self._validate()
+        if problem:
+            self._show_error(*problem)
+            return
+        super().accept()
+
+
+class AnalysisVariantDialog(QDialog):
+    """Create or edit an :class:`AnalysisVariantConfig`: an analysis on the netlist with values changed.
+
+    *analyses* are the analysis types the simulator runs, *netlist_names* the
+    elements and instances a value may name, *taken_names* the names of the other
+    variants. A variant goals read (*in_use*) keeps its name and analysis.
+    """
+
+    def __init__(
+        self,
+        parent=None,
+        variant: AnalysisVariantConfig | None = None,
+        analyses: "Collection[str]" = (),
+        netlist_names: "Collection[str]" = (),
+        taken_names: "Collection[str]" = (),
+        in_use: bool = False,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Analysis variant")
+        self.setMinimumWidth(400)
+        self._netlist_names = {name.casefold() for name in netlist_names}
+        self._taken_names = set(taken_names)
+        self.form_layout = QFormLayout(self)
+
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("e.g. HB_m40")
+        self.name_edit.setToolTip(tooltip("variant_name_edit"))
+        self.analysis_combo = QComboBox()
+        self.analysis_combo.addItems(list(analyses))
+        self.analysis_combo.setToolTip(tooltip("variant_analysis_combo"))
+        self.values_edit = QLineEdit()
+        self.values_edit.setPlaceholderText("e.g. vp_rf:ampl=0.00632, R1=60")
+        self.values_edit.setToolTip(tooltip("variant_values_edit"))
+        if variant is not None:
+            self.name_edit.setText(variant.name)
+            self.analysis_combo.setCurrentText(variant.analysis.upper())
+            self.values_edit.setText(
+                ", ".join(f"{key}={value}" for key, value in variant.netlist_values.items())
+            )
+        if in_use:
+            # Goals read the variant by name and parameters of its analysis.
+            self.name_edit.setEnabled(False)
+            self.analysis_combo.setEnabled(False)
+
+        self.error_label = QLabel()
+        self.error_label.setProperty("role", "error")
+        self.error_label.setWordWrap(True)
+        self.error_label.setVisible(False)
+
+        self.form_layout.addRow("Name", self.name_edit)
+        self.form_layout.addRow("Analysis", self.analysis_combo)
+        self.form_layout.addRow("Netlist values", self.values_edit)
+        self.form_layout.addRow(self.error_label)
+        self.buttons = _ok_cancel_buttons(self)
+        self.form_layout.addRow(self.buttons)
+        for edit in (self.name_edit, self.values_edit):
+            edit.textChanged.connect(self._clear_error)
+
+    def _values(self) -> dict[str, float | str]:
+        """The netlist values typed in, numbers as numbers; raises ValueError on a malformed entry."""
+        values: dict[str, float | str] = {}
+        for entry in filter(None, (item.strip() for item in self.values_edit.text().split(","))):
+            name, separator, value = (part.strip() for part in entry.partition("="))
+            if not separator or not name or not value:
+                raise ValueError(f"'{entry}' is not of the form name=value.")
+            try:
+                values[name] = float(value)
+            except ValueError:
+                values[name] = value
+        return values
+
+    def _validate(self) -> tuple[str, QLineEdit | None] | None:
+        """The first problem with the current inputs and the field it concerns, or ``None``."""
+        try:
+            config = self._config()
+        except ValueError as exc:
+            return str(exc), self.values_edit
+        if config.name in self._taken_names:
+            return f"A variant named {config.name} exists already.", self.name_edit
+        try:
+            config.validate()
+        except ConfigurationError as exc:
+            message = str(exc)
+            return message, self.name_edit if message.startswith("Analysis variant name") else self.values_edit
+        for name in config.netlist_values:
+            element = name.split(":", 1)[0]
+            if element.casefold() not in self._netlist_names:
+                return f"The netlist has no element or instance '{element}'.", self.values_edit
+        return None
+
+    def _config(self) -> AnalysisVariantConfig:
+        return AnalysisVariantConfig(
+            name=self.name_edit.text().strip(),
+            analysis=self.analysis_combo.currentText(),
+            netlist_values=self._values(),
+        )
+
+    def _show_error(self, message: str, field: QLineEdit | None) -> None:
+        self.error_label.setText(message)
+        self.error_label.setVisible(True)
+        if field is not None:
+            field.setProperty("invalid", True)
+            refresh_style(field)
+            field.setFocus()
+
+    def _clear_error(self) -> None:
+        self.error_label.setVisible(False)
+        for edit in (self.name_edit, self.values_edit):
+            if edit.property("invalid"):
+                edit.setProperty("invalid", False)
+                refresh_style(edit)
+
+    def get_data(self) -> AnalysisVariantConfig:
+        problem = self._validate()
+        if problem:
+            raise ValueError(problem[0])
+        return self._config()
 
     def accept(self):
         problem = self._validate()

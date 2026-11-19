@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.simulation_type import Analysis, AnalysisVariant, SimulationType
 
 if TYPE_CHECKING:
     import skrf as rf
@@ -44,19 +44,20 @@ def _zeroed_stage_times() -> dict[str, float]:
 def sanitize_for_json(obj: Any) -> Any:
     """Recursively convert *obj* to a JSON-safe structure.
 
-    Enum keys and values become their ``.value``; anything else that is not a
-    native JSON type is left for ``json.dump``'s ``default=str`` fallback.
-    Needed because ``simulation_results`` and ``sim_params_by_type`` are keyed
-    by :class:`SimulationType`, and JSON object keys must be strings.
+    Enum keys and values, and analysis variants, become their ``.value``; anything
+    else that is not a native JSON type is left for ``json.dump``'s ``default=str``
+    fallback. Needed because ``simulation_results`` and ``sim_params_by_type`` are
+    keyed by :class:`SimulationType` or :class:`AnalysisVariant`, and JSON object
+    keys must be strings.
     """
     if isinstance(obj, dict):
         return {
-            (k.value if isinstance(k, Enum) else k): sanitize_for_json(v)
+            (k.value if isinstance(k, (Enum, AnalysisVariant)) else k): sanitize_for_json(v)
             for k, v in obj.items()
         }
     if isinstance(obj, list):
         return [sanitize_for_json(v) for v in obj]
-    if isinstance(obj, Enum):
+    if isinstance(obj, (Enum, AnalysisVariant)):
         return obj.value
     return obj
 
@@ -97,8 +98,8 @@ class OptimizationContext:
     predicted_networks: list[rf.Network] = field(default_factory=list)
 
     # --- Written by CircuitSimulationStage ---------------------------------
-    simulation_results: dict[SimulationType, SimulationResult] = field(default_factory=dict)
-    """One entry per simulation type that succeeded.
+    simulation_results: dict[Analysis, SimulationResult] = field(default_factory=dict)
+    """One entry per analysis (type or variant) that succeeded.
 
     A type that failed is absent, which
     :meth:`~cobra.optimizers.design_goal.DesignGoalChecker.check_goals` turns

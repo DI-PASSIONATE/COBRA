@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+import numpy as np
 
-    import numpy as np
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
 
     from cobra.optimization_context import OptimizationContext
+    from cobra.optimizers.goal_expression import GoalExpression
     from cobra.spice_sim.base_simulator import SimulationResult
-    from cobra.spice_sim.simulation_type import SimulationType
+    from cobra.spice_sim.simulation_type import Analysis, AnalysisVariant, SimulationType
 
 
 FAILED_SIMULATION_PENALTY = 1e6
 """Penalty for a goal whose simulation produced no result.
 """
+
+
+class UnavailableValueError(LookupError):
+    """A parameter's value cannot be computed for a trial: an analysis it reads has no
+    result, or an expression gives a value that is not finite (e.g. ``ln`` of a negative).
+    """
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,10 @@ class DesignParameter:
         Human-readable explanation shown as a tooltip in the GUI.
     inputs:
         Which bounds and frequency inputs a goal on this parameter takes.
+    variant:
+        The analysis variant the parameter is read from, ``None`` for the netlist's own
+        analysis of ``simulation_type``
+        (see :func:`~cobra.optimizers.design_goal_collection.with_variant`).
     """
 
     name: str
@@ -71,6 +82,30 @@ class DesignParameter:
     min_ports: int = 1
     """Minimum number of netlist ports required to evaluate this parameter."""
     inputs: GoalInputs = GoalInputs()
+    variant: AnalysisVariant | None = None
+
+    @property
+    def analysis(self) -> Analysis:
+        """The analysis whose result the formula reads."""
+        return self.variant if self.variant is not None else self.simulation_type
+
+    @property
+    def required_analyses(self) -> tuple[Analysis, ...]:
+        """The analyses whose results the parameter reads."""
+        return (self.analysis,)
+
+    def values(
+        self, sim_results: Mapping[Analysis, SimulationResult], frequency_range: str | None = None
+    ) -> np.ndarray | float:
+        """The parameter's value(s) in a trial's results, at *frequency_range*.
+
+        Raises:
+            UnavailableValueError: The analysis it reads has no result.
+        """
+        sim_result = sim_results.get(self.analysis)
+        if sim_result is None:
+            raise UnavailableValueError(f"No {self.analysis.value} result for '{self.name}'")
+        return self.formula(sim_result, frequency_range)
 
     def __hash__(self):
         return hash(self.name)
@@ -141,11 +176,25 @@ class DesignGoal:
     def required_simulation_type(self) -> SimulationType:
         return self.parameter.simulation_type
 
+    @property
+    def required_analyses(self) -> tuple[Analysis, ...]:
+        """The analyses whose results the goal reads."""
+        return self.parameter.required_analyses
+
     def penalty(self, sim_result: SimulationResult) -> float:
         """Calculate the penalty for the given simulation result."""
         # Calculates the value of the parameter (e.g. S21_dB) from the simulation result
-        values = self.parameter.formula(sim_result, self.frequency_range)
+        return self._score(self.parameter.formula(sim_result, self.frequency_range))
 
+    def evaluate(self, sim_results: Mapping[Analysis, SimulationResult]) -> float:
+        """The penalty for a trial's results; :data:`FAILED_SIMULATION_PENALTY` without them."""
+        try:
+            values = self.parameter.values(sim_results, self.frequency_range)
+        except UnavailableValueError:
+            return self._fail()
+        return self._score(values)
+
+    def _score(self, values: np.ndarray | float) -> float:
         # Store the current value for later reference
         self.current_value = values
 
@@ -153,6 +202,11 @@ class DesignGoal:
         penalty_value = self.parameter.loss(self.min_value, self.max_value, values, self.scale) * self.weight
         self.current_penalty = penalty_value
         return penalty_value
+
+    def _fail(self) -> float:
+        self.current_value = None
+        self.current_penalty = FAILED_SIMULATION_PENALTY
+        return FAILED_SIMULATION_PENALTY
 
     def __str__(self):
         freq_range_str = self.frequency_range or "full range"
@@ -201,6 +255,51 @@ class DesignGoal:
         return (min_freq_hz, max_freq_hz) if max_freq_hz is not None else (min_freq_hz, min_freq_hz)
 
 
+@dataclass(eq=False)
+class ExpressionParameter(DesignParameter):
+    """A parameter computed from other parameters, e.g. ``a - b`` for gain compression.
+
+    Each variable of ``expression`` stands for one parameter in ``terms``, read at
+    the frequency of the goal on this parameter. The terms may come from different
+    analyses and may be expressions themselves. Build one with
+    :func:`~cobra.optimizers.design_goal_collection.make_expression_parameter`.
+    """
+
+    expression: GoalExpression | None = None
+    terms: dict[str, DesignParameter] = field(default_factory=dict)
+
+    @property
+    def required_analyses(self) -> tuple[Analysis, ...]:
+        return tuple(
+            dict.fromkeys(analysis for term in self.terms.values() for analysis in term.required_analyses)
+        )
+
+    def values(
+        self, sim_results: Mapping[Analysis, SimulationResult], frequency_range: str | None = None
+    ) -> np.ndarray:
+        """The expression over the terms' values at *frequency_range*.
+
+        Raises:
+            UnavailableValueError: A term's analysis has no result, or the value is not finite.
+        """
+        if self.expression is None:
+            raise TypeError(f"Expression parameter '{self.name}' has no expression")
+        values = {
+            variable: np.atleast_1d(np.asarray(term.values(sim_results, frequency_range), dtype=float))
+            for variable, term in self.terms.items()
+        }
+        sizes = {array.size for array in values.values()} - {1}
+        if len(sizes) > 1:
+            raise ValueError(
+                f"Expression '{self.name}': its terms have different numbers of values at "
+                f"{frequency_range or 'the whole sweep'}; give the goal a single frequency"
+            )
+        result = np.atleast_1d(self.expression.evaluate(values))
+        if not np.all(np.isfinite(result)):
+            raise UnavailableValueError(f"Expression '{self.name}' is not finite: {result}")
+        return result
+
+
 # ---------------------------------------------------------------------------
 # DesignGoalChecker — evaluates all goals against simulation results
 # ---------------------------------------------------------------------------
@@ -210,17 +309,34 @@ class DesignGoalChecker:
     """Evaluates a list of DesignGoals against one or more simulation results."""
 
     def __init__(self, design_goals: list[DesignGoal]):
-        # Group goals by simulation type for efficient evaluation
-        self.design_goals: dict[SimulationType, list[DesignGoal]] = {}
+        # Group goals by the analysis they read; an expression goal joins its first term's.
+        self.design_goals: dict[Analysis, list[DesignGoal]] = {}
         for goal in design_goals:
-            st = goal.required_simulation_type
-            self.design_goals.setdefault(st, []).append(goal)
+            self.design_goals.setdefault(goal.required_analyses[0], []).append(goal)
+
+    def required_analyses(self) -> set[Analysis]:
+        """Every analysis a goal reads, including those of every term of an expression goal."""
+        return {
+            analysis
+            for goals in self.design_goals.values()
+            for goal in goals
+            for analysis in goal.required_analyses
+        }
+
+    def goals_reading(self, analysis: Analysis) -> list[DesignGoal]:
+        """The goals that read *analysis*'s result."""
+        return [
+            goal
+            for goals in self.design_goals.values()
+            for goal in goals
+            if analysis in goal.required_analyses
+        ]
 
     def check_goals(self, context: OptimizationContext) -> OptimizationContext:
         """
         Evaluate all goals and update *context* with results.
 
-        Reads ``context.simulation_results`` (``dict[SimulationType, SimulationResult]``).
+        Reads ``context.simulation_results`` (``dict[Analysis, SimulationResult]``).
         """
         sim_results = context.simulation_results
         penalties = self.loss(sim_results)
@@ -230,35 +346,20 @@ class DesignGoalChecker:
 
         return context
 
-    def loss(self, sim_results: dict[SimulationType, SimulationResult]) -> list[float]:
+    def loss(self, sim_results: Mapping[Analysis, SimulationResult]) -> list[float]:
         """
         Compute penalties for each goal using the appropriate network.
 
-        A goal whose simulation type is missing from *sim_results* — the
-        simulation failed — receives :data:`FAILED_SIMULATION_PENALTY` instead of
-        being skipped, so the optimizer learns to avoid those parameters.
+        A goal whose analysis is missing from *sim_results* — the simulation
+        failed — receives :data:`FAILED_SIMULATION_PENALTY` instead of being
+        skipped, so the optimizer learns to avoid those parameters.
 
         Parameters
         ----------
         sim_results:
-            ``{SimulationType: SimulationResult}`` — one entry per required analysis type.
+            ``{analysis: SimulationResult}`` — one entry per analysis the goals read.
         """
-        penalties = []
-
-        # Iterate over all goals and evaluate them against the result of the
-        # simulation type they require.
-        for sim_type, goals_for_type in self.design_goals.items():
-            sim_result = sim_results.get(sim_type)
-            if sim_result is None:
-                for goal in goals_for_type:
-                    goal.current_value = None
-                    goal.current_penalty = FAILED_SIMULATION_PENALTY
-                    penalties.append(FAILED_SIMULATION_PENALTY)
-                continue
-
-            penalties.extend(goal.penalty(sim_result) for goal in goals_for_type)
-
-        return penalties
+        return [goal.evaluate(sim_results) for goals in self.design_goals.values() for goal in goals]
 
     def __str__(self):
         parts = [

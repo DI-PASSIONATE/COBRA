@@ -67,6 +67,29 @@ TOOLTIPS = {
     "sim_type_tabs": "Design parameters grouped by the analysis that produces them. A goal on another tab adds that analysis to the run.",
     "freq_mode_combo": "Whole sweep/spectrum: the goal applies everywhere. Single frequency: the nearest sweep point or spectral line. Range: every point or line inside the band.",
     "freq_unit_combo": "Unit for the goal frequency.",
+    "variant_list": (
+        "Further analyses of a type, each run on the netlist with some values changed,\n"
+        "e.g. the HB at another drive. Goals read one from its tab in the goal dialog."
+    ),
+    "add_variant_btn": "Add an analysis variant: an analysis run on the netlist with some values changed.",
+    "variant_name_edit": "Name of the variant; its goals carry it as a prefix, e.g. HB_m40:Power_dBm[Out].",
+    "variant_analysis_combo": "Analysis type the variant runs, with that type's simulation settings.",
+    "variant_values_edit": (
+        "Netlist values the variant sets, comma-separated: an element (R1=60) or\n"
+        "<instance>:<parameter> (vp_rf:ampl=0.00632, the sine amplitude in volts).\n"
+        "A gain goal on the variant refers to the amplitude it sets for the gain's port."
+    ),
+    "expression_name_edit": "Name of the expression; other expressions use it as a term under this name.",
+    "expression_terms": (
+        "The goals an expression can use, each under a variable name.\n"
+        "Double-click one to insert its variable into the expression."
+    ),
+    "expression_edit": (
+        "Formula over the variables, read at the goal's frequency: numbers, + - * / **,\n"
+        "abs, sqrt, exp, ln, log10, and min/max of two or more values.\n"
+        "E.g. a - b: the gain at the netlist's drive minus the gain on a high-drive variant.\n"
+        "Terms from several analyses need a single frequency."
+    ),
     "goal_scale_edit": (
         "Unit a miss of the limit is measured in, e.g. 1 for one dB of a dB goal.\n"
         "Empty: relative to the limit (a miss of 1 at a limit of -10 counts 0.1), or 1 for a limit of 0."

@@ -10,6 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING, TypeAlias
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from cobra.spice_sim.netlist_parsers.netlist import Netlist
 
 
 class SimulationType(Enum):
@@ -95,6 +101,68 @@ class SimulationType(Enum):
             get_available_parameters,  # lazy – avoids circular import
         )
         return [p.name for p in get_available_parameters(num_ports)]
+
+
+# ---------------------------------------------------------------------------
+# AnalysisVariant — a second analysis of a type, on a netlist with other values
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AnalysisVariant:
+    """An analysis of *simulation_type* on the netlist with some values changed.
+
+    A run holds one result per analysis type, so a netlist cannot carry two HB
+    analyses at different drives. A variant adds one: the circuit simulation runs
+    it as an analysis of its own, on a copy of the netlist with ``netlist_values``
+    set (``"vp_rf:ampl"`` for an instance parameter, ``"R1"`` for an element value,
+    as for ``netlist_variable`` parameters). Goals on it carry its name as a prefix,
+    e.g. ``HB_m40:Power_dBm[Vdd]``.
+
+    Like :class:`SimulationType`, it has a ``name`` (used in file names) and a
+    ``value`` (used in messages), so the two can key the same mappings.
+    """
+
+    name: str
+    simulation_type: SimulationType
+    netlist_values: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def create(
+        cls, name: str, simulation_type: SimulationType, netlist_values: Mapping[str, float | str]
+    ) -> AnalysisVariant:
+        """A variant setting *netlist_values*, given as a mapping."""
+        return cls(name, simulation_type, tuple((key, str(value)) for key, value in netlist_values.items()))
+
+    @property
+    def value(self) -> str:
+        return self.name
+
+    @property
+    def display_name(self) -> str:
+        """Label shown in the GUI, e.g. ``"HB_m40"``."""
+        return self.name
+
+    def netlist_value(self, name: str) -> str | None:
+        """The value the variant sets for *name* (case-insensitive), or ``None``."""
+        return next(
+            (value for key, value in self.netlist_values if key.casefold() == name.casefold()),
+            None,
+        )
+
+    def apply(self, netlist: Netlist) -> Netlist:
+        """A copy of *netlist* with the variant's values set."""
+        changed = netlist.copy()
+        changed.update_parameters(dict(self.netlist_values))
+        return changed
+
+
+#: What an analysis of a run is keyed by: a netlist analysis type or a variant of one.
+Analysis: TypeAlias = SimulationType | AnalysisVariant
+
+
+def base_simulation_type(analysis: Analysis) -> SimulationType:
+    """The analysis type *analysis* runs: itself, or the type a variant is based on."""
+    return analysis.simulation_type if isinstance(analysis, AnalysisVariant) else analysis
 
 
 # ---------------------------------------------------------------------------

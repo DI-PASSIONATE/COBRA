@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from cobra.cobra import COBRA
 from cobra.configuration import (
     DEFAULT_PALACE_PROCESSES,
+    AnalysisVariantConfig,
     BackendConfig,
     ConfigurationError,
     DesignGoalConfig,
@@ -51,25 +52,30 @@ from cobra.configuration import (
     OptimizationParameterConfig,
     RunConfiguration,
 )
-from cobra.configuration.config_runner import build_configured_run, build_design_goals
+from cobra.configuration.config_runner import (
+    build_analysis_variants,
+    build_configured_run,
+    build_design_goals,
+)
 from cobra.optimization_context import OptimizationContext
 from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter
+from cobra.optimizers.design_goal import DesignGoal, DesignParameter, ExpressionParameter
 from cobra.optimizers.design_goal_collection import (
     get_available_parameters,
     make_gain_db,
     make_isolation_db,
     make_power_dbm,
+    with_variant,
 )
 from cobra.optimizers.gradient_descent_optimizer import GradientDescentOptimizer
 from cobra.optimizers.optuna_optimizer import OptunaOptimizer
 from cobra.spice_sim import hb_spectrum
-from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.simulation_type import AnalysisVariant, SimulationType, base_simulation_type
 from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.surrogate_metadata import FeasibilityConstraints, SurrogateMetadata
 
-from .dialogs import DesignGoalDialog, OptimizationParamDialog
+from .dialogs import AnalysisVariantDialog, DesignGoalDialog, OptimizationParamDialog
 from .geometry_selector import GeometrySelectorWidget
 from .help_texts import TUTORIAL_HTML, tooltip
 from .hf_model_browser import HuggingFaceModelDialog
@@ -82,6 +88,13 @@ if TYPE_CHECKING:
     from pyqtgraph.GraphicsScene import GraphicsScene
 
 logger = logging.getLogger(__name__)
+
+
+def _uses(parameter: DesignParameter, name: str) -> bool:
+    """Whether *parameter* is an expression that reads the parameter *name*, directly or not."""
+    if not isinstance(parameter, ExpressionParameter):
+        return False
+    return any(term.name == name or _uses(term, name) for term in parameter.terms.values())
 
 #: Plot-selector entries for the analyses that yield a spectrum: key → (analysis, title).
 _SPECTRUM_VIEWS: dict[str, tuple[SimulationType, str]] = {
@@ -398,7 +411,23 @@ class MainWindow(QMainWindow):
         h_param_btns.addWidget(add_net_btn)
         param_layout.addLayout(h_param_btns)
 
-        # 3. Design Goals
+        # 3. Analysis variants: further analyses of a type, on the netlist with other values
+        variant_group = QGroupBox("Analysis variants")
+        variant_layout = QVBoxLayout(variant_group)
+        self.variant_list = QListWidget()
+        self.variant_list.setToolTip(tooltip("variant_list"))
+        self.variant_list.setMaximumHeight(96)
+        self.variant_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.variant_list.customContextMenuRequested.connect(self.variant_context_menu)
+        self.variant_list.doubleClicked.connect(lambda idx: self.edit_analysis_variant(idx.row()))
+        variant_layout.addWidget(self.variant_list)
+        add_variant_btn = QPushButton("Add variant")
+        add_variant_btn.setToolTip(tooltip("add_variant_btn"))
+        add_variant_btn.clicked.connect(self.add_analysis_variant)
+        self._theme.bind_icon(add_variant_btn, "plus")
+        variant_layout.addWidget(add_variant_btn)
+
+        # 4. Design Goals
         goal_group = QGroupBox("Design goals")
         goal_layout = QVBoxLayout(goal_group)
         self.goal_list = QListWidget()
@@ -419,6 +448,7 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.addWidget(param_group, stretch=2)
+        right_layout.addWidget(variant_group)
         right_layout.addWidget(goal_group, stretch=1)
 
         # Left panel: Configuration
@@ -533,6 +563,9 @@ class MainWindow(QMainWindow):
         # Data storage
         self.opt_params: list[OptimizationProperty] = []
         self.goals: list[DesignGoal] = []
+        # Analysis variants as configured, and built against the current netlist.
+        self.analysis_variants: list[AnalysisVariantConfig] = []
+        self._variants: dict[str, AnalysisVariant] = {}
         self.worker = None
         self.loss_history = {} # key: goal index, value: list of losses
         self.overlay_items = []
@@ -1193,10 +1226,24 @@ class MainWindow(QMainWindow):
                 **extra,
             )
 
-        # Spectrum goals carry their analysis as a name prefix ("TRAN:"); HB is unprefixed.
-        prefix_match = re.fullmatch(r"(?:(TRAN):)?(.+)", name)
-        analysis = (prefix_match.group(1) if prefix_match else None) or "HB"
-        base = prefix_match.group(2) if prefix_match else name
+        parameter = goal.parameter
+        if isinstance(parameter, ExpressionParameter):
+            return make(
+                kind="expression",
+                expression=parameter.expression.text if parameter.expression is not None else None,
+                terms={variable: term.name for variable, term in parameter.terms.items()},
+            )
+        # A goal on a variant carries the variant's name as its prefix and analysis;
+        # a spectrum goal on the netlist's own transient "TRAN:", one on its HB none.
+        variant = goal.parameter.variant
+        if variant is not None:
+            analysis, prefix = variant.name, f"{variant.name}:"
+            variant = self._variants.get(variant.name, variant)
+        elif goal.parameter.simulation_type is SimulationType.TRAN:
+            analysis, prefix = "TRAN", "TRAN:"
+        else:
+            analysis, prefix = "HB", ""
+        base = name.removeprefix(prefix)
         power_match = re.fullmatch(r"Power_dBm\[(.+)]", base)
         if power_match:
             return make(kind="power_dbm", node=power_match.group(1), analysis=analysis)
@@ -1209,7 +1256,7 @@ class MainWindow(QMainWindow):
             source = self._port_sources.get(port)
             if source is None:
                 raise ConfigurationError(f"No source information is available for gain port '{port}'")
-            amplitude = source.get("sin_amplitude") or source.get("ac_amplitude")
+            amplitude = self._drive_amplitude(port, variant)
             return make(
                 kind="gain_db",
                 node=node,
@@ -1218,7 +1265,19 @@ class MainWindow(QMainWindow):
                 impedance=source.get("z0", 50.0),
                 analysis=analysis,
             )
-        return make()
+        return make(analysis=analysis) if variant is not None else make()
+
+    def _drive_amplitude(self, port: str, variant: AnalysisVariant | None = None) -> float | None:
+        """The sine amplitude of *port*'s source: the netlist's, or the one *variant* sets."""
+        if variant is not None:
+            value = variant.netlist_value(f"{port}:ampl")
+            if value is not None:
+                try:
+                    return float(value)
+                except ValueError:
+                    pass  # build_design_goals reports a non-numeric amplitude
+        source = self._port_sources.get(port, {})
+        return source.get("sin_amplitude") or source.get("ac_amplitude")
 
     def create_run_configuration(self) -> RunConfiguration:
         """Capture and validate all GUI fields that affect execution."""
@@ -1279,6 +1338,7 @@ class MainWindow(QMainWindow):
                 )
                 for parameter in self.opt_params
             ],
+            analysis_variants=list(self.analysis_variants),
             design_goals=[self._design_goal_configuration(goal) for goal in self.goals],
             fine_tuning=FineTuningConfig(
                 enabled=self.finetune_cb.isChecked(),
@@ -1297,6 +1357,9 @@ class MainWindow(QMainWindow):
         config.validate()
         self.goals.clear()
         self.goal_list.clear()
+        self.analysis_variants = []
+        self._variants = {}
+        self.variant_list.clear()
         self.opt_params.clear()
         self.param_table.setRowCount(0)
         # The netlist is read in the configured simulator's dialect.
@@ -1371,7 +1434,12 @@ class MainWindow(QMainWindow):
 
         netlist = self._simulator_cls.netlist_parser.parse_file(config.netlist)
         netlist.select_surrogates(self._surrogate_masters)
-        self.goals = build_design_goals(config.design_goals, netlist, self._simulator_cls)
+        self._variants = build_analysis_variants(config.analysis_variants, netlist, self._simulator_cls)
+        self.analysis_variants = list(config.analysis_variants)
+        for variant in self.analysis_variants:
+            self.variant_list.addItem(self._variant_label(variant))
+        self._rebuild_design_parameters()
+        self.goals = build_design_goals(config.design_goals, netlist, self._simulator_cls, self._variants)
         for goal in self.goals:
             self.goal_list.addItem(self._goal_label(goal))
         self.loss_history = {index: [] for index in range(len(self.goals))}
@@ -1478,6 +1546,7 @@ class MainWindow(QMainWindow):
             self._netlist_sim_type = sim_type
             self._populate_analysis_point_combo()
             self._populate_spectrum_input_port_combo()
+            self._variants = self._buildable_variants(netlist)
             self._rebuild_design_parameters()
 
             self.sim_type_value_label.setText(sim_type.display_name)
@@ -1539,30 +1608,47 @@ class MainWindow(QMainWindow):
         self.spectrum_input_port_combo.blockSignals(False)
 
     def _rebuild_design_parameters(self) -> None:
-        """Rebuild the available design parameters for the current netlist and analysis point."""
+        """Rebuild the available design parameters for the current netlist and analysis point.
+
+        Each analysis variant offers the parameters of its analysis type again, read
+        from the variant; its gain goals refer to the drive the variant sets.
+        """
         supported = self._simulator_cls.supported_simulation_types
-        self._available_parameters = [
+        catalogue = [
             parameter
             for parameter in get_available_parameters(self._num_ports)
             if parameter.simulation_type in supported
         ]
-        node = self.analysis_point
-        if not node:
-            return
         # Both large-signal analyses offer the spectrum goals; the netlist's own comes first.
         analyses = [SimulationType.HB, SimulationType.TRAN]
         if self._netlist_sim_type is SimulationType.TRAN:
             analyses.reverse()
-        for analysis in analyses:
-            self._available_parameters.append(make_power_dbm(node, analysis))
-            self._available_parameters.append(make_isolation_db(node, analysis))
-            # Gain needs the input drive level, so only ports with a SIN/AC source qualify.
-            for port_name, source_info in sorted(self._port_sources.items()):
-                sin_amp = source_info.get("sin_amplitude") or source_info.get("ac_amplitude")
-                if sin_amp is not None:
-                    self._available_parameters.append(
-                        make_gain_db(port_name, sin_amp, source_info.get("z0", 50.0), node, analysis)
-                    )
+        self._available_parameters = catalogue + [
+            parameter for analysis in analyses for parameter in self._spectrum_parameters(analysis)
+        ]
+        for variant in self._variants.values():
+            if variant.simulation_type not in supported:
+                continue
+            own = [p for p in catalogue if p.simulation_type is variant.simulation_type]
+            own += self._spectrum_parameters(variant.simulation_type, variant)
+            self._available_parameters += [with_variant(parameter, variant) for parameter in own]
+
+    def _spectrum_parameters(
+        self, analysis: SimulationType, variant: AnalysisVariant | None = None
+    ) -> list[DesignParameter]:
+        """Power, isolation and gain at the analysis point, read from a large-signal *analysis*."""
+        node = self.analysis_point
+        if not node or analysis not in _LARGE_SIGNAL_TYPES:
+            return []
+        parameters = [make_power_dbm(node, analysis), make_isolation_db(node, analysis)]
+        # Gain needs the input drive level, so only ports with a SIN/AC source qualify.
+        for port_name, source_info in sorted(self._port_sources.items()):
+            amplitude = self._drive_amplitude(port_name, variant)
+            if amplitude is not None:
+                parameters.append(
+                    make_gain_db(port_name, amplitude, source_info.get("z0", 50.0), node, analysis)
+                )
+        return parameters
 
     def on_analysis_point_changed(self) -> None:
         self._rebuild_design_parameters()
@@ -1576,10 +1662,12 @@ class MainWindow(QMainWindow):
             required.add(self._netlist_sim_type)
         # Add any additional types required by goals (e.g. AC for S-parameter goals
         # when the native type is HB)
+        # A variant runs its analysis type with that type's settings.
         for goal in self.goals:
-            st = goal.required_simulation_type
-            if st is not SimulationType.UNKNOWN:
-                required.add(st)
+            for analysis in goal.required_analyses:
+                st = base_simulation_type(analysis)
+                if st is not SimulationType.UNKNOWN:
+                    required.add(st)
         if not required:
             required = {SimulationType.AC}
         self._required_sim_types = required
@@ -1950,10 +2038,50 @@ class MainWindow(QMainWindow):
             self,
             available_parameters=self._available_parameters,
             initial_simulation_type=self._netlist_sim_type,
+            term_parameters=self._term_parameters(),
+            taken_names=self._taken_names(),
         )
         if dlg.exec():
             goal = dlg.get_data()
             self._add_goal_to_list(goal)
+
+    def _term_parameters(self, exclude: DesignGoal | None = None) -> list[DesignParameter]:
+        """The parameters an expression can use: those of the goals other than *exclude*,
+        leaving out the expressions that use *exclude*'s, which would form a cycle.
+        """
+        terms: list[DesignParameter] = []
+        for goal in self.goals:
+            if goal is exclude or goal.parameter in terms:
+                continue
+            if exclude is not None and _uses(goal.parameter, exclude.parameter.name):
+                continue
+            terms.append(goal.parameter)
+        return terms
+
+    def _taken_names(self, exclude: DesignGoal | None = None) -> set[str]:
+        """The parameter names of the goals other than *exclude*, which an expression may not take."""
+        return {goal.parameter.name for goal in self.goals if goal is not exclude}
+
+    def _rebuild_goals(self, goals: list[DesignGoal]) -> list[DesignGoal]:
+        """*goals* built afresh from their configuration, so every expression reads the current
+        version of its terms. Raises ConfigurationError, e.g. when a term's goal is gone.
+        """
+        configurations = [self._design_goal_configuration(goal) for goal in goals]
+        return build_design_goals(configurations, self._parsed_netlist(), self._simulator_cls, self._variants)
+
+    def _apply_goals(self, goals: list[DesignGoal]) -> bool:
+        """Make *goals* the goal list if they build; otherwise say why and keep the current one."""
+        try:
+            rebuilt = self._rebuild_goals(goals)
+        except ConfigurationError as exc:
+            QMessageBox.information(self, "Goal in use", str(exc))
+            return False
+        self.goals = rebuilt
+        self.goal_list.clear()
+        for goal in self.goals:
+            self.goal_list.addItem(self._goal_label(goal))
+        self._refresh_sim_params_for_goals()
+        return True
 
     def goal_context_menu(self, pos):
         item = self.goal_list.itemAt(pos)
@@ -1973,28 +2101,157 @@ class MainWindow(QMainWindow):
             return
 
         goal = self.goals[row]
-        dlg = DesignGoalDialog(self, goal=goal, available_parameters=self._available_parameters or None)
+        dlg = DesignGoalDialog(
+            self,
+            goal=goal,
+            available_parameters=self._available_parameters or None,
+            term_parameters=self._term_parameters(exclude=goal),
+            taken_names=self._taken_names(exclude=goal),
+        )
         if dlg.exec():
-            new_goal = dlg.get_data()
-            self.goals[row] = new_goal
-            self._update_goal_item(item, new_goal)
+            goals = list(self.goals)
+            goals[row] = dlg.get_data()
+            self._apply_goals(goals)
 
     def delete_goal(self, item):
         row = self.goal_list.row(item)
         if row < 0 or row >= len(self.goals):
             return
+        # An expression that uses the goal's parameter keeps it from being deleted.
+        if not self._apply_goals([goal for index, goal in enumerate(self.goals) if index != row]):
+            return
 
-        del self.goals[row]
-        if row in self.loss_history:
-             del self.loss_history[row]
-
-        # Re-index remaining loss history?
-        # Actually loss history indices will shift so this is tricky if run continuously.
-        # Ideally we rebuild. For now just clear.
+        # Loss history indices shift with the goals, so it starts over.
         self.loss_history = {}
 
-        self.goal_list.takeItem(row)
+    # ------------------------------------------------------------------
+    # Analysis variants
+    # ------------------------------------------------------------------
+
+    def _parsed_netlist(self):
+        """The netlist of the netlist field, read in the selected simulator's dialect."""
+        netlist = self._simulator_cls.netlist_parser.parse_file(self.netlist_edit.text().strip())
+        netlist.select_surrogates(self._surrogate_masters)
+        return netlist
+
+    def _set_analysis_variants(self, variants: list[AnalysisVariantConfig], netlist=None) -> None:
+        """Make *variants* the run's analysis variants and rebuild what reads them.
+
+        The goals on a variant are rebuilt from their configuration, so a changed
+        value (e.g. the drive a gain goal refers to) reaches them.
+        """
+        netlist = netlist if netlist is not None else self._parsed_netlist()
+        built = build_analysis_variants(variants, netlist, self._simulator_cls)
+        # The goals' configuration takes a gain goal's drive from the new variant.
+        previous, self._variants = self._variants, built
+        try:
+            configurations = [self._design_goal_configuration(goal) for goal in self.goals]
+            goals = build_design_goals(configurations, netlist, self._simulator_cls, built)
+        except Exception:
+            self._variants = previous
+            raise
+        self.analysis_variants = list(variants)
+        self.goals = goals
+        self.variant_list.clear()
+        for variant in self.analysis_variants:
+            self.variant_list.addItem(self._variant_label(variant))
+        for index, goal in enumerate(self.goals):
+            item = self.goal_list.item(index)
+            if item is not None:
+                item.setText(self._goal_label(goal))
+        self._rebuild_design_parameters()
         self._refresh_sim_params_for_goals()
+
+    def _buildable_variants(self, netlist) -> dict[str, AnalysisVariant]:
+        """The configured variants that *netlist* has the elements for; the rest are logged."""
+        built: dict[str, AnalysisVariant] = {}
+        for variant in self.analysis_variants:
+            try:
+                built.update(build_analysis_variants([variant], netlist, self._simulator_cls))
+            except ConfigurationError as exc:
+                logger.warning("%s", exc)
+        return built
+
+    @staticmethod
+    def _variant_label(variant: AnalysisVariantConfig) -> str:
+        values = ", ".join(f"{key}={value}" for key, value in variant.netlist_values.items())
+        return f"{variant.name} ({variant.analysis.upper()}): {values}"
+
+    def _variant_dialog(self, variant: AnalysisVariantConfig | None = None) -> AnalysisVariantDialog:
+        netlist = self._parsed_netlist()
+        analyses = sorted(
+            t.name for t in self._simulator_cls.supported_simulation_types if t is not SimulationType.UNKNOWN
+        )
+        return AnalysisVariantDialog(
+            self,
+            variant=variant,
+            analyses=analyses,
+            netlist_names=[element.name for element in netlist.list_elements()],
+            taken_names=[v.name for v in self.analysis_variants if v is not variant],
+            in_use=variant is not None and bool(self._goals_reading_variant(variant.name)),
+        )
+
+    def _goals_reading_variant(self, name: str) -> list[DesignGoal]:
+        """The goals that read the analysis variant *name*, an expression through its terms."""
+        return [
+            goal
+            for goal in self.goals
+            if any(isinstance(a, AnalysisVariant) and a.name == name for a in goal.required_analyses)
+        ]
+
+    def add_analysis_variant(self) -> None:
+        if not self.netlist_edit.text().strip():
+            QMessageBox.information(self, "Load a netlist first", "A variant changes values of the netlist.")
+            return
+        try:
+            dlg = self._variant_dialog()
+            if dlg.exec():
+                self._set_analysis_variants([*self.analysis_variants, dlg.get_data()])
+        except Exception as e:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
+            QMessageBox.critical(self, "Analysis variant", str(e))
+
+    def edit_analysis_variant(self, row: int) -> None:
+        if not 0 <= row < len(self.analysis_variants):
+            return
+        try:
+            dlg = self._variant_dialog(self.analysis_variants[row])
+            if dlg.exec():
+                variants = list(self.analysis_variants)
+                variants[row] = dlg.get_data()
+                self._set_analysis_variants(variants)
+        except Exception as e:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
+            QMessageBox.critical(self, "Analysis variant", str(e))
+
+    def delete_analysis_variant(self, row: int) -> None:
+        if not 0 <= row < len(self.analysis_variants):
+            return
+        name = self.analysis_variants[row].name
+        readers = [goal.parameter_name for goal in self._goals_reading_variant(name)]
+        if readers:
+            QMessageBox.information(
+                self,
+                "Variant in use",
+                f"{', '.join(readers)} read{'s' if len(readers) == 1 else ''} {name}, so it cannot be "
+                "deleted. Delete those goals first.",
+            )
+            return
+        try:
+            self._set_analysis_variants([v for i, v in enumerate(self.analysis_variants) if i != row])
+        except Exception as e:  # noqa: BLE001 - GUI boundary: any failure is reported in a dialog
+            QMessageBox.critical(self, "Analysis variant", str(e))
+
+    def variant_context_menu(self, pos) -> None:
+        item = self.variant_list.itemAt(pos)
+        if item:
+            row = self.variant_list.row(item)
+            menu = QMenu()
+            edit_action = menu.addAction("Edit")
+            delete_action = menu.addAction("Delete")
+            action = menu.exec(self.variant_list.mapToGlobal(pos))
+            if action == edit_action:
+                self.edit_analysis_variant(row)
+            elif action == delete_action:
+                self.delete_analysis_variant(row)
 
     def _add_goal_to_list(self, goal):
         self.goals.append(goal)
@@ -2258,7 +2515,11 @@ class MainWindow(QMainWindow):
             self.s_param_plot.clear()
 
             sim_results = context.simulation_results
-            ntwk_n = next((r.network for r in sim_results.values() if r.network is not None), None)
+            # The netlist's own analyses, not a variant's.
+            ntwk_n = next(
+                (r.network for a, r in sim_results.items() if isinstance(a, SimulationType) and r.network is not None),
+                None,
+            )
             requested_sparams = self._goal_sparam_specs()
 
             if ntwk_n is not None:

@@ -9,12 +9,13 @@ from cobra.spice_sim.netlist_parsers.netlist import Netlist
 from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
 from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import VacaskNetlistParser
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
-from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
+from cobra.spice_sim.simulation_type import AnalysisVariant, SimulationType, SimulationTypeMetadata
 from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.vector_fit import vector_fit, vector_fit_vacask
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 
 __all__ = [
+    "AnalysisVariant",
     "BaseSimulator",
     "Netlist",
     "NetlistParser",
