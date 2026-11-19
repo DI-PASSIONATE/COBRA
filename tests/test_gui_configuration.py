@@ -226,3 +226,17 @@ def test_goal_dialog_offers_variant_tabs_and_an_expression(tmp_path, window):
 
     assert goal.parameter_name == "Drop"
     assert _expression(goal).terms == {"a": window.goals[0].parameter, "b": window.goals[1].parameter}
+
+
+def test_retune_settings_survive_the_window(tmp_path, window):
+    config = _variant_config(tmp_path)
+    config.fine_tuning.retune_trials = 150
+    config.fine_tuning.retune_range = 0.25
+    config.fine_tuning.retune_min_steps = 3
+
+    window.apply_run_configuration(config)
+    saved = window.create_run_configuration().fine_tuning
+
+    assert (saved.retune_trials, saved.retune_range, saved.retune_min_steps) == (150, 0.25, 3)
+    window.retune_trials_spin.setValue(0)
+    assert not window.retune_range_spin.isEnabled()

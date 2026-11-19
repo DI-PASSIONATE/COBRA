@@ -165,6 +165,34 @@ def test_fine_tuning_optimizer_must_be_known():
         FineTuningConfig.from_dict({"optimizer": "annealing"}).validate()
 
 
+@pytest.mark.parametrize(
+    ("settings", "match"),
+    [
+        ({"retune_trials": -1}, "retune_trials must be a non-negative integer"),
+        ({"retune_trials": 2.5}, "retune_trials must be a non-negative integer"),
+        ({"retune_range": 0}, "retune_range must be positive"),
+        ({"retune_range": "30 %"}, "retune_range must be a finite number"),
+        ({"retune_min_steps": -2}, "retune_min_steps must be a non-negative integer"),
+    ],
+)
+def test_invalid_retune_settings_are_rejected(settings, match):
+    with pytest.raises(ConfigurationError, match=match):
+        FineTuningConfig.from_dict(settings).validate()
+
+
+def test_retune_settings_round_trip(config_dir: Path, config_data):
+    config_data["fine_tuning"] = {"retune_trials": 200, "retune_range": 0.2, "retune_min_steps": 1}
+    config = RunConfiguration.from_dict(config_data, config_dir)
+
+    reloaded = RunConfiguration.load(config.save(config_dir / "run.json"))
+
+    assert (
+        reloaded.fine_tuning.retune_trials,
+        reloaded.fine_tuning.retune_range,
+        reloaded.fine_tuning.retune_min_steps,
+    ) == (200, 0.2, 1)
+
+
 def test_custom_geometry_file_is_resolved_and_checked(config_dir: Path):
     data = make_config_data(
         fine_tuning={

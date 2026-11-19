@@ -19,7 +19,8 @@ import pytest
 import skrf as rf
 
 from cobra.cobra import COBRA
-from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType
+from cobra.configuration.configuration import ConfigurationError
+from cobra.optimizers.base_optimizer import OptimizationProperty, OptimizationType, narrowed_around
 from cobra.optimizers.design_goal import (
     FAILED_SIMULATION_PENALTY,
     DesignGoal,
@@ -110,6 +111,10 @@ def _run_with_fine_tuning(
     fine_tuning_optimizer: str = "reuse",
     callback: Callable[[OptimizationContext], bool | None] | None = None,
     touchstone_type: str | None = None,
+    retune_trials: int = 0,
+    goal: DesignGoal | None = None,
+    start: float | None = None,
+    max_iterations: int = 3,
 ) -> tuple[COBRA, OptimizationContext, _RecordingSimulator, _FakePalaceStage]:
     monkeypatch.chdir(tmp_path)
     model = tmp_path / "model.s2p"
@@ -127,6 +132,7 @@ def _run_with_fine_tuning(
         palace_fine_tuning_processes=1,
         fine_tuning_iterations=FINE_TUNING_ITERATIONS,
         fine_tuning_optimizer=fine_tuning_optimizer,
+        retune_trials=retune_trials,
     )
     # Treat X1 as an ONNX component, so fine-tuning simulates it with "Palace".
     assert cobra.em_surrogate_stage is not None
@@ -137,12 +143,12 @@ def _run_with_fine_tuning(
 
     context = cobra.run(
         netlist=str(netlist),
-        design_goals=[_r1_goal()],
+        design_goals=[goal or _r1_goal()],
         optimization_parameters=[
-            OptimizationProperty("R1", OptimizationType.NETLIST_VARIABLE, 10.0, 100.0, step=1.0),
+            OptimizationProperty("R1", OptimizationType.NETLIST_VARIABLE, 10.0, 100.0, step=1.0, initial_value=start),
             OptimizationProperty("X1:width", OptimizationType.MODEL_INPUT, 1.0, 5.0),
         ],
-        max_iterations=3,
+        max_iterations=max_iterations,
         orca_geometries={"X1": object()},
         callback=callback,
     )
@@ -224,6 +230,109 @@ def test_stopping_before_fine_tuning_still_saves_the_context(tmp_path, monkeypat
     assert palace.calls == []
     saved = Path(context.results_dir) / "cobra_optimization_context.json"
     assert json.loads(saved.read_text(encoding="utf-8"))["netlist"] == context.netlist
+
+
+# ---------------------------------------------------------------------------
+# COBRA.fine_tuning — the retune with the EM models fixed
+# ---------------------------------------------------------------------------
+
+
+def _retune_simulations(simulator: _RecordingSimulator, iteration: int) -> list[float]:
+    """R1 of every netlist the retune after fine-tuning *iteration* searched, in order."""
+    return [
+        _r1(text)
+        for path, text in simulator.simulated
+        if f"retune_{iteration:02d}" in Path(path).parts and "search" in Path(path).parts
+    ]
+
+
+def test_retune_meets_the_goals_with_the_em_models_fixed(tmp_path, monkeypatch):
+    # The surrogate loop and fine-tuning iteration 1 evaluate R1 = 60 only; R1 <= 50 meets the goal.
+    goal = DesignGoal(_r1_goal().parameter, max_value=50.0)
+    _, context, simulator, palace = _run_with_fine_tuning(
+        tmp_path, monkeypatch, retune_trials=30, goal=goal, start=60.0, max_iterations=1
+    )
+
+    assert len(palace.calls) == 1  # the retune ran no Palace simulation
+    assert context.goal_achieved
+    retuned = float(context.netlist_parameters["R1"])
+    assert 42.0 <= retuned <= 50.0  # within 60 ± 30 %, on the grid
+    searched = _retune_simulations(simulator, 1)
+    assert searched[0] == 60.0  # it starts at the fine-tuning iteration's values
+    assert all(42.0 <= value <= 78.0 for value in searched)
+    retune_dir = Path(context.results_dir) / "fine_tuning" / "retune_01"
+    assert (retune_dir / "X1.s2p").is_file()  # the Palace result as the fixed model
+    assert _r1((retune_dir / "result" / "circuit.cir").read_text(encoding="utf-8")) == retuned
+    assert _r1((Path(context.results_dir) / "circuit.cir").read_text(encoding="utf-8")) == retuned
+    assert context.model_parameters == palace.calls[0]["model_parameters"]
+
+
+def test_retune_follows_every_iteration_that_misses_the_goals(tmp_path, monkeypatch):
+    _, context, simulator, palace = _run_with_fine_tuning(tmp_path, monkeypatch, retune_trials=2)
+
+    assert [call["iteration"] for call in palace.calls] == [1, 2, 3]
+    assert not context.goal_achieved
+    for iteration, call in enumerate(palace.calls, start=1):
+        centre = float(call["netlist_parameters"]["R1"])
+        searched = _retune_simulations(simulator, iteration)
+        assert searched[0] == centre
+        assert all(abs(value - centre) <= max(0.3 * centre, 2.0) for value in searched)
+
+
+def test_without_retune_trials_there_is_no_retune(tmp_path, monkeypatch):
+    _, context, _, _ = _run_with_fine_tuning(tmp_path, monkeypatch)
+
+    assert not list((Path(context.results_dir) / "fine_tuning").glob("retune_*"))
+
+
+def _netlist_variable(name: str, low: float, high: float, step: float | None = None, **extra) -> OptimizationProperty:
+    return OptimizationProperty(name, OptimizationType.NETLIST_VARIABLE, low, high, step=step, **extra)
+
+
+def test_retune_ranges_narrow_around_the_values_on_their_grid():
+    parameters = [
+        _netlist_variable("C5", 300.0, 400.0, step=1.0, unit="f"),
+        _netlist_variable("Xq1:nx", 1.0, 10.0, step=1.0),
+        _netlist_variable("R2", 0.0, 100.0),
+        _netlist_variable("C6", 0.0, 1000.0, step=1.0, linked_to="C5"),
+        OptimizationProperty("X1:width", OptimizationType.MODEL_INPUT, 1.0, 5.0),
+        _netlist_variable("C7", 0.0, 0.0, linked_to="X1:width"),
+    ]
+    values = {"C5": "377.0f", "Xq1:nx": "3.0", "R2": "0.0", "C6": "377.0f", "C7": "2.0"}
+
+    narrowed = {p.name: p for p in narrowed_around(parameters, values, fraction=0.3, min_steps=2)}
+
+    # ±30 % clipped to the range, on the grid counted from its minimum
+    assert (narrowed["C5"].min_value, narrowed["C5"].max_value) == (300.0, 400.0)
+    assert narrowed["C5"].initial_value == 377.0
+    # ±2 steps for a small integer, where ±30 % would not move it
+    assert (narrowed["Xq1:nx"].min_value, narrowed["Xq1:nx"].max_value) == (1.0, 5.0)
+    # a value of 0 without a step: ±30 % of the whole range
+    assert (narrowed["R2"].min_value, narrowed["R2"].max_value) == (0.0, 30.0)
+    # a linked variable keeps following its master; the geometry and what follows it stay
+    assert narrowed["C6"].linked_to == "C5"
+    assert set(narrowed) == {"C5", "Xq1:nx", "R2", "C6"}
+
+
+def test_retune_range_keeps_an_off_centre_grid():
+    [narrowed] = narrowed_around([_netlist_variable("L1", 0.5, 10.5, step=2.0)], {"L1": "6.5"}, 0.3, 0)
+
+    # 6.5 ± 1.95 lies on the grid 0.5, 2.5, ..., so 4.55-8.45 becomes 6.5-6.5
+    assert (narrowed.min_value, narrowed.max_value) == (6.5, 6.5)
+    [wider] = narrowed_around([_netlist_variable("L1", 0.5, 10.5, step=2.0)], {"L1": "6.5"}, 0.5, 0)
+    assert (wider.min_value, wider.max_value) == (4.5, 8.5)
+
+
+def test_retune_settings_are_checked():
+    netlist = XyceNetlistParser().parse_file(netlist_path("minimal_ac"))
+    settings: list[tuple[dict[str, Any], str]] = [
+        ({"retune_trials": -1}, "retune_trials"),
+        ({"retune_range": 0.0}, "retune_range"),
+        ({"retune_min_steps": 1.5}, "retune_min_steps"),
+    ]
+    for setting, match in settings:
+        with pytest.raises(ConfigurationError, match=match):
+            COBRA(netlist=netlist, component_onnx_mapping={}, **setting)
 
 
 # ---------------------------------------------------------------------------
