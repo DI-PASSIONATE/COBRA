@@ -89,7 +89,7 @@ Use goal constraints with optional frequency ranges, for example:
 - -3 dB <= S21 <= 0 dB in `125-135ghz`
 - `Power_dBm[Out]` >= 10 dB at `35ghz` (single spectral line of an HB run)
 
-The goal dialog groups the parameters by the analysis that produces them (`.AC`, `.HB`, `.TRAN`) in a tab bar at the top; the netlist's own analysis is opened first, and a goal from another tab adds that analysis to the run. Below, the dialog offers the inputs the selected parameter takes: choose *Whole sweep / spectrum*, *Single frequency* (the nearest frequency of the sweep or spectral line is used) or *Frequency range*. Goals that only make sense one way are restricted accordingly — an isolation goal, for example, has no max value and always targets a single frequency.
+The goal dialog groups the parameters by the analysis that produces them (`.AC`, `.HB`, `.TRAN`) in a tab bar at the top; the netlist's own analysis is opened first, and a goal from another tab adds that analysis to the run. Below, the dialog offers the inputs the selected parameter takes: choose *Whole sweep / spectrum*, *Single frequency* (the nearest frequency of the sweep or spectral line is used) or *Frequency range*. Goals that only make sense one way are restricted accordingly — an isolation goal, for example, has no max value and always targets a single frequency. *Scale* is the unit a miss of the limit is measured in (e.g. `1` for one dB); left empty, a miss counts relative to the limit, or in units of 1 for a limit of 0.
 
 !!! note
     Goals are transformed into penalty values. Satisfying goals yields zero or negative penalty (reward), violations increase positive penalty.

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+- `design_goals[].scale`: the unit a goal's miss of its bound is measured in, e.g. `1.0`
+  for one dB. In the GUI: the goal dialog's *Scale*.
+
+### Changed
+- A goal with a bound of 0 measures its miss in units of 1 instead of dividing it by 1e-9;
+  a conversion gain goal of at least 0 dB gave penalties of 1e17 to 1e20 and outweighed
+  every other goal.
+- A goal's penalty is the mean over the points of its frequency range instead of their sum,
+  so a band goal no longer weighs as many times more than a single-frequency goal as its
+  band has points. Penalty values of band goals in logs and plots are smaller by that count.
+
 ## 3.2.0 - 2026-11-06
 
 ### Added

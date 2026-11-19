@@ -41,13 +41,35 @@ def test_malformed_frequency_range_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_two_sided_penalty_is_zero_inside_and_sums_violations_outside():
+def test_two_sided_penalty_is_zero_inside_and_averages_violations_outside():
     assert calculate_array_penalty(-20.0, -10.0, np.array([-15.0, -12.0])) == 0.0
 
     values = np.array([-30.0, -15.0, -5.0])
     below = ((-20.0 - -30.0) / 20.0) ** 2
     above = ((-5.0 - -10.0) / 10.0) ** 2
-    assert calculate_array_penalty(-20.0, -10.0, values) == pytest.approx(below + above)
+    assert calculate_array_penalty(-20.0, -10.0, values) == pytest.approx((below + above) / 3)
+
+
+def test_band_goal_weighs_as_much_as_a_single_point_goal():
+    """A goal's share must not grow with the number of sweep points in its band."""
+    single = calculate_array_penalty(None, -10.0, np.array([-8.0]))
+    band = calculate_array_penalty(None, -10.0, np.full(11, -8.0))
+    assert band == pytest.approx(single)
+    assert calculate_array_penalty(None, -10.0, np.full(11, -12.0)) == pytest.approx(
+        calculate_array_penalty(None, -10.0, np.array([-12.0]))
+    )
+
+
+def test_limit_of_zero_measures_the_deviation_in_units_of_one():
+    """Dividing by |0| + 1e-9 made a 1 dB miss of a 0 dB gain goal cost 1e18."""
+    assert calculate_array_penalty(0.0, None, np.array([-1.0])) == pytest.approx(1.0)
+    assert calculate_array_penalty(-3.0, 0.0, np.array([0.5])) == pytest.approx(0.25)
+
+
+def test_scale_replaces_the_relative_deviation():
+    assert calculate_array_penalty(None, -10.0, np.array([-8.0]), 1.0) == pytest.approx(4.0)
+    assert calculate_array_penalty(-20.0, -10.0, np.array([-21.0, -9.0]), 0.5) == pytest.approx(4.0)
+    assert calculate_array_penalty(0.0, None, np.array([2.0]), 2.0) == pytest.approx(-1.0)
 
 
 def test_single_sided_penalty_rewards_margin_but_any_violation_dominates():
@@ -90,6 +112,17 @@ def test_penalty_applies_the_weight_and_caches_the_value():
     assert goal.penalty(SimulationResult()) == pytest.approx(unweighted * 3.0)
     assert goal.current_value == pytest.approx(np.array([20.0]))
     assert goal.current_penalty == pytest.approx(unweighted * 3.0)
+
+
+def test_goal_passes_its_scale_to_the_loss():
+    goal = DesignGoal(_parameter("gain", value=-2.0), min_value=0.0, scale=0.5)
+    assert goal.penalty(SimulationResult()) == pytest.approx(16.0)
+
+
+@pytest.mark.parametrize("scale", [0.0, -1.0])
+def test_goal_rejects_a_scale_that_is_not_positive(scale):
+    with pytest.raises(ValueError, match="scale must be positive"):
+        DesignGoal(_parameter("gain"), min_value=0.0, scale=scale)
 
 
 def test_check_goals_succeeds_only_when_every_goal_is_met():

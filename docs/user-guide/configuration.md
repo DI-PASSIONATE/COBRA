@@ -287,7 +287,13 @@ fine-tuning would round them to a different geometry.
 
 Every goal needs a `parameter`, a `kind`, and at least one of `min_value` and
 `max_value`. `weight` (default `1.0`, must be positive) sets its share of the
-penalty. `frequency_range` is a single frequency (`"130GHz"`, the nearest point
+penalty. A goal's penalty is the mean, over the points of its frequency range, of the
+squared miss of its bound divided by `scale`. Without `scale` the miss is relative to
+the bound (a miss of 1 dB at −10 dB counts as 0.1), or measured in units of 1 for a
+bound of 0, such as a conversion gain of at least 0 dB. Give `scale` (must be positive),
+for example `1.0` for dB goals, to measure every goal of a run in the same unit.
+
+`frequency_range` is a single frequency (`"130GHz"`, the nearest point
 or spectral line) or a band (`"125-135GHz"`, every point or line inside counts);
 `null` uses the whole sweep.
 

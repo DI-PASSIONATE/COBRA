@@ -389,13 +389,32 @@ def noise_figure_formula(column: str) -> Callable[[SimulationResult, str | None]
 # ----------------------------------------------------------------------------
 # Penalty functions for design goals
 # ----------------------------------------------------------------------------
-def calculate_array_penalty(min_value: float | None, max_value: float | None, values: np.ndarray | float) -> float:
+def deviation_scale(bound: float, scale: float | None) -> float:
+    """The unit a goal's deviation from *bound* is measured in.
+
+    *scale* when given; otherwise ``|bound|``, so the penalty is relative to the limit,
+    or 1 for a limit of 0, which has no size to be relative to (a gain goal of 0 dB
+    measures its deviation in dB, not as a multiple of 1e-9).
+    """
+    if scale is not None:
+        return scale
+    return abs(bound) if bound != 0 else 1.0
+
+
+def calculate_array_penalty(
+    min_value: float | None,
+    max_value: float | None,
+    values: np.ndarray | float,
+    scale: float | None = None,
+) -> float:
         """
         Calculate a penalty for an array of values based on the provided min and max constraints.
-        The penalty is calculated as the sum of squared normalized deviations from the constraints.
+        The penalty is the mean over the values of their squared deviations from the constraints,
+        each divided by :func:`deviation_scale`. The mean rather than the sum keeps a goal's share
+        of the total independent of how many sweep points or spectral lines its band holds.
         If a value is within the range [min_value, max_value], it contributes 0 to the penalty.
         If it is outside this range, it contributes a positive value proportional to the square of its normalized deviation from the nearest bound.
-        If it is within the range, it contributes a negative value proportional to the square of its normalized deviation from the nearest bound.
+        If a goal has only one bound and every value meets it, the penalty is negative: minus the mean squared normalized distance from the bound.
 
         Parameters
         ----------
@@ -406,41 +425,40 @@ def calculate_array_penalty(min_value: float | None, max_value: float | None, va
         values : Union[np.ndarray, float]
             The value(s) to evaluate. Scalars — as returned by single-valued parameters
             such as SRF — are treated as a one-element array.
+        scale : Optional[float]
+            Unit of the deviation; ``None`` measures it relative to the bound (see
+            :func:`deviation_scale`).
 
         """
         values = np.atleast_1d(np.asarray(values, dtype=float))
 
-        eps = 1e-9
+        count = max(values.size, 1)
         loss_val = 0.0
 
         if min_value is not None and max_value is not None:
             below_mask = values < min_value
             above_mask = values > max_value
             if np.any(below_mask):
-                diff = (min_value - values[below_mask]) / (
-                    np.abs(min_value) + eps
-                )
+                diff = (min_value - values[below_mask]) / deviation_scale(min_value, scale)
                 loss_val += np.sum(diff**2)
             if np.any(above_mask):
-                diff = (values[above_mask] - max_value) / (
-                    np.abs(max_value) + eps
-                )
+                diff = (values[above_mask] - max_value) / deviation_scale(max_value, scale)
                 loss_val += np.sum(diff**2)
-            return float(loss_val)
+            return float(loss_val / count)
 
         if min_value is not None:
-            denom = np.abs(min_value) + eps
+            denom = deviation_scale(min_value, scale)
             if np.any(values < min_value):
                 violating = values[values < min_value]
-                return float(np.sum(((min_value - violating) / denom) ** 2))
-            return float(-np.sum(((values - min_value) / denom) ** 2))
+                return float(np.sum(((min_value - violating) / denom) ** 2) / count)
+            return float(-np.sum(((values - min_value) / denom) ** 2) / count)
 
         if max_value is not None:
-            denom = np.abs(max_value) + eps
+            denom = deviation_scale(max_value, scale)
             if np.any(values > max_value):
                 violating = values[values > max_value]
-                return float(np.sum(((violating - max_value) / denom) ** 2))
-            return float(-np.sum(((max_value - values) / denom) ** 2))
+                return float(np.sum(((violating - max_value) / denom) ** 2) / count)
+            return float(-np.sum(((max_value - values) / denom) ** 2) / count)
 
         raise ValueError("At least one of min_value or max_value must be provided.")
 
