@@ -79,6 +79,7 @@ from .dialogs import AnalysisVariantDialog, DesignGoalDialog, OptimizationParamD
 from .geometry_selector import GeometrySelectorWidget
 from .help_texts import TUTORIAL_HTML, tooltip
 from .hf_model_browser import HuggingFaceModelDialog
+from .sections import CollapsibleSection
 from .theme import ThemeTokens, icon, refresh_style, style_plot
 from .theme import manager as theme_manager
 from .worker import OptimizationWorker
@@ -238,28 +239,47 @@ class MainWindow(QMainWindow):
         config_group = QGroupBox("Configuration")
         config_layout = QVBoxLayout(config_group)
 
+        # The panel is a stack of collapsible sections; each shows a one-line summary
+        # while collapsed, and keeps rarely changed settings behind an Advanced fold.
+        self.circuit_section = CollapsibleSection("Netlist and models", self._theme)
+        self.analysis_section = CollapsibleSection("Analyses", self._theme)
+        self.optimizer_section = CollapsibleSection("Optimizer", self._theme)
+        self.simulator_section = CollapsibleSection("Simulator", self._theme, expanded=False)
+        self.finetune_section = CollapsibleSection("Fine-tuning", self._theme, expanded=False)
+        self._sections = (
+            self.circuit_section,
+            self.analysis_section,
+            self.optimizer_section,
+            self.simulator_section,
+            self.finetune_section,
+        )
+        circuit_form = self.circuit_section.form
+        analysis_form = self.analysis_section.form
+        optimizer_form = self.optimizer_section.form
+        finetune_form = self.finetune_section.form
+        finetune_advanced = self.finetune_section.advanced_form
+
         # 1. File Selection
-        self.config_form_layout = QFormLayout()
 
         self.netlist_edit = QLineEdit()
         self.netlist_btn = self._browse_button(tooltip("netlist_btn"), self.on_netlist_selected)
         h_net = QHBoxLayout()
         h_net.addWidget(self.netlist_edit)
         h_net.addWidget(self.netlist_btn)
-        self.config_form_layout.addRow("Netlist", h_net)
+        circuit_form.addRow("Netlist", h_net)
 
         self.sim_type_value_label = QLabel()
         self.sim_type_value_label.setToolTip(tooltip("sim_type_value_label"))
-        self.config_form_layout.addRow("Simulation type", self.sim_type_value_label)
-        self.config_form_layout.setRowVisible(self.sim_type_value_label, False)
+        analysis_form.addRow("Simulation type", self.sim_type_value_label)
+        analysis_form.setRowVisible(self.sim_type_value_label, False)
 
         # Analysis point — the node whose HB / transient spectrum is plotted and used by
         # the power, gain and isolation goals.
         self.analysis_point_combo = QComboBox()
         self.analysis_point_combo.setToolTip(tooltip("analysis_point_combo"))
         self.analysis_point_combo.currentIndexChanged.connect(self.on_analysis_point_changed)
-        self.config_form_layout.addRow("Analysis point", self.analysis_point_combo)
-        self.config_form_layout.setRowVisible(self.analysis_point_combo, False)
+        analysis_form.addRow("Analysis point", self.analysis_point_combo)
+        analysis_form.setRowVisible(self.analysis_point_combo, False)
 
         # Simulation Parameters — populated dynamically when a netlist is loaded.
         # Shows editable fields for the sweep directive (e.g. .AC points, start/stop freq).
@@ -268,14 +288,14 @@ class MainWindow(QMainWindow):
         self.sim_params_layout.setContentsMargins(0, 0, 0, 0)
         self.sim_params_layout.setSpacing(self._theme.tokens.space_2)
         self.sim_params_container.setVisible(False)
-        self.config_form_layout.addRow("", self.sim_params_container)
+        analysis_form.addRow("", self.sim_params_container)
 
         self.component_onnx_container = QWidget()
         self.component_onnx_layout = QVBoxLayout(self.component_onnx_container)
         self.component_onnx_layout.setContentsMargins(0, 0, 0, 0)
         self.component_onnx_layout.setSpacing(self._theme.tokens.space_2)
         self.component_onnx_container.setVisible(False)
-        self.config_form_layout.addRow("", self.component_onnx_container)
+        circuit_form.addRow("", self.component_onnx_container)
 
         # A subcircuit (e.g. an LE model) can be the surrogate too, replaced wherever it is used.
         self.surrogate_master_combo = QComboBox()
@@ -293,14 +313,14 @@ class MainWindow(QMainWindow):
         surrogate_master_layout.addWidget(self.surrogate_master_combo, stretch=1)
         surrogate_master_layout.addWidget(surrogate_master_btn)
         surrogate_master_layout.addWidget(surrogate_master_clear_btn)
-        self.config_form_layout.addRow("Subcircuit surrogate", self.surrogate_master_row)
-        self.config_form_layout.setRowVisible(self.surrogate_master_row, False)
+        circuit_form.addRow("Subcircuit surrogate", self.surrogate_master_row)
+        circuit_form.setRowVisible(self.surrogate_master_row, False)
 
         # ---- Optimizer selection + dynamic per-optimizer options ----
         self.optimizer_combo = QComboBox()
         self.optimizer_combo.addItem("OptunaOptimizer", OptunaOptimizer)
         self.optimizer_combo.addItem("GradientDescentOptimizer", GradientDescentOptimizer)
-        self.config_form_layout.addRow("Optimizer", self.optimizer_combo)
+        optimizer_form.addRow("Optimizer", self.optimizer_combo)
         self.optimizer_widgets: dict[str, QWidget] = {}
         self.optimizer_combo.currentIndexChanged.connect(self.update_optimizer_options)
 
@@ -311,7 +331,7 @@ class MainWindow(QMainWindow):
         self.max_iter_spin.setRange(1, 99999)
         self.max_iter_spin.setValue(500)
         self.max_iter_spin.setToolTip(_cobra_tips.get("max_iterations", ""))
-        self.config_form_layout.addRow("Max iterations", self.max_iter_spin)
+        optimizer_form.addRow("Max iterations", self.max_iter_spin)
 
         # Parallelism: N independent trials or one N-rank MPI simulation, never both.
         # Maps onto ``parallel_trials`` and the simulator's MPI settings on save/load.
@@ -325,65 +345,63 @@ class MainWindow(QMainWindow):
         h_parallel.addWidget(self.parallel_mode_combo, stretch=1)
         h_parallel.addWidget(QLabel("Processes"))
         h_parallel.addWidget(self.parallel_procs_spin)
-        self.config_form_layout.addRow("Parallelism", h_parallel)
+        optimizer_form.addRow("Parallelism", h_parallel)
 
         # ---- Simulator selection + dynamic per-simulator options ----
         self.simulator_combo = QComboBox()
         self.simulator_combo.addItem("XyceSimulator", XyceSimulator)
         self.simulator_combo.addItem("VacaskSimulator", VacaskSimulator)
-        self.config_form_layout.addRow("Simulator", self.simulator_combo)
+        self.simulator_section.form.addRow("Simulator", self.simulator_combo)
         self.simulator_widgets: dict[str, QWidget] = {}
         self.simulator_combo.currentIndexChanged.connect(self.update_simulator_options)
 
         # ---- Optional EM fine-tuning with Palace ----
-        self.finetune_cb = QCheckBox("Perform fine-tuning")
+        # Its on/off switch sits in the section header, visible while the section is collapsed.
+        self.finetune_cb = QCheckBox("Enabled")
         self.finetune_cb.setToolTip(tooltip("finetune_cb"))
-        self.config_form_layout.addRow("", self.finetune_cb)
+        self.finetune_section.add_header_widget(self.finetune_cb)
 
         self.palace_edit = QLineEdit("palace")
         self.palace_edit.setToolTip(_cobra_tips.get("palace_fine_tuning_command", ""))
-        self.config_form_layout.addRow("Palace command", self.palace_edit)
+        finetune_form.addRow("Palace command", self.palace_edit)
 
         self.palace_procs_spin = QSpinBox()
         self.palace_procs_spin.setRange(1, 4096)
         self.palace_procs_spin.setValue(DEFAULT_PALACE_PROCESSES)
         self.palace_procs_spin.setToolTip(_cobra_tips.get("palace_fine_tuning_processes", ""))
-        self.config_form_layout.addRow("Palace processes", self.palace_procs_spin)
+        finetune_advanced.addRow("Palace processes", self.palace_procs_spin)
 
         self.ft_iter_spin = QSpinBox()
         self.ft_iter_spin.setRange(1, 100)
         self.ft_iter_spin.setValue(3)
         self.ft_iter_spin.setToolTip(_cobra_tips.get("fine_tuning_iterations", ""))
-        self.config_form_layout.addRow("Fine-tuning iterations", self.ft_iter_spin)
+        finetune_form.addRow("Fine-tuning iterations", self.ft_iter_spin)
 
         self.ft_optimizer_combo = QComboBox()
         self.ft_optimizer_combo.addItem("Reuse surrogate optimizer", "reuse")
         self.ft_optimizer_combo.addItem("Gradient descent", "gradient_descent")
         self.ft_optimizer_combo.setToolTip(tooltip("ft_optimizer_combo"))
-        self.config_form_layout.addRow("Fine-tuning optimizer", self.ft_optimizer_combo)
+        finetune_form.addRow("Fine-tuning optimizer", self.ft_optimizer_combo)
 
         # Retune of the circuit values with an iteration's EM models fixed
         self.retune_trials_spin = QSpinBox()
         self.retune_trials_spin.setRange(0, 1_000_000)
         self.retune_trials_spin.setSpecialValueText("Off")
         self.retune_trials_spin.setToolTip(_cobra_tips.get("retune_trials", ""))
-        self.config_form_layout.addRow("Retune trials", self.retune_trials_spin)
+        finetune_form.addRow("Retune trials", self.retune_trials_spin)
         self.retune_range_spin = QDoubleSpinBox()
         self.retune_range_spin.setRange(1.0, 1000.0)
         self.retune_range_spin.setDecimals(1)
         self.retune_range_spin.setValue(30.0)
         self.retune_range_spin.setToolTip(_cobra_tips.get("retune_range", ""))
-        self.config_form_layout.addRow("Retune range (±%)", self.retune_range_spin)
+        finetune_advanced.addRow("Retune range (±%)", self.retune_range_spin)
         self.retune_steps_spin = QSpinBox()
         self.retune_steps_spin.setRange(0, 1000)
         self.retune_steps_spin.setValue(2)
         self.retune_steps_spin.setToolTip(_cobra_tips.get("retune_min_steps", ""))
-        self.config_form_layout.addRow("Retune min steps", self.retune_steps_spin)
+        finetune_advanced.addRow("Retune min steps", self.retune_steps_spin)
         self.retune_trials_spin.valueChanged.connect(self._update_retune_fields)
-        self._finetune_fields = (
-            self.palace_edit, self.palace_procs_spin, self.ft_iter_spin, self.ft_optimizer_combo,
-            self.retune_trials_spin, self.retune_range_spin, self.retune_steps_spin,
-        )
+        self.finetune_section.update_advanced()
 
         self.component_geometry_container = QWidget()
         self.component_geometry_layout = QVBoxLayout(self.component_geometry_container)
@@ -391,6 +409,7 @@ class MainWindow(QMainWindow):
         self.component_geometry_layout.setSpacing(self._theme.tokens.space_2)
         self.component_geometry_container.setVisible(False)
         self.component_geometry_selectors: dict[str, GeometrySelectorWidget] = {}
+        finetune_form.addRow("", self.component_geometry_container)
 
         # Fine-tuning fields and per-component geometry selectors follow the checkbox.
         self.on_finetune_toggled(False)
@@ -407,8 +426,10 @@ class MainWindow(QMainWindow):
         self.config_scroll_widget = QWidget()
         self.config_scroll_layout = QVBoxLayout(self.config_scroll_widget)
         self.config_scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.config_scroll_layout.addLayout(self.config_form_layout)
-        self.config_scroll_layout.addWidget(self.component_geometry_container)
+        self.config_scroll_layout.setSpacing(self._theme.tokens.space_2)
+        for section in self._sections:
+            self.config_scroll_layout.addWidget(section)
+            section.toggled.connect(self._refresh_section_summaries)
         self.config_scroll_layout.addStretch()
         self.config_scroll_area.setWidget(self.config_scroll_widget)
 
@@ -615,6 +636,7 @@ class MainWindow(QMainWindow):
         self.update_simulator_options()
         self._update_plot_view_availability()
         self.set_active_panel("config")
+        self._refresh_section_summaries()
 
     # ------------------------------------------------------------------
     # Appearance
@@ -1053,64 +1075,87 @@ class MainWindow(QMainWindow):
                     self.s_param_plot.addItem(item)
                     self.overlay_items.append(item)
 
-    def _form_row_of(self, widget: QWidget) -> int:
-        """Row of *widget* in the configuration form, or -1 when it is not in it.
+    def _form_row_of(self, widget: QWidget) -> tuple[QFormLayout | None, int]:
+        """The section form holding *widget* and its row there, or ``(None, -1)``.
 
         ``QFormLayout.getWidgetPosition`` is annotated as returning ``object`` by
         the PySide6 stubs; at runtime it yields a ``(row, role)`` tuple.
         """
-        row, _role = cast("tuple[int, int]", self.config_form_layout.getWidgetPosition(widget))
-        return row
+        for section in self._sections:
+            for form in section.forms():
+                row, _role = cast("tuple[int, int]", form.getWidgetPosition(widget))
+                if row >= 0:
+                    return form, row
+        return None, -1
+
+    def _set_row_visible(self, widget: QWidget, visible: bool) -> None:
+        """Show or hide *widget*'s row in whichever section form holds it."""
+        form, row = self._form_row_of(widget)
+        if form is not None:
+            form.setRowVisible(row, visible)
 
     @staticmethod
     def _setting_label(name: str) -> str:
         return name.replace("_", " ").capitalize()
 
-    def _rebuild_backend_options(self, combo: QComboBox, widgets: dict[str, QWidget]) -> None:
+    def _rebuild_backend_options(
+        self, combo: QComboBox, widgets: dict[str, QWidget], section: CollapsibleSection
+    ) -> None:
         """Replace the settings rows under *combo* with those of its selected class.
 
         Classes that declare a ``_settings`` list of ``CobraSetting`` descriptors get
-        typed widgets with tooltips; others fall back to their ``__init__`` signature.
+        typed widgets with tooltips, the ``advanced`` ones in *section*'s Advanced fold;
+        others fall back to their ``__init__`` signature.
         """
-        rows = sorted({row for w in widgets.values() if (row := self._form_row_of(w)) >= 0}, reverse=True)
-        for row in rows:
-            result = self.config_form_layout.takeRow(row)
+        for widget in widgets.values():
+            form, row = self._form_row_of(widget)
+            if form is None:
+                continue
+            result = form.takeRow(row)
             for item in (result.labelItem, result.fieldItem):
-                widget = item.widget() if item else None
-                if widget:
-                    widget.hide()  # out of the layout, it would show at (0, 0) until deleted
-                    widget.deleteLater()
+                taken = item.widget() if item else None
+                if taken:
+                    taken.hide()  # out of the layout, it would show at (0, 0) until deleted
+                    taken.deleteLater()
         widgets.clear()
 
         backend_cls = combo.currentData()
         if not backend_cls:
+            section.update_advanced()
             return
-        idx = self._form_row_of(combo) + 1
+        idx = self._form_row_of(combo)[1] + 1
 
         cobra_settings = getattr(backend_cls, "_settings", None)
         if cobra_settings:
             for setting in cobra_settings:
                 widget = self._widget_for_setting(setting.dtype, setting.default, setting.choices)
                 widget.setToolTip(setting.description)
-                self.config_form_layout.insertRow(idx, self._setting_label(setting.name), widget)
+                if setting.advanced:
+                    section.advanced_form.addRow(self._setting_label(setting.name), widget)
+                else:
+                    section.form.insertRow(idx, self._setting_label(setting.name), widget)
+                    idx += 1
                 widgets[setting.name] = widget
-                idx += 1
+            section.update_advanced()
             return
 
         try:
             sig = inspect.signature(backend_cls.__init__)
         except ValueError:
+            section.update_advanced()
             return
         for name, param in sig.parameters.items():
             if name in ("self", "args", "kwargs"):
                 continue
             widget = self._widget_for_setting(param.annotation, param.default)
-            self.config_form_layout.insertRow(idx, self._setting_label(name), widget)
+            section.form.insertRow(idx, self._setting_label(name), widget)
             widgets[name] = widget
             idx += 1
+        section.update_advanced()
 
     def update_optimizer_options(self):
-        self._rebuild_backend_options(self.optimizer_combo, self.optimizer_widgets)
+        self._rebuild_backend_options(self.optimizer_combo, self.optimizer_widgets, self.optimizer_section)
+        self._refresh_section_summaries()
 
     def _on_simulator_changed(self) -> None:
         """Switch the netlist dialect: a loaded netlist is read again by the new simulator."""
@@ -1120,12 +1165,12 @@ class MainWindow(QMainWindow):
             self.parse_and_update_components(path)
 
     def update_simulator_options(self):
-        self._rebuild_backend_options(self.simulator_combo, self.simulator_widgets)
+        self._rebuild_backend_options(self.simulator_combo, self.simulator_widgets, self.simulator_section)
         # The parallelism selector owns the simulator's MPI settings.
         for name in (_SIMULATOR_MPI_FLAG, _SIMULATOR_MPI_PROCESSES):
             widget = self.simulator_widgets.get(name)
             if widget is not None:
-                self.config_form_layout.setRowVisible(widget, False)
+                self._set_row_visible(widget, False)
         previous = self.parallel_mode_combo.currentData()
         self.parallel_mode_combo.blockSignals(True)
         self.parallel_mode_combo.clear()
@@ -1169,10 +1214,50 @@ class MainWindow(QMainWindow):
         return widget
 
     def on_finetune_toggled(self, checked):
-        for field in self._finetune_fields:
-            self.config_form_layout.setRowVisible(field, checked)
+        # Switching fine-tuning on opens its settings; off, they stay but do not apply.
+        self.finetune_section.body.setEnabled(checked)
+        self.finetune_section.set_expanded(checked)
         self._update_retune_fields()
         self._update_geometry_selectors_visibility()
+        self._refresh_section_summaries()
+
+    def _refresh_section_summaries(self, *_args) -> None:
+        """The one-line summary each section shows while collapsed."""
+        netlist = Path(self.netlist_edit.text().strip()).name or "No netlist"
+        components = len(self.component_onnx_edits)
+        missing = sum(not edit.text().strip() for edit in self.component_onnx_edits.values())
+        circuit = netlist
+        if components:
+            circuit += f" · {components} component{'s' if components != 1 else ''}"
+            if missing:
+                circuit += f", {missing} without a model"
+        self.circuit_section.set_summary(circuit)
+
+        analyses = self.sim_type_value_label.text() or "No netlist"
+        point_shown = self.analysis_section.form.isRowVisible(self.analysis_point_combo)
+        if point_shown and self.analysis_point:
+            analyses += f" · analysis point {self.analysis_point}"
+        self.analysis_section.set_summary(analyses)
+
+        processes = self.parallel_procs_spin.value()
+        if self.parallel_mode_combo.currentData() == _PARALLEL_SIMULATOR:
+            parallel = f"MPI ×{processes}"
+        elif processes > 1:
+            parallel = f"{processes} parallel trials"
+        else:
+            parallel = "one trial at a time"
+        self.optimizer_section.set_summary(
+            f"{self.optimizer_combo.currentText()} · up to {self.max_iter_spin.value()} iterations · {parallel}"
+        )
+        self.simulator_section.set_summary(self.simulator_combo.currentText())
+
+        if not self.finetune_cb.isChecked():
+            finetune = "Off"
+        else:
+            finetune = f"Palace ×{self.palace_procs_spin.value()} · {self.ft_iter_spin.value()} iterations"
+            if self.retune_trials_spin.value():
+                finetune += f" · retune {self.retune_trials_spin.value()} trials"
+        self.finetune_section.set_summary(finetune)
 
     def _update_retune_fields(self) -> None:
         """The retune's range settings matter only when it runs."""
@@ -1519,6 +1604,7 @@ class MainWindow(QMainWindow):
                 raise ConfigurationError(f"Geometry references unknown component '{component}'")
             selector.apply_configuration(geometry)
         self._update_geometry_selectors_visibility()
+        self._refresh_section_summaries()
 
     def save_configuration(self) -> None:
         suggested = self._last_config_path or str(Path.cwd() / "cobra_config.json")
@@ -1583,7 +1669,7 @@ class MainWindow(QMainWindow):
             self._rebuild_design_parameters()
 
             self.sim_type_value_label.setText(sim_type.display_name)
-            self.config_form_layout.setRowVisible(self.sim_type_value_label, True)
+            self._set_row_visible(self.sim_type_value_label, True)
 
             # Populate editable simulation-parameter fields for required sim types
             self._refresh_sim_params_for_goals()
@@ -1600,8 +1686,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Netlist parsing error", f"Failed to parse netlist:\n{e!s}")
             self.clear_component_onnx_selectors()
             self._netlist_sim_type = None
-            self.config_form_layout.setRowVisible(self.sim_type_value_label, False)
+            self._set_row_visible(self.sim_type_value_label, False)
             self._populate_sim_param_widgets(set())
+        self._refresh_section_summaries()
 
     @property
     def analysis_point(self) -> str | None:
@@ -1710,7 +1797,7 @@ class MainWindow(QMainWindow):
         self._populate_sim_param_widgets(required)
 
         show_point = bool(required & _LARGE_SIGNAL_TYPES) and bool(self._probe_nodes)
-        self.config_form_layout.setRowVisible(self.analysis_point_combo, show_point)
+        self._set_row_visible(self.analysis_point_combo, show_point)
         self._update_plot_view_availability()
 
     def _named_analysis_parameters(self) -> bool:
@@ -1875,7 +1962,7 @@ class MainWindow(QMainWindow):
         for name in candidates:
             pins = netlist.masters[name]
             self.surrogate_master_combo.addItem(f"{name} ({len(pins)} pins)", name)
-        self.config_form_layout.setRowVisible(
+        self._set_row_visible(
             self.surrogate_master_row, bool(candidates or self._surrogate_masters)
         )
 

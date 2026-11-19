@@ -47,6 +47,7 @@ class GradientDescentOptimizer(BaseOptimizer):
                 "Enable multi-objective optimisation.\n"
                 "When disabled, all goal losses are summed into a single scalar."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="learning_rate",
@@ -65,6 +66,7 @@ class GradientDescentOptimizer(BaseOptimizer):
                 "Distance of the gradient probes: 1 probes at 10 % of the parameter range,\n"
                 "at least one step. Increase to smooth out noise; decrease for fine refinement."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="random_seed",
@@ -73,6 +75,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             description=(
                 "Random seed for reproducibility. Use -1 for a non-deterministic run."
             ),
+            advanced=True,
         ),
     ]
 

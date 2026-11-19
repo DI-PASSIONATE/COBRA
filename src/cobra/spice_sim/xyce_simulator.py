@@ -90,6 +90,7 @@ class XyceSimulator(BaseSimulator):
                 "Increases pre-processing time but prevents non-physical\n"
                 "active behaviour in the circuit simulator."
             ),
+            advanced=True,
         ),
     ]
 

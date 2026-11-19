@@ -36,6 +36,7 @@ class OptunaOptimizer(BaseOptimizer):
                 "Enable multi-objective optimisation (Pareto front).\n"
                 "When disabled, per-goal losses are aggregated into a single scalar."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="sampler",
@@ -66,6 +67,7 @@ class OptunaOptimizer(BaseOptimizer):
                 ("SuccessiveHalvingPruner", "successive_halving"),
                 ("HyperbandPruner", "hyperband"),
             ],
+            advanced=True,
         ),
         CobraSetting(
             name="random_seed",
@@ -76,6 +78,7 @@ class OptunaOptimizer(BaseOptimizer):
                 "A run repeats only with parallel_trials = 1: concurrent trials finish in\n"
                 "an order that varies."
             ),
+            advanced=True,
         ),
     ]
 

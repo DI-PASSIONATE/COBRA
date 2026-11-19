@@ -88,6 +88,7 @@ class VacaskSimulator(BaseSimulator):
                 "0 lets VACASK pick (honours OMP_NUM_THREADS). With parallel trials,\n"
                 "keep this at 1 so the trials do not compete for cores."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="vector_fit_max_order",
@@ -98,6 +99,7 @@ class VacaskSimulator(BaseSimulator):
                 "Higher follows the S-parameters more closely; the fit stops below it\n"
                 "when more poles no longer help."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="enforce_passivity",
@@ -108,6 +110,7 @@ class VacaskSimulator(BaseSimulator):
                 "Increases pre-processing time but prevents non-physical\n"
                 "active behaviour in the circuit simulator."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="surrogate_thermal_noise",
@@ -119,6 +122,7 @@ class VacaskSimulator(BaseSimulator):
                 "enforce_passivity. A fit that is not strictly passive is retried at\n"
                 "lower orders; if none gets the noise, the trial is penalised."
             ),
+            advanced=True,
         ),
     ]
 
