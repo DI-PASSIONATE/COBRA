@@ -303,3 +303,27 @@ def test_malformed_constraints_are_an_error(config_dir: Path, monkeypatch):
     assert has_errors(report)
     assert any(message.startswith("The run would refuse this model") for message in messages)
     assert not any("declares no usable frequency range" in message for message in messages)
+
+
+def test_analysis_variants_are_listed_and_checked_against_the_netlist(config_dir: Path):
+    variants = [
+        {"name": "HB_r60", "analysis": "HB", "netlist_values": {"R1": 60}},
+        {"name": "HB_bad", "analysis": "HB", "netlist_values": {"R9": 60}},
+    ]
+    goal = {
+        "parameter": "HB_r60:Power_dBm[OUT]", "frequency_range": "85GHz", "max_value": -30.0,
+        "kind": "power_dbm", "node": "OUT", "analysis": "HB_r60",
+    }
+    path = _hb_config(config_dir, "85GHz", analysis_variants=variants)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["design_goals"].append(goal)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    report = inspect_path(path, check_models=False)
+
+    assert isinstance(report, ConfigurationReport)
+    errors = [issue for issue in all_issues(report) if issue.location.startswith("analysis_variants")]
+    assert [issue.location for issue in errors] == ["analysis_variants.HB_bad"]
+    assert report.design_goals[1].valid
+    assert report.design_goals[1].simulation_type == "HB_r60 (.HB)"
+    assert "HB_r60" in render_report(report)
