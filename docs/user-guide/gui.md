@@ -14,6 +14,14 @@ cobra
 
 ## What You Can Configure
 
+The configuration panel is split into sections: *Netlist and models*, *Analyses*,
+*Optimizer*, *Simulator* and *Fine-tuning*. Click a section's title to collapse or
+expand it; a collapsed section shows a one-line summary of its settings, e.g.
+"OptunaOptimizer · up to 500 iterations · 4 parallel trials". Settings whose defaults
+suit most runs (the Optuna pruner and seed, VACASK's fit settings, the Palace process
+count, the retune's range) sit behind the section's *Advanced* fold. Fine-tuning is
+switched on with the *Enabled* box in its header, which opens its settings.
+
 - Netlist source
 - Component-to-model mapping (`.onnx` or `.sNp`). Hover over the model field to see what
   an ONNX model declares: its band, trained ranges, feasibility constraints and guarantees

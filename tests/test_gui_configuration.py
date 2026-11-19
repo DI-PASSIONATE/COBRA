@@ -240,3 +240,51 @@ def test_retune_settings_survive_the_window(tmp_path, window):
     assert (saved.retune_trials, saved.retune_range, saved.retune_min_steps) == (150, 0.25, 3)
     window.retune_trials_spin.setValue(0)
     assert not window.retune_range_spin.isEnabled()
+
+
+def test_rarely_changed_settings_are_behind_advanced(window):
+    window.simulator_combo.setCurrentText("VacaskSimulator")
+
+    advanced = window.simulator_section.advanced_form
+    basic = window.simulator_section.form
+    assert basic.getWidgetPosition(window.simulator_widgets["vacask_command"])[0] >= 0
+    assert advanced.getWidgetPosition(window.simulator_widgets["vector_fit_max_order"])[0] >= 0
+    assert window.optimizer_section.advanced_form.getWidgetPosition(window.optimizer_widgets["random_seed"])[0] >= 0
+    assert window.finetune_section.advanced_form.getWidgetPosition(window.retune_range_spin)[0] >= 0
+
+    # Switching back rebuilds both forms without leftovers.
+    window.simulator_combo.setCurrentText("XyceSimulator")
+    rows = basic.rowCount() + advanced.rowCount()
+    window.simulator_combo.setCurrentText("VacaskSimulator")
+    window.simulator_combo.setCurrentText("XyceSimulator")
+    assert basic.rowCount() + advanced.rowCount() == rows
+
+
+def test_collapsed_sections_summarise_their_settings(tmp_path, window):
+    config = _variant_config(tmp_path)
+    config.fine_tuning.enabled = True
+    config.fine_tuning.retune_trials = 200
+    config.parallel_trials = 4
+
+    window.apply_run_configuration(config)
+    for section in window._sections:
+        section.set_expanded(False)
+
+    assert window.circuit_section.summary_label.text() == "pad.sim · 1 component"
+    assert window.analysis_section.summary_label.text() == ".AC, .HB · analysis point out"
+    assert window.optimizer_section.summary_label.text() == (
+        "OptunaOptimizer · up to 10 iterations · 4 parallel trials"
+    )
+    assert window.finetune_section.summary_label.text().endswith("3 iterations · retune 200 trials")
+    assert not window.finetune_section.summary_label.isHidden()
+
+
+def test_switching_fine_tuning_opens_its_section(window):
+    window.finetune_cb.setChecked(True)
+    assert window.finetune_section.expanded
+    assert window.finetune_section.body.isEnabled()
+
+    window.finetune_cb.setChecked(False)
+    assert not window.finetune_section.expanded
+    assert not window.finetune_section.body.isEnabled()
+    assert window.finetune_section.summary_label.text() == "Off"

@@ -149,6 +149,14 @@ under the field — never a message box for validation.
 **Group boxes / cards** — `surface` fill on `canvas`, `border`, `radius_lg`,
 title in `text_muted 600`. Use them to group; do not nest more than two deep.
 
+**Sections** — the configuration panel is a stack of `CollapsibleSection`s
+(`gui/sections.py`), not nested group boxes: a header row (chevron via
+`theme.icon`, title as a `sectionToggle` button, `text_muted` summary while
+collapsed, a `border` divider below) over a form. Rarely changed settings go into
+the section's *Advanced* fold (`advancedToggle`, `tide` text); a backend setting
+lands there when its `CobraSetting` has `advanced=True`. A section's on/off switch
+(fine-tuning) sits in its header so it stays visible when collapsed.
+
 **Tables** — `surface` fill, header `surface_alt`, alternating rows off,
 `selection` for selected rows, row height ≥ 28 px. Section-header rows inside
 a table use `surface_alt`, not a Qt global colour.

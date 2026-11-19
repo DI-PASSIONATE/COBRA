@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for one dB. In the GUI: the goal dialog's *Scale*.
 
 ### Changed
+- The GUI's configuration panel is split into collapsible sections (*Netlist and
+  models*, *Analyses*, *Optimizer*, *Simulator*, *Fine-tuning*), each with a one-line
+  summary while collapsed. Rarely changed settings sit behind an *Advanced* fold per
+  section (`CobraSetting(advanced=True)` for backend settings); fine-tuning is switched
+  on in its section header.
 - A goal with a bound of 0 measures its miss in units of 1 instead of dividing it by 1e-9;
   a conversion gain goal of at least 0 dB gave penalties of 1e17 to 1e20 and outweighed
   every other goal.
