@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Retune with the EM models fixed (`fine_tuning.retune_trials`, `retune_range`,
+  `retune_min_steps`): after a fine-tuning iteration that misses the goals, the circuit
+  values are optimized again in a circuit-only run, with that iteration's Palace networks as
+  fixed component models and the netlist variables in ranges narrowed around their values
+  (±30 %, at least ±2 steps, by default).
+- `COBRA.run(results_dir=...)` writes the results to a given folder.
 - `analysis_variants`: further analyses of a type per run, each on the netlist with some
   values changed (`netlist_values`, named as `netlist_variable` parameters), e.g. the HB at
   another drive. A goal reads one by naming it as its `analysis`, with the variant's name as

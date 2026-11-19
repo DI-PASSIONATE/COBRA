@@ -1,7 +1,8 @@
+import math
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -77,6 +78,49 @@ def parse_netlist_value(value: Any) -> float:
     if not match:
         raise ValueError(f"Cannot parse numeric value from '{value}'.")
     return float(match.group(1))
+
+
+def narrowed_around(
+    parameters: list[OptimizationProperty],
+    values: Mapping[str, Any],
+    fraction: float,
+    min_steps: int = 0,
+) -> list[OptimizationProperty]:
+    """The netlist-variable parameters of *parameters*, with ranges narrowed around *values*.
+
+    Each range becomes the current value ± ``max(fraction * |value|, min_steps * step)``,
+    or ± *fraction* of the whole range for a value of 0 without a step, clipped to the
+    original range and kept on its grid, and the value becomes the start point. So
+    ``fraction=0.3, min_steps=2`` gives ±30 % for a capacitance and ±2 for a
+    transistor count ``nx``. Model inputs are left out, and so are netlist variables
+    linked to one: the geometry stays as it is. A linked netlist variable keeps
+    following its master.
+    """
+    by_name = {parameter.name: parameter for parameter in parameters}
+    narrowed: list[OptimizationProperty] = []
+    for parameter in parameters:
+        if parameter.type is not OptimizationType.NETLIST_VARIABLE:
+            continue
+        if resolve_linked_master(parameter, by_name).type is not OptimizationType.NETLIST_VARIABLE:
+            continue
+        if parameter.linked_to:
+            narrowed.append(replace(parameter, initial_value=None))
+            continue
+        value = parse_netlist_value(values[parameter.name])
+        step = parameter.step or 0.0
+        half_width = max(fraction * abs(value), min_steps * step) or fraction * (
+            parameter.max_value - parameter.min_value
+        )
+        low = max(parameter.min_value, value - half_width)
+        high = min(parameter.max_value, value + half_width)
+        if step:
+            # On the original grid, which the value lies on, counted from the original minimum.
+            low = parameter.min_value + math.ceil((low - parameter.min_value) / step - 1e-9) * step
+            high = parameter.min_value + math.floor((high - parameter.min_value) / step + 1e-9) * step
+        narrowed.append(
+            replace(parameter, min_value=round(low, 12), max_value=round(high, 12), initial_value=value)
+        )
+    return narrowed
 
 
 class BaseOptimizer(ABC):

@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import math
@@ -21,6 +22,7 @@ from cobra.optimizers.base_optimizer import (
     BaseOptimizer,
     OptimizationProperty,
     aggregate_penalty,
+    narrowed_around,
 )
 from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker
 from cobra.spice_sim.base_simulator import BaseSimulator
@@ -105,6 +107,35 @@ class COBRA:
                 "Can be a plain command name (if on PATH) or an absolute executable path."
             ),
         ),
+        CobraSetting(
+            name="retune_trials",
+            dtype=int,
+            default=0,
+            description=(
+                "Trials of a retune after each EM fine-tuning iteration that misses the goals:\n"
+                "the circuit values are optimized again with that iteration's Palace models\n"
+                "fixed, so every trial is EM-exact for the geometry and needs no Palace run.\n"
+                "0 switches it off."
+            ),
+        ),
+        CobraSetting(
+            name="retune_range",
+            dtype=float,
+            default=0.3,
+            description=(
+                "Half-width of a retune's ranges, relative to each value: 0.3 searches\n"
+                "±30 % around the values of the fine-tuning iteration."
+            ),
+        ),
+        CobraSetting(
+            name="retune_min_steps",
+            dtype=int,
+            default=2,
+            description=(
+                "Least half-width of a retune's ranges, in steps of the parameter, so that\n"
+                "a small integer such as a transistor count nx still varies (±2 by default)."
+            ),
+        ),
     ]
 
     def __init__(
@@ -117,6 +148,9 @@ class COBRA:
         palace_fine_tuning_processes: int = DEFAULT_PALACE_PROCESSES,
         fine_tuning_iterations: int = 3,
         fine_tuning_optimizer: BaseOptimizer | str | None = "reuse",
+        retune_trials: int = 0,
+        retune_range: float = 0.3,
+        retune_min_steps: int = 2,
     ):
         # Validate initialization arguments
         if not isinstance(netlist, Netlist):
@@ -136,8 +170,17 @@ class COBRA:
                 f"Components found in netlist: {set(components.keys())}"
             )
 
+        if isinstance(retune_trials, bool) or not isinstance(retune_trials, int) or retune_trials < 0:
+            raise ConfigurationError(f"retune_trials must be a non-negative integer, got {retune_trials!r}")
+        if isinstance(retune_range, bool) or not isinstance(retune_range, (int, float)) or not retune_range > 0:
+            raise ConfigurationError(f"retune_range must be positive, got {retune_range!r}")
+        if isinstance(retune_min_steps, bool) or not isinstance(retune_min_steps, int) or retune_min_steps < 0:
+            raise ConfigurationError(f"retune_min_steps must be a non-negative integer, got {retune_min_steps!r}")
+
         self.netlist = netlist
         self.component_onnx_mapping = component_onnx_mapping
+        # A retune runs on the netlist as given, before run() swaps in the surrogates.
+        self._source_netlist = netlist.copy()
 
         # Only create a surrogate stage when there are components with models
         if components and component_onnx_mapping:
@@ -149,6 +192,8 @@ class COBRA:
             self.em_surrogate_stage = None
 
         self.optimizer_stage = OptimizerStage(optimizer if optimizer is not None else OptunaOptimizer())
+        # Each retune searches with a fresh copy of the run's optimizer, as it is before run().
+        self._optimizer_template = copy.deepcopy(self.optimizer_stage.optimizer)
         self.circuit_simulation_stage = CircuitSimulationStage(
             circuit_simulator if circuit_simulator is not None else XyceSimulator()
         )
@@ -159,6 +204,10 @@ class COBRA:
         )
         self.fine_tuning_iterations = fine_tuning_iterations
         self.fine_tuning_optimizer = fine_tuning_optimizer
+        self.retune_trials = retune_trials
+        self.retune_range = float(retune_range)
+        self.retune_min_steps = retune_min_steps
+        self._parallel_trials = 1
 
     def _build_fine_tuning_optimizer_stage(self) -> OptimizerStage:
         fine_tuning_optimizer = self.fine_tuning_optimizer
@@ -191,7 +240,7 @@ class COBRA:
                 f"parallel_trials must be at least 1, got {parallel_trials}"
             )
 
-    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: dict | None = None, callback=None, results_name: str | None = None, sim_params_by_type: dict | None = None, run_configuration: Optional["RunConfiguration"] = None, parallel_trials: int = 1) -> OptimizationContext:
+    def run(self, netlist: str, design_goals: list[DesignGoal], optimization_parameters: list[OptimizationProperty], max_iterations: int = 500, orca_geometries: dict | None = None, callback=None, results_name: str | None = None, sim_params_by_type: dict | None = None, run_configuration: Optional["RunConfiguration"] = None, parallel_trials: int = 1, results_dir: str | Path | None = None) -> OptimizationContext:
         """
         Run the optimization workflow.
 
@@ -208,6 +257,7 @@ class COBRA:
                     If the callback returns False, the optimization is stopped. Trials still in
                     flight are finished and reported to it as well, unless one met the goals.
         - results_name: Optional name for the results folder. If not provided, derives from netlist filename.
+        - results_dir: Optional folder for the results, instead of ``results/<timestamp>_<results_name>``.
         - parallel_trials: How many trials to evaluate at the same time, each in its own
                            working directory. Once a stopping condition is reached the
                            trials already in flight are still finished, so up to
@@ -231,11 +281,15 @@ class COBRA:
                 parallel_trials,
             )
 
+        self._parallel_trials = parallel_trials
+
         # Create results folder with timestamp and name
-        if results_name is None:
-            results_name = Path(netlist).stem
-        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S")
-        results_dir = Path("results") / f"{timestamp}_{results_name}"
+        if results_dir is None:
+            if results_name is None:
+                results_name = Path(netlist).stem
+            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S")
+            results_dir = Path("results") / f"{timestamp}_{results_name}"
+        results_dir = Path(results_dir)
         results_dir.mkdir(parents=True, exist_ok=True)
 
         if run_configuration is not None:
@@ -593,6 +647,13 @@ class COBRA:
         best: OptimizationContext | None = None
         best_penalty = math.inf
 
+        def keep_if_best(evaluated: OptimizationContext) -> None:
+            nonlocal best, best_penalty
+            penalty = aggregate_penalty(OptimizerStage.losses(context))
+            if best is None or penalty < best_penalty:
+                best = evaluated
+                best_penalty = penalty if math.isfinite(penalty) else math.inf
+
         for iteration in tqdm.tqdm(
             range(1, self.fine_tuning_iterations + 1),
             desc="COBRA EM fine-tuning",
@@ -610,15 +671,23 @@ class COBRA:
                 fine_tuning_optimizer_stage.tell(context)
             else:
                 fine_tuning_optimizer_stage.record(context)
-
-            penalty = aggregate_penalty(OptimizerStage.losses(context))
-            if best is None or penalty < best_penalty:
-                best = trial
-                best_penalty = penalty if math.isfinite(penalty) else math.inf
+            keep_if_best(trial)
 
             if callback and callback(context) is False:
                 logger.info("EM fine-tuning stopped by the callback")
                 break
+
+            if not context.goal_achieved and self.retune_trials > 0 and not trial.infeasible:
+                retuned = self._retune(context, trial, netlist_template, fine_tuning_dir, callback)
+                if retuned is not None:
+                    context.absorb_trial(retuned)
+                    context.fine_tuning_iteration = iteration
+                    # The optimizer did not suggest these values, so it only records them.
+                    fine_tuning_optimizer_stage.record(context)
+                    keep_if_best(retuned)
+                    if callback and callback(context) is False:
+                        logger.info("EM fine-tuning stopped by the callback")
+                        break
 
             if context.goal_achieved:
                 logger.info("Design goals achieved after EM fine-tuning iteration %d", iteration)
@@ -655,6 +724,112 @@ class COBRA:
             )
 
         return context
+
+    def _retune(
+        self,
+        context: OptimizationContext,
+        trial: OptimizationContext,
+        netlist_template: Netlist,
+        fine_tuning_dir: Path,
+        callback=None,
+    ) -> OptimizationContext | None:
+        """Optimize the circuit values again with *trial*'s EM models fixed.
+
+        A circuit-only COBRA run, in ``fine_tuning/retune_NN/``: every component is
+        the network *trial* simulated (Palace for an ONNX component, its file for a
+        Touchstone one), the geometry stays, and the netlist variables search ranges
+        narrowed around *trial*'s values (:func:`narrowed_around`), starting there.
+        Its best values are scored once more with the same networks as their own
+        fine-tuning trial, which is returned; ``None`` without netlist variables to retune.
+        """
+        iteration = trial.fine_tuning_iteration
+        parameters = narrowed_around(
+            context.optimization_parameters, trial.netlist_parameters, self.retune_range, self.retune_min_steps
+        )
+        if not any(not parameter.linked_to for parameter in parameters):
+            logger.info("No netlist variables to retune after EM fine-tuning iteration %d", iteration)
+            return None
+        surrogate_stage = self.em_surrogate_stage
+        if surrogate_stage is None:  # fine_tuning() checks this before it starts
+            return None
+        retune_dir = fine_tuning_dir / f"retune_{iteration:02d}"
+        retune_dir.mkdir(parents=True, exist_ok=True)
+
+        # The networks of the trial as fixed component models: the Palace results are
+        # written out, a Touchstone component keeps its file.
+        simulated = {ntwk.name: ntwk for ntwk in trial.predicted_networks}
+        models: dict[str, str] = {}
+        for component, is_touchstone in zip(
+            surrogate_stage.component_names, surrogate_stage.is_touchstone, strict=True
+        ):
+            if is_touchstone:
+                models[component] = self.component_onnx_mapping[component]
+            else:
+                ntwk = simulated[component]
+                path = retune_dir / f"{component}.s{ntwk.nports}p"
+                ntwk.write_touchstone(str(path))
+                models[component] = str(path)
+
+        netlist = self._source_netlist.copy()
+        netlist.update_parameters(trial.netlist_parameters)
+        netlist_path = retune_dir / f"netlist{Path(context.netlist).suffix}"
+        netlist.save(netlist_path)
+        goals = copy.deepcopy([goal for goals in context.design_goal_checker.design_goals.values() for goal in goals])
+
+        def report(retune_context: OptimizationContext) -> bool | None:
+            """Show a retune trial as part of the fine-tuning iteration; the callback can stop it."""
+            if callback is None:
+                return None
+            shown = copy.copy(retune_context)
+            shown.fine_tuning_active = True
+            shown.fine_tuning_iteration = iteration
+            shown.fine_tuning_total = context.fine_tuning_total
+            shown.iteration = context.iteration
+            shown.max_iterations = context.max_iterations
+            return callback(shown)
+
+        logger.info(
+            "Retuning %d netlist variable(s) with the EM models of fine-tuning iteration %d, up to %d trials",
+            sum(not parameter.linked_to for parameter in parameters),
+            iteration,
+            self.retune_trials,
+        )
+        retune = COBRA(
+            netlist=netlist,
+            component_onnx_mapping=models,
+            optimizer=copy.deepcopy(self._optimizer_template),
+            circuit_simulator=self.circuit_simulation_stage.simulator,
+        )
+        searched = retune.run(
+            netlist=str(netlist_path),
+            design_goals=goals,
+            optimization_parameters=parameters,
+            max_iterations=self.retune_trials,
+            callback=report,
+            sim_params_by_type=context.sim_params_by_type,
+            parallel_trials=self._parallel_trials,
+            results_dir=retune_dir / "search",
+        )
+        for stage, seconds in searched.times.items():
+            if stage in context.times:
+                context.times[stage] += seconds
+
+        # Score the retuned values with the fine-tuning trial's own networks.
+        retuned = context.for_trial(retune_dir / "result")
+        retuned.iteration = iteration
+        retuned.fine_tuning_iteration = iteration
+        retuned.model_parameters = dict(trial.model_parameters)
+        retuned.netlist_parameters = {**trial.netlist_parameters, **searched.netlist_parameters}
+        self._render_netlist(retuned, netlist_template)
+        retuned.predicted_networks = list(trial.predicted_networks)
+        self.circuit_simulation_stage.run(retuned)
+        retuned.design_goal_checker.check_goals(retuned)
+        logger.info(
+            "Retune after EM fine-tuning iteration %d %s the design goals",
+            iteration,
+            "meets" if retuned.goal_achieved else "does not meet",
+        )
+        return retuned
 
     @staticmethod
     def _next_fine_tuning_trial(

@@ -402,6 +402,9 @@ def build_configured_run(configuration: RunConfiguration) -> ConfiguredRun:
         palace_fine_tuning_processes=fine_tuning.palace_processes,
         fine_tuning_iterations=fine_tuning.iterations,
         fine_tuning_optimizer=fine_tuning.optimizer if fine_tuning.enabled else "reuse",
+        retune_trials=fine_tuning.retune_trials,
+        retune_range=fine_tuning.retune_range,
+        retune_min_steps=fine_tuning.retune_min_steps,
     )
     return ConfiguredRun(
         configuration=configuration,

@@ -383,13 +383,20 @@ class FineTuningConfig:
     palace_processes: int = DEFAULT_PALACE_PROCESSES
     iterations: int = 3
     optimizer: str = "reuse"
+    retune_trials: int = 0
+    """Trials of a circuit-only retune with an iteration's EM models fixed; 0 switches it off."""
+    retune_range: float = 0.3
+    """Half-width of the retune's ranges, relative to each value."""
+    retune_min_steps: int = 2
+    """Least half-width of the retune's ranges, in parameter steps."""
     geometries: dict[str, GeometryConfig] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FineTuningConfig:
         data = _mapping(data, "fine_tuning")
         allowed = {
-            "enabled", "palace_command", "palace_processes", "iterations", "optimizer", "geometries",
+            "enabled", "palace_command", "palace_processes", "iterations", "optimizer",
+            "retune_trials", "retune_range", "retune_min_steps", "geometries",
         }
         _require_keys(data, allowed, "fine_tuning")
         geometries_data = _mapping(data.get("geometries", {}), "fine_tuning.geometries")
@@ -418,6 +425,13 @@ class FineTuningConfig:
             raise ConfigurationError("fine_tuning.iterations must be at least 1")
         if self.optimizer not in {"reuse", "gradient_descent"}:
             raise ConfigurationError(f"Unsupported fine-tuning optimizer '{self.optimizer}'")
+        for name in ("retune_trials", "retune_min_steps"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ConfigurationError(f"fine_tuning.{name} must be a non-negative integer")
+        _number(self.retune_range, "fine_tuning.retune_range")
+        if self.retune_range <= 0:
+            raise ConfigurationError("fine_tuning.retune_range must be positive")
         for geometry in self.geometries.values():
             geometry.validate()
 

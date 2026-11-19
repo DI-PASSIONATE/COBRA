@@ -34,7 +34,9 @@ cobra
 - Optimization parameters and ranges
 - Iteration control and stop behavior
 - Parallelism: either N independent trials or one N-rank MPI simulation
-- Optional fine-tuning settings
+- Optional fine-tuning settings, including the retune after a Palace iteration that
+  misses the goals (*Retune trials*, *Retune range (±%)*, *Retune min steps*; see
+  [Fine-Tuning](../advanced/fine-tuning.md#retune-with-the-em-models-fixed))
 
 ## Appearance
 

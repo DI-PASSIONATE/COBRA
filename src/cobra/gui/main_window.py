@@ -361,8 +361,28 @@ class MainWindow(QMainWindow):
         self.ft_optimizer_combo.addItem("Gradient descent", "gradient_descent")
         self.ft_optimizer_combo.setToolTip(tooltip("ft_optimizer_combo"))
         self.config_form_layout.addRow("Fine-tuning optimizer", self.ft_optimizer_combo)
+
+        # Retune of the circuit values with an iteration's EM models fixed
+        self.retune_trials_spin = QSpinBox()
+        self.retune_trials_spin.setRange(0, 1_000_000)
+        self.retune_trials_spin.setSpecialValueText("Off")
+        self.retune_trials_spin.setToolTip(_cobra_tips.get("retune_trials", ""))
+        self.config_form_layout.addRow("Retune trials", self.retune_trials_spin)
+        self.retune_range_spin = QDoubleSpinBox()
+        self.retune_range_spin.setRange(1.0, 1000.0)
+        self.retune_range_spin.setDecimals(1)
+        self.retune_range_spin.setValue(30.0)
+        self.retune_range_spin.setToolTip(_cobra_tips.get("retune_range", ""))
+        self.config_form_layout.addRow("Retune range (±%)", self.retune_range_spin)
+        self.retune_steps_spin = QSpinBox()
+        self.retune_steps_spin.setRange(0, 1000)
+        self.retune_steps_spin.setValue(2)
+        self.retune_steps_spin.setToolTip(_cobra_tips.get("retune_min_steps", ""))
+        self.config_form_layout.addRow("Retune min steps", self.retune_steps_spin)
+        self.retune_trials_spin.valueChanged.connect(self._update_retune_fields)
         self._finetune_fields = (
-            self.palace_edit, self.palace_procs_spin, self.ft_iter_spin, self.ft_optimizer_combo
+            self.palace_edit, self.palace_procs_spin, self.ft_iter_spin, self.ft_optimizer_combo,
+            self.retune_trials_spin, self.retune_range_spin, self.retune_steps_spin,
         )
 
         self.component_geometry_container = QWidget()
@@ -1151,7 +1171,14 @@ class MainWindow(QMainWindow):
     def on_finetune_toggled(self, checked):
         for field in self._finetune_fields:
             self.config_form_layout.setRowVisible(field, checked)
+        self._update_retune_fields()
         self._update_geometry_selectors_visibility()
+
+    def _update_retune_fields(self) -> None:
+        """The retune's range settings matter only when it runs."""
+        enabled = self.retune_trials_spin.value() > 0
+        self.retune_range_spin.setEnabled(enabled)
+        self.retune_steps_spin.setEnabled(enabled)
 
     def browse_file(self, line_edit, name_filter):
         fname, _ = QFileDialog.getOpenFileName(self, "Select file", "", name_filter)
@@ -1346,6 +1373,9 @@ class MainWindow(QMainWindow):
                 palace_processes=self.palace_procs_spin.value(),
                 iterations=self.ft_iter_spin.value(),
                 optimizer=self.ft_optimizer_combo.currentData(),
+                retune_trials=self.retune_trials_spin.value(),
+                retune_range=self.retune_range_spin.value() / 100,
+                retune_min_steps=self.retune_steps_spin.value(),
                 geometries=geometries,
             ),
         )
@@ -1479,6 +1509,9 @@ class MainWindow(QMainWindow):
         self.palace_edit.setText(fine_tuning.palace_command)
         self.palace_procs_spin.setValue(fine_tuning.palace_processes)
         self.ft_iter_spin.setValue(fine_tuning.iterations)
+        self.retune_trials_spin.setValue(fine_tuning.retune_trials)
+        self.retune_range_spin.setValue(fine_tuning.retune_range * 100)
+        self.retune_steps_spin.setValue(fine_tuning.retune_min_steps)
         self._set_widget_value(self.ft_optimizer_combo, fine_tuning.optimizer)
         for component, geometry in fine_tuning.geometries.items():
             selector = self.component_geometry_selectors.get(component)
