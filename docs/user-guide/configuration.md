@@ -192,6 +192,9 @@ apply to a run may use empty objects or arrays.
     "palace_processes": 16,
     "iterations": 3,
     "optimizer": "reuse",
+    "retune_trials": 0,
+    "retune_range": 0.3,
+    "retune_min_steps": 2,
     "geometries": {}
   }
 }
@@ -398,6 +401,13 @@ on a high-drive variant, at most 1 dB, and the same relative to the gain:
  "terms": {"c": "Compression_dB", "g": "Gain_dB[vp_rf@Out]"},
  "frequency_range": "35GHz", "max_value": 10.0}
 ```
+
+`fine_tuning.retune_trials` (default `0`, off) is the budget of the circuit-only
+retune that follows a fine-tuning iteration missing the goals: the circuit values are
+optimized again, with that iteration's Palace networks as fixed models, in ranges of
+± `retune_range` (relative, default `0.3`) around their values, at least
+`retune_min_steps` steps wide (default `2`). See
+[Fine-Tuning](../advanced/fine-tuning.md#retune-with-the-em-models-fixed).
 
 `fine_tuning.palace_processes` is the number of MPI ranks Palace uses per EM
 simulation; the Xyce simulator takes the equivalent `parallel_xyce_processes`
