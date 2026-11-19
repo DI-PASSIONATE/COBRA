@@ -368,6 +368,33 @@ QPushButton[flat="true"]:disabled {
     background-color: transparent;
     color: $text_disabled;
 }
+QFrame[sectionHeader="true"] {
+    border: none;
+    border-bottom: 1px solid $border;
+}
+QPushButton[sectionToggle="true"],
+QPushButton[advancedToggle="true"] {
+    background-color: transparent;
+    border: 1px solid transparent;
+    text-align: left;
+    padding: ${space_1}px ${space_2}px;
+    min-height: 0px;
+}
+QPushButton[sectionToggle="true"] {
+    color: $text;
+    font-size: 14px;
+}
+QPushButton[advancedToggle="true"] {
+    color: $tide;
+}
+QPushButton[sectionToggle="true"]:hover,
+QPushButton[advancedToggle="true"]:hover {
+    background-color: $tide_subtle;
+}
+QPushButton[sectionToggle="true"]:focus,
+QPushButton[advancedToggle="true"]:focus {
+    border: 1px solid $tide;
+}
 QPushButton[tabButton="true"] {
     background-color: $surface_alt;
     color: $text_muted;

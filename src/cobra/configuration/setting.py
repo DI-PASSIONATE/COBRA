@@ -46,6 +46,9 @@ class CobraSetting:
         renders a ``QComboBox`` instead of a plain text/spin widget.  The
         ``value`` stored against each item is what gets passed to the
         constructor; ``label`` is the human-readable display text.
+    advanced:
+        Whether the GUI shows the setting behind its section's *Advanced* fold:
+        for settings whose default suits most runs.
     """
 
     name: str
@@ -53,3 +56,4 @@ class CobraSetting:
     default: Any
     description: str
     choices: list[tuple[str, Any]] | None = None
+    advanced: bool = False

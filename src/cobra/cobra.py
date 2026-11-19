@@ -97,6 +97,7 @@ class COBRA:
                 "Number of MPI ranks Palace uses per EM fine-tuning simulation.\n"
                 "Defaults to the number of cores available on this machine."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="palace_fine_tuning_command",
@@ -126,6 +127,7 @@ class COBRA:
                 "Half-width of a retune's ranges, relative to each value: 0.3 searches\n"
                 "±30 % around the values of the fine-tuning iteration."
             ),
+            advanced=True,
         ),
         CobraSetting(
             name="retune_min_steps",
@@ -135,6 +137,7 @@ class COBRA:
                 "Least half-width of a retune's ranges, in steps of the parameter, so that\n"
                 "a small integer such as a transistor count nx still varies (±2 by default)."
             ),
+            advanced=True,
         ),
     ]
 
