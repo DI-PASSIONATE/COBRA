@@ -27,7 +27,9 @@ cobra
   [VACASK Simulator](../advanced/vacask.md#style-2-xschem-netlists)) and
   **Clear** removes the selection. Loading a configuration restores subcircuit
   surrogates
-- Design goals (S-parameter and RF metrics)
+- Analysis variants: further analyses of a type, each on the netlist with some
+  values changed (e.g. the HB at another drive)
+- Design goals (S-parameter and RF metrics, and expressions over other goals)
 - Analysis point, when the run includes a Harmonic Balance or transient analysis
 - Optimization parameters and ranges
 - Iteration control and stop behavior
@@ -90,6 +92,10 @@ Use goal constraints with optional frequency ranges, for example:
 - `Power_dBm[Out]` >= 10 dB at `35ghz` (single spectral line of an HB run)
 
 The goal dialog groups the parameters by the analysis that produces them (`.AC`, `.HB`, `.TRAN`) in a tab bar at the top; the netlist's own analysis is opened first, and a goal from another tab adds that analysis to the run. Below, the dialog offers the inputs the selected parameter takes: choose *Whole sweep / spectrum*, *Single frequency* (the nearest frequency of the sweep or spectral line is used) or *Frequency range*. Goals that only make sense one way are restricted accordingly — an isolation goal, for example, has no max value and always targets a single frequency. *Scale* is the unit a miss of the limit is measured in (e.g. `1` for one dB); left empty, a miss counts relative to the limit, or in units of 1 for a limit of 0.
+
+**Analysis variants** (the list above the goals; *Add variant*, right-click to edit or delete) are analyses run on the netlist with values changed, such as an HB at another drive: give a name, the analysis type and the values, comma-separated (`vp_rf:ampl=0.00632, R1=60`). Each variant gets its own tab in the goal dialog with the parameters of its analysis, named with the variant as a prefix (`HB_m40:Power_dBm[Out]`); its gain goals refer to the amplitude the variant sets. A variant goals read keeps its name and analysis, and cannot be deleted before them; editing its values updates those goals.
+
+Once a goal exists, the dialog's *Expression* tab makes a goal on a formula over other goals: give it a name, and write the *Expression* with the variables listed under *Terms* (`a = Gain_dB[...]`, …; double-click one to insert it), e.g. `a - b` for the gain at the netlist's drive minus the gain on a high-drive variant (compression). The formula takes numbers, `+ - * / **`, `abs`, `sqrt`, `exp`, `ln`, `log10` and `min`/`max`; an expression can use other expressions. Terms from several analyses need a single frequency. A goal an expression uses cannot be deleted, or changed to another parameter, while the expression exists; editing it otherwise updates the expressions that use it.
 
 !!! note
     Goals are transformed into penalty values. Satisfying goals yields zero or negative penalty (reward), violations increase positive penalty.

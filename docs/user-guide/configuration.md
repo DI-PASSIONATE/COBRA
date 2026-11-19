@@ -303,6 +303,7 @@ or spectral line) or a band (`"125-135GHz"`, every point or line inside counts);
 | `power_dbm` | `Power_dBm[<node>]` | `node` |
 | `gain_db` | `Gain_dB[<port>@<node>]` | `node`; `port`, a driven port; `source_amplitude`, its SIN amplitude in volts; `impedance`, its `z0` |
 | `isolation_db` | `Isolation_dB[<node>]` | `node`; `frequency_range`, naming the wanted line |
+| `expression` | a name of your choice, e.g. `Compression_dB` | `expression`, a formula; `terms`, its variables and the goal parameters they stand for |
 
 `NF` is the small-signal noise figure referred to the input port at 290 K. Both
 simulators run it; the mixer goals `NF_SSB` and `NF_DSB` need `VacaskSimulator`
@@ -335,6 +336,68 @@ store the drive level so their power reference can be reconstructed. An
 isolation goal's value is the margin in dB down to the strongest other line in
 the spectrum, DC excluded. See [Harmonic Balance](../advanced/harmonic-balance.md)
 and [Transient](../advanced/transient.md).
+
+### Analysis Variants
+
+A run holds one result per analysis type, so one netlist cannot carry two HB
+analyses at different drives. `analysis_variants` adds them: each is an analysis
+of type `analysis` (`AC`, `HB`, `TRAN`, `DC`, `NOISE` or `HBNOISE`), run on a copy
+of the netlist with `netlist_values` set. The values use the names of
+`netlist_variable` parameters: an element (`"R1"`) or
+`"<instance>:<parameter>"` (`"vp_rf:ampl"`, a VACASK sine source's amplitude in
+volts). A variant name is an identifier other than an analysis type.
+
+```json
+"analysis_variants": [
+  {"name": "HB_m40", "analysis": "HB", "netlist_values": {"vp_rf:ampl": 0.00632}},
+  {"name": "HB_m15", "analysis": "HB", "netlist_values": {"vp_rf:ampl": 0.112}}
+]
+```
+
+A goal reads a variant by naming it in `analysis`, and its `parameter` takes the
+variant's name as a prefix: `HB_m40:Power_dBm[Vdd]`, `HB_m15:Gain_dB[vp_rf@Out]`,
+or a catalogue goal such as `AC_cold:S21_dB` on an `AC` variant. The variant runs
+with its type's `simulation_parameters`. A gain goal on a variant refers to the
+amplitude the variant sets for its port (`<port>:ampl`); its `source_amplitude`
+must be that amplitude. Each variant is one more simulation per trial. In a VACASK
+netlist, an `alter` in the control block that sets the same value later wins over
+the variant.
+
+Typical uses: the supply power at the operating point (`Power_dBm[Vdd]` at
+`0-0.1GHz` on a low-drive HB variant) next to the gain at the nominal drive, or
+the gain at a test drive for compression.
+
+### Expression Goals
+
+An `expression` goal bounds a formula over the values of other goals. `terms`
+maps each variable of the `expression` to the `parameter` of another goal in the
+configuration; that goal keeps its own bounds (give it a loose one when only the
+expression matters). Every term is read at the expression goal's own
+`frequency_range`, and the formula is applied elementwise. The goal's `parameter`
+is a name of your choice, unique among the goals, so that other expressions can
+use it as a term: expressions chain, as long as none depends on itself.
+
+The formula takes numbers, the variables, `+ - * / **`, and the functions `abs`,
+`sqrt`, `exp`, `ln`, `log10`, and `min`/`max` of two or more values (elementwise).
+Terms from several analyses need a single frequency, since their frequency
+points need not match. A trial missing an analysis a term reads, or whose formula
+gives no finite value (e.g. `ln` of a negative number), fails the goal like any
+other.
+
+Gain compression at a test drive, the gain at the netlist's drive minus the gain
+on a high-drive variant, at most 1 dB, and the same relative to the gain:
+
+```json
+{"parameter": "Compression_dB", "kind": "expression", "expression": "g - g_test",
+ "terms": {"g": "Gain_dB[vp_rf@Out]", "g_test": "HB_m15:Gain_dB[vp_rf@Out]"},
+ "frequency_range": "35GHz", "max_value": 1.0}
+```
+
+```json
+{"parameter": "Compression_pct", "kind": "expression", "expression": "100 * c / g",
+ "terms": {"c": "Compression_dB", "g": "Gain_dB[vp_rf@Out]"},
+ "frequency_range": "35GHz", "max_value": 10.0}
+```
 
 `fine_tuning.palace_processes` is the number of MPI ranks Palace uses per EM
 simulation; the Xyce simulator takes the equivalent `parallel_xyce_processes`

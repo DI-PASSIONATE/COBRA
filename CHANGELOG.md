@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- `analysis_variants`: further analyses of a type per run, each on the netlist with some
+  values changed (`netlist_values`, named as `netlist_variable` parameters), e.g. the HB at
+  another drive. A goal reads one by naming it as its `analysis`, with the variant's name as
+  its prefix (`HB_m40:Power_dBm[Vdd]`); a gain goal on it refers to the drive the variant
+  sets. Before, a run held one result per analysis type, so the supply power at the
+  operating point and the gain at the drive could not share a run. `cobra parse` lists the
+  variants and checks their values against the netlist. In the GUI: the *Analysis variants*
+  list and a tab per variant in the goal dialog.
+- Goal kind `expression`: a formula (`expression`) over the parameters of other goals
+  (`terms`), e.g. `g - g_test` for gain compression at a test drive. Terms may come from
+  different analyses and may be expressions themselves. The formula takes numbers,
+  `+ - * / **`, `abs`, `sqrt`, `exp`, `ln`, `log10`, `min` and `max`, and is parsed, not
+  evaluated as Python. In the GUI: the goal dialog's *Expression* tab.
 - `design_goals[].scale`: the unit a goal's miss of its bound is measured in, e.g. `1.0`
   for one dB. In the GUI: the goal dialog's *Scale*.
 

@@ -12,7 +12,7 @@ from threadpoolctl import threadpool_limits
 
 from cobra.optimizers.design_goal import DesignGoal
 from cobra.spice_sim.base_simulator import BaseSimulator, SimulationResult
-from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.simulation_type import AnalysisVariant, SimulationType, base_simulation_type
 from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import skrf as rf
 
     from cobra.optimization_context import OptimizationContext
+    from cobra.spice_sim.simulation_type import Analysis
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,9 @@ def goal_band(goals: list[DesignGoal]) -> tuple[float, float] | None:
 
 class CircuitSimulationStage(COBRABaseStage):
     """
-    Circuit Simulation Stage — runs one Xyce simulation per required analysis
-    type and stores all results in ``context.simulation_results``.
+    Circuit Simulation Stage — runs one simulation per required analysis (an
+    analysis type or a variant of one) and stores all results in
+    ``context.simulation_results``.
 
     """
 
@@ -124,17 +126,17 @@ class CircuitSimulationStage(COBRABaseStage):
         finally:
             context.times["vector_fitting"] += time.time() - fit_started
 
-        # Determine which simulation types to run:
+        # Determine which analyses to run:
         # 1. Always run the netlist's native simulation type.
-        # 2. Also run any type required by a design goal (e.g. AC for S-params
-        #    when the native type is HB).
+        # 2. Also run any analysis a design goal reads (e.g. AC for S-params
+        #    when the native type is HB, or an HB variant at another drive).
         native_sim_type: SimulationType = context.native_sim_type
-        required_types: set[SimulationType] = set()
+        required: set[Analysis] = set()
         if native_sim_type is not SimulationType.UNKNOWN:
-            required_types.add(native_sim_type)
+            required.add(native_sim_type)
 
         design_goal_checker = context.design_goal_checker
-        required_types.update(design_goal_checker.design_goals)
+        required.update(design_goal_checker.required_analyses())
 
         # Per-type simulation parameters from the GUI (e.g. sweep range edits)
         sim_params_by_type: dict[SimulationType, dict[str, str]] = context.sim_params_by_type
@@ -146,39 +148,42 @@ class CircuitSimulationStage(COBRABaseStage):
 
         # Start from a clean slate: a result kept from the previous iteration would
         # otherwise be attributed to the current parameters when a simulation fails.
-        simulation_results: dict[SimulationType, SimulationResult] = {}
-        failed_types: list[SimulationType] = []
+        simulation_results: dict[Analysis, SimulationResult] = {}
+        failed: list[Analysis] = []
 
-        # Run each required simulation type (e.g. AC, HB, TRAN) and store the results in context.
-        for sim_type in required_types:
+        # Run each required analysis (e.g. AC, HB, TRAN, an HB variant) and store the results in context.
+        for analysis in sorted(required, key=lambda item: item.name):
+            sim_type = base_simulation_type(analysis)
+            # A variant runs on a copy of the netlist with its values set.
+            source = analysis.apply(netlist) if isinstance(analysis, AnalysisVariant) else netlist
             # Ensure the netlist contains a directive for this simulation type; a
             # netlist that lacks one gets a copy with it injected.
             prepared = self.simulator.prepare_netlist(
-                netlist,
+                source,
                 sim_type,
                 sim_params_by_type.get(sim_type, {}),
-                goal_band(design_goal_checker.design_goals.get(sim_type, [])),
+                goal_band(design_goal_checker.goals_reading(analysis)),
             )
             prepared_path = netlist_path
             if prepared is not netlist:
-                prepared_path = os.path.join(results_dir, f"{name}_{sim_type.name.lower()}{ext}")
+                prepared_path = os.path.join(results_dir, f"{name}_{analysis.name.lower()}{ext}")
                 prepared.save(prepared_path)
             # Run the simulation
             sim_result = self.simulator.run_simulation(prepared_path, prepared)
 
             # Store the results in context for later stages to use.
             if sim_result is None:
-                failed_types.append(sim_type)
+                failed.append(analysis)
             else:
-                simulation_results[sim_type] = sim_result
+                simulation_results[analysis] = sim_result
 
         context.simulation_results = simulation_results
 
-        if failed_types:
+        if failed:
             logger.warning(
                 "No %s result for these parameters; the design goals that need it "
                 "are penalised so the optimizer avoids them",
-                ", ".join(t.name for t in failed_types),
+                ", ".join(analysis.name for analysis in failed),
             )
 
         return context

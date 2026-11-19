@@ -1,16 +1,25 @@
-from collections.abc import Callable
+import dataclasses
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 import numpy as np
 import skrf as rf
 
-from cobra.optimizers.design_goal import DesignGoal, DesignParameter, GoalInputs
+from cobra.optimizers.design_goal import (
+    DesignGoal,
+    DesignParameter,
+    ExpressionParameter,
+    GoalInputs,
+)
+from cobra.optimizers.goal_expression import GoalExpression
 from cobra.spice_sim import hb_spectrum
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
 
 if TYPE_CHECKING:
     import pandas as pd
+
+    from cobra.spice_sim.simulation_type import AnalysisVariant
 
 # ---------------------------------------------------------------------------
 # Helper: Z-matrix accessor used by several lumped-parameter formulas
@@ -107,6 +116,68 @@ def large_signal_name(base: str, simulation_type: SimulationType) -> str:
             f"Spectrum goals need an HB or TRAN analysis, got {simulation_type.value}"
         )
     return f"{_LARGE_SIGNAL_PREFIX[simulation_type]}{base}"
+
+
+def with_variant(parameter: DesignParameter, variant: "AnalysisVariant") -> DesignParameter:
+    """*parameter* read from *variant*'s result instead of the netlist's own analysis.
+
+    The formula stays; the name takes the variant's prefix in place of an analysis
+    prefix, e.g. ``TRAN:Gain_dB[P1@Out]`` on a TRAN variant ``TRAN_m15`` becomes
+    ``TRAN_m15:Gain_dB[P1@Out]``.
+    """
+    if parameter.variant is not None:
+        raise ValueError(f"'{parameter.name}' is already read from the variant {parameter.variant.name}")
+    if parameter.simulation_type is not variant.simulation_type:
+        raise ValueError(
+            f"'{parameter.name}' needs a {parameter.simulation_type.value} analysis; the variant "
+            f"{variant.name} runs {variant.simulation_type.value}"
+        )
+    base = parameter.name.removeprefix(_LARGE_SIGNAL_PREFIX.get(parameter.simulation_type, ""))
+    return dataclasses.replace(parameter, name=f"{variant.name}:{base}", variant=variant)
+
+
+def _term_names(parameter: DesignParameter) -> set[str]:
+    """The names of *parameter*'s terms, and of theirs, for an expression parameter."""
+    if not isinstance(parameter, ExpressionParameter):
+        return set()
+    return {name for term in parameter.terms.values() for name in (term.name, *_term_names(term))}
+
+
+def _unreadable(_result: SimulationResult, _frequency_range: str | None = None) -> np.ndarray:
+    raise TypeError("An expression parameter reads several results; use values(sim_results)")
+
+
+def make_expression_parameter(
+    name: str, expression: str | GoalExpression, terms: Mapping[str, DesignParameter]
+) -> ExpressionParameter:
+    """A parameter named *name* whose value is *expression* over *terms*.
+
+    Every variable of the expression must be a term and every term must be used,
+    e.g. ``make_expression_parameter("Compression_dB", "a - b", {"a": gain, "b": gain_at_test})``.
+    Raises ``ValueError`` otherwise, or when the parameter would be its own term.
+    """
+    parsed = expression if isinstance(expression, GoalExpression) else GoalExpression(expression)
+    if not terms:
+        raise ValueError(f"Expression '{name}' needs at least one term")
+    missing = [variable for variable in parsed.variables if variable not in terms]
+    if missing:
+        raise ValueError(f"Expression '{name}' uses {', '.join(missing)}, which are not among its terms")
+    unused = [variable for variable in terms if variable not in parsed.variables]
+    if unused:
+        raise ValueError(f"Expression '{name}' does not use its terms {', '.join(unused)}")
+    if any(name == term.name or name in _term_names(term) for term in terms.values()):
+        raise ValueError(f"Expression '{name}' depends on itself")
+    first = next(iter(terms.values()))
+    return ExpressionParameter(
+        name=name,
+        simulation_type=first.simulation_type,
+        formula=_unreadable,
+        loss=calculate_array_penalty,
+        description=f"{parsed.text}, with " + ", ".join(f"{v} = {t.name}" for v, t in terms.items()),
+        variant=first.variant,
+        expression=parsed,
+        terms=dict(terms),
+    )
 
 
 def _spectrum_dataframe(

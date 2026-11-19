@@ -19,6 +19,7 @@ import pytest
 from cobra import __main__ as cli
 from cobra.configuration.config_runner import OPTIMIZER_REGISTRY, SIMULATOR_REGISTRY
 from cobra.configuration.configuration import (
+    AnalysisVariantConfig,
     DesignGoalConfig,
     OptimizationParameterConfig,
     RunConfiguration,
@@ -148,6 +149,9 @@ def test_json_example_matches_the_schema(example: dict[str, Any], tmp_path: Path
         optimizer = OPTIMIZER_REGISTRY[example["optimizer"]["name"]]
         names = {setting.name for setting in optimizer._settings}
         assert set(example["optimizer"].get("settings", {})) <= names
+    elif example.keys() == {"analysis_variants"}:
+        for variant in example["analysis_variants"]:
+            AnalysisVariantConfig.from_dict(variant).validate()
     elif "parameter" in example:
         DesignGoalConfig.from_dict(example).validate()
     elif {"name", "type"} <= example.keys():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from math import isfinite
@@ -144,6 +145,70 @@ class OptimizationParameterConfig:
 
 
 @dataclass(slots=True)
+class AnalysisVariantConfig:
+    """A second analysis of a type, run on the netlist with ``netlist_values`` set.
+
+    ``netlist_values`` uses the names of ``netlist_variable`` parameters: an element
+    (``"R1"``) or ``"<instance>:<parameter>"`` (``"vp_rf:ampl"``). A goal reads the
+    variant by naming it as its ``analysis``.
+    """
+
+    name: str
+    analysis: str
+    netlist_values: dict[str, float | str] = field(default_factory=dict)
+
+    #: A variant name: a short identifier that does not shadow an analysis type.
+    NAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AnalysisVariantConfig:
+        data = _mapping(data, "analysis variant")
+        _require_keys(data, {"name", "analysis", "netlist_values"}, "analysis variant")
+        try:
+            return cls(**data)
+        except TypeError as exc:
+            raise ConfigurationError(f"Invalid analysis variant: {exc}") from exc
+
+    def validate(self) -> None:
+        if not isinstance(self.name, str) or not self.NAME_PATTERN.fullmatch(self.name):
+            raise ConfigurationError(
+                f"Analysis variant name {self.name!r} must be an identifier, e.g. 'HB_m40'"
+            )
+        if self.name.upper() in _ANALYSIS_NAMES:
+            raise ConfigurationError(
+                f"Analysis variant name '{self.name}' is an analysis type; choose another, e.g. "
+                f"'{self.name.upper()}_2'"
+            )
+        if not isinstance(self.analysis, str) or self.simulation_type().name == "UNKNOWN":
+            raise ConfigurationError(
+                f"Analysis variant '{self.name}' analysis must be one of {sorted(_ANALYSIS_NAMES)}, "
+                f"got {self.analysis!r}"
+            )
+        values = _mapping(self.netlist_values, f"Analysis variant '{self.name}' netlist_values")
+        if not values:
+            raise ConfigurationError(f"Analysis variant '{self.name}' sets no netlist_values")
+        for key, value in values.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ConfigurationError(f"Analysis variant '{self.name}' has an empty netlist value name")
+            if isinstance(value, str):
+                if not value.strip():
+                    raise ConfigurationError(f"Analysis variant '{self.name}' value of '{key}' is empty")
+            else:
+                _number(value, f"Analysis variant '{self.name}' value of '{key}'")
+
+    def simulation_type(self) -> SimulationType:
+        """The analysis type the variant runs."""
+        # Imported here: the simulator package imports this module.
+        from cobra.spice_sim.simulation_type import SimulationType
+
+        return SimulationType.from_directive(f".{self.analysis}")
+
+
+#: Names of the analysis types, which a variant name must not take.
+_ANALYSIS_NAMES: frozenset[str] = frozenset({"AC", "LIN", "HB", "TRAN", "DC", "NOISE", "HBNOISE"})
+
+
+@dataclass(slots=True)
 class DesignGoalConfig:
     parameter: str
     frequency_range: str | None = None
@@ -158,17 +223,26 @@ class DesignGoalConfig:
     source_amplitude: float | None = None
     impedance: float | None = None
     analysis: str = "HB"
-    """Large-signal analysis a power/gain/isolation goal reads: ``"HB"`` or ``"TRAN"``."""
+    """Analysis the goal reads: ``"HB"`` or ``"TRAN"`` for a power/gain/isolation goal,
+    or the name of an analysis variant (for any goal but an expression)."""
+    expression: str | None = None
+    """For an ``expression`` goal: the formula over its terms, e.g. ``"a - b"``."""
+    terms: dict[str, str] | None = None
+    """For an ``expression`` goal: each variable of the formula and the parameter of the
+    goal it stands for, e.g. ``{"a": "Gain_dB[P1@Out]", "b": "HB_m15:Gain_dB[P1@Out]"}``."""
 
     #: Analyses that yield a spectrum for the large-signal goal kinds.
     LARGE_SIGNAL_ANALYSES: ClassVar[frozenset[str]] = frozenset({"HB", "TRAN"})
+    #: Goal kinds read from a spectrum.
+    LARGE_SIGNAL_KINDS: ClassVar[frozenset[str]] = frozenset({"power_dbm", "gain_db", "isolation_db"})
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DesignGoalConfig:
         data = _mapping(data, "design goal")
         allowed = {
             "parameter", "frequency_range", "min_value", "max_value", "weight", "scale",
-            "kind", "node", "port", "source_amplitude", "impedance", "analysis",
+            "kind", "node", "port", "source_amplitude", "impedance", "analysis", "expression",
+            "terms",
         }
         _require_keys(data, allowed, "design goal")
         try:
@@ -176,15 +250,34 @@ class DesignGoalConfig:
         except TypeError as exc:
             raise ConfigurationError(f"Invalid design goal: {exc}") from exc
 
-    def validate(self) -> None:
+    def validate(self, variants: Mapping[str, AnalysisVariantConfig] | None = None) -> None:
+        """Check the goal on its own; *variants* are the run's analysis variants by name."""
+        variants = variants or {}
         if not self.parameter:
             raise ConfigurationError("Design goal parameter cannot be empty")
-        if self.kind not in {"catalogue", "power_dbm", "gain_db", "isolation_db"}:
+        if self.kind not in {"catalogue", "expression", *self.LARGE_SIGNAL_KINDS}:
             raise ConfigurationError(f"Unsupported design goal kind '{self.kind}'")
-        if not isinstance(self.analysis, str) or self.analysis.upper() not in self.LARGE_SIGNAL_ANALYSES:
+        if not isinstance(self.analysis, str) or (
+            self.analysis.upper() not in self.LARGE_SIGNAL_ANALYSES and self.analysis not in variants
+        ):
             raise ConfigurationError(
                 f"Design goal '{self.parameter}' analysis must be one of "
-                f"{sorted(self.LARGE_SIGNAL_ANALYSES)}, got {self.analysis!r}"
+                f"{sorted(self.LARGE_SIGNAL_ANALYSES)} or an analysis variant "
+                f"({', '.join(sorted(variants)) or 'none defined'}), got {self.analysis!r}"
+            )
+        variant = variants.get(self.analysis)
+        if self.kind == "expression":
+            self._validate_expression(variant is not None)
+        elif self.expression is not None or self.terms is not None:
+            raise ConfigurationError(f"Only an expression goal takes expression and terms, not '{self.parameter}'")
+        if (
+            self.kind in self.LARGE_SIGNAL_KINDS
+            and variant is not None
+            and variant.analysis.upper() not in self.LARGE_SIGNAL_ANALYSES
+        ):
+            raise ConfigurationError(
+                f"Design goal '{self.parameter}' reads a spectrum; its variant '{variant.name}' "
+                f"runs {variant.analysis}, not HB or TRAN"
             )
         if self.min_value is None and self.max_value is None:
             raise ConfigurationError(f"Design goal '{self.parameter}' needs a minimum or maximum")
@@ -211,11 +304,48 @@ class DesignGoalConfig:
             if self.impedance is None or self.impedance <= 0:
                 raise ConfigurationError(f"Gain goal '{self.parameter}' requires positive impedance")
 
-    def analysis_type(self) -> SimulationType:
-        """The simulation type a power/gain/isolation goal is evaluated from."""
+    def _validate_expression(self, on_variant: bool) -> None:
+        # Imported here: the optimizers package imports the simulators, which import this module.
+        from cobra.optimizers.goal_expression import GoalExpression
+
+        if on_variant:
+            raise ConfigurationError(
+                f"Expression goal '{self.parameter}' reads its terms' analyses; drop its analysis"
+            )
+        if not isinstance(self.expression, str) or not self.expression.strip():
+            raise ConfigurationError(f"Expression goal '{self.parameter}' needs an expression, e.g. \"a - b\"")
+        try:
+            variables = GoalExpression(self.expression).variables
+        except ValueError as exc:
+            raise ConfigurationError(f"Expression goal '{self.parameter}': {exc}") from exc
+        terms = self.terms
+        if (
+            not isinstance(terms, Mapping)
+            or not terms
+            or not all(isinstance(term, str) and term for term in terms.values())
+        ):
+            raise ConfigurationError(
+                f"Expression goal '{self.parameter}' needs terms: each variable of its expression "
+                "and the parameter of the goal it stands for"
+            )
+        missing = [variable for variable in variables if variable not in terms]
+        unused = [variable for variable in terms if variable not in variables]
+        if missing or unused:
+            raise ConfigurationError(
+                f"Expression goal '{self.parameter}': the terms must be the expression's variables "
+                f"({', '.join(variables)})"
+                + (f"; missing {', '.join(missing)}" if missing else "")
+                + (f"; unused {', '.join(unused)}" if unused else "")
+            )
+
+    def analysis_type(self, variants: Mapping[str, AnalysisVariantConfig] | None = None) -> SimulationType:
+        """The simulation type a power/gain/isolation goal is evaluated from, or its variant's."""
         # Imported here: the simulator package imports this module.
         from cobra.spice_sim.simulation_type import SimulationType
 
+        variant = (variants or {}).get(self.analysis)
+        if variant is not None:
+            return variant.simulation_type()
         return SimulationType.from_directive(f".{self.analysis}")
 
 
@@ -304,6 +434,7 @@ class RunConfiguration:
     max_iterations: int = 500
     parallel_trials: int = 1
     optimization_parameters: list[OptimizationParameterConfig] = field(default_factory=list)
+    analysis_variants: list[AnalysisVariantConfig] = field(default_factory=list)
     design_goals: list[DesignGoalConfig] = field(default_factory=list)
     fine_tuning: FineTuningConfig = field(default_factory=FineTuningConfig)
     schema_version: int = CURRENT_SCHEMA_VERSION
@@ -315,7 +446,7 @@ class RunConfiguration:
         allowed = {
             "schema_version", "netlist", "component_models", "simulation_parameters",
             "optimizer", "simulator", "max_iterations", "parallel_trials",
-            "optimization_parameters", "design_goals", "fine_tuning",
+            "optimization_parameters", "analysis_variants", "design_goals", "fine_tuning",
         }
         _require_keys(data, allowed, "configuration")
         version = data.get("schema_version")
@@ -353,6 +484,9 @@ class RunConfiguration:
             optimization_parameters=[
                 OptimizationParameterConfig.from_dict(item)
                 for item in data.get("optimization_parameters", [])
+            ],
+            analysis_variants=[
+                AnalysisVariantConfig.from_dict(item) for item in data.get("analysis_variants", [])
             ],
             design_goals=[DesignGoalConfig.from_dict(item) for item in data.get("design_goals", [])],
             fine_tuning=fine_tuning,
@@ -423,13 +557,51 @@ class RunConfiguration:
                 if not target:
                     break
                 current = target
+        variants = self.variants_by_name()
+        if len(variants) != len(self.analysis_variants):
+            raise ConfigurationError("Analysis variant names must be unique")
+        for variant in self.analysis_variants:
+            variant.validate()
         for goal in self.design_goals:
-            goal.validate()
+            goal.validate(variants)
+        self._validate_expression_terms()
         self.fine_tuning.validate()
         if check_paths:
             for geometry in self.fine_tuning.geometries.values():
                 if geometry.file and not Path(geometry.file).is_file():
                     raise ConfigurationError(f"Geometry file not found: {geometry.file}")
+
+    def _validate_expression_terms(self) -> None:
+        """Every term names another goal's parameter, and no expression depends on itself."""
+        expressions = [goal for goal in self.design_goals if goal.kind == "expression"]
+        parameters = [goal.parameter for goal in self.design_goals]
+        for goal in expressions:
+            if parameters.count(goal.parameter) > 1:
+                raise ConfigurationError(
+                    f"Expression goal '{goal.parameter}' shares its name with another goal; "
+                    "other expressions refer to it by name"
+                )
+            missing = [term for term in (goal.terms or {}).values() if term not in parameters or term == goal.parameter]
+            if missing:
+                raise ConfigurationError(
+                    f"Expression goal '{goal.parameter}' uses {', '.join(missing)}, which no other "
+                    "design goal reads; add a goal on it (any bound, e.g. a loose one)"
+                )
+        uses = {goal.parameter: set((goal.terms or {}).values()) for goal in expressions}
+
+        def reaches(start: str, target: str, seen: set[str]) -> bool:
+            for term in uses.get(start, ()):
+                if term == target or (term not in seen and reaches(term, target, seen | {term})):
+                    return True
+            return False
+
+        for name in uses:
+            if reaches(name, name, {name}):
+                raise ConfigurationError(f"Expression goal '{name}' depends on itself through its terms")
+
+    def variants_by_name(self) -> dict[str, AnalysisVariantConfig]:
+        """The analysis variants by name."""
+        return {variant.name: variant for variant in self.analysis_variants}
 
     def to_dict(self, destination_directory: str | Path | None = None) -> dict[str, Any]:
         self.validate()
