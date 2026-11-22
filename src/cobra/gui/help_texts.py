@@ -53,7 +53,7 @@ TOOLTIPS = {
         "Only used when the plotted quantity is Gain."
     ),
     "geometry_file_btn": "Browse for a custom ORCA geometry Python file.",
-    "optuna_sampler_combo": "Select the Optuna sampler strategy. SimulatedAnnealingSampler requires optunahub.",
+    "optuna_sampler_combo": "Select the Optuna sampler strategy. CmaEsSampler needs multi-objective off; SimulatedAnnealingSampler requires optunahub.",
     "optuna_pruner_combo": "Select an optional Optuna pruner. Pruners stop unpromising trials early to save time, but may miss good solutions.",
     "parallel_mode_combo": (
         "Independent trials: evaluate N trials at once, each in its own single-core simulation.\n"

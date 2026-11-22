@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Sampler `cmaes` for `OptunaOptimizer`: Optuna's CMA-ES with the margin variant for
+  parameters on a step grid, seeded by `random_seed`; single objective only. Adds the
+  `cmaes` package as a dependency. In the GUI: *CmaEsSampler* in the sampler list.
 - Retune with the EM models fixed (`fine_tuning.retune_trials`, `retune_range`,
   `retune_min_steps`): after a fine-tuning iteration that misses the goals, the circuit
   values are optimized again in a circuit-only run, with that iteration's Palace networks as

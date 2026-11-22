@@ -204,10 +204,17 @@ apply to a run may use empty objects or arrays.
 
 `optimizer.name` is `OptunaOptimizer` or `GradientDescentOptimizer`.
 
-`OptunaOptimizer`'s settings are `multi_objective`, `sampler` (`tpe`, `random`,
-`simulated_annealing`), `pruner` and `random_seed` (default `-1`, no seed). A
-seed makes the run repeatable when `parallel_trials` is 1; it reaches the `tpe`
-and `random` samplers, and an optunahub sampler that accepts a seed.
+`OptunaOptimizer`'s settings are `multi_objective`, `sampler` (`tpe`, `cmaes`,
+`random`, `simulated_annealing`), `pruner` and `random_seed` (default `-1`, no
+seed). A seed makes the run repeatable when `parallel_trials` is 1; it reaches the
+`tpe`, `cmaes` and `random` samplers, and an optunahub sampler that accepts a seed.
+
+`cmaes` is Optuna's CMA-ES sampler in its margin variant, which keeps moving on the
+grid of parameters with a `step`. It adapts one search distribution to the penalty
+landscape, which suits continuous circuit values and many parallel trials; in the
+OJCAS ablation on the LNA it met the goals as often as TPE. It optimizes a single
+objective, so `multi_objective` must be off, and with only one parameter Optuna falls
+back to independent sampling.
 
 ```json
 "optimizer": {"name": "OptunaOptimizer", "settings": {"sampler": "tpe", "random_seed": 42}}
