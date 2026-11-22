@@ -1,6 +1,7 @@
 import importlib
 import inspect
 import logging
+import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import optuna
@@ -45,10 +46,13 @@ class OptunaOptimizer(BaseOptimizer):
             description=(
                 "Optuna sampling algorithm used to suggest trial parameters.\n"
                 "TPE (Tree-structured Parzen Estimator) is a good general-purpose choice.\n"
+                "CMA-ES adapts a search distribution to the penalty landscape; it suits\n"
+                "continuous circuit values and many parallel trials, with one objective only.\n"
                 "SimulatedAnnealing requires the optunahub package."
             ),
             choices=[
                 ("TPESampler (default)", "tpe"),
+                ("CmaEsSampler", "cmaes"),
                 ("RandomSampler", "random"),
                 ("SimulatedAnnealingSampler (optunahub)", "simulated_annealing"),
             ],
@@ -157,13 +161,23 @@ class OptunaOptimizer(BaseOptimizer):
             return optuna.samplers.TPESampler(**seeded)
         if sampler_name in {"random", "randomsampler"}:
             return optuna.samplers.RandomSampler(**seeded)
+        if sampler_name in {"cmaes", "cmaessampler"}:
+            # The margin variant keeps CMA-ES moving on the step grid of discrete
+            # parameters, where the plain one stalls between two grid points. Optuna
+            # marks it experimental; chosen deliberately, so its warning is not repeated
+            # on every run.
+            cmaes_kwargs: dict[str, Any] = {"with_margin": True, **seeded}
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", optuna.exceptions.ExperimentalWarning)
+                return optuna.samplers.CmaEsSampler(**cmaes_kwargs)
         if sampler_name in {"simulatedannealing", "simulatedannealingsampler"}:
             return self._load_optunahub_sampler("samplers/simulated_annealing", "SimulatedAnnealingSampler")
         if sampler_name in {"auto", "autosampler"}:
             return self._load_optunahub_sampler("samplers/auto_sampler", "AutoSampler")
 
         raise ValueError(
-            "Unsupported sampler. Choose one of: AutoSampler, RandomSampler, TPESampler, SimulatedAnnealingSampler."
+            "Unsupported sampler. Choose one of: AutoSampler, CmaEsSampler, RandomSampler, "
+            "TPESampler, SimulatedAnnealingSampler."
         )
 
     def _create_pruner(self) -> optuna.pruners.BasePruner | None:
@@ -199,6 +213,18 @@ class OptunaOptimizer(BaseOptimizer):
         optuna.logging.set_verbosity(
             optuna.logging.INFO if logger.isEnabledFor(logging.DEBUG) else optuna.logging.WARNING
         )
+        if (
+            self.multi_objective
+            and isinstance(self.sampler, str)
+            and self._normalize_name(self.sampler) in {"cmaes", "cmaessampler"}
+        ):
+            # Imported here: cobra.configuration imports the optimizers.
+            from cobra.configuration.configuration import ConfigurationError
+
+            raise ConfigurationError(
+                "The CMA-ES sampler optimizes a single objective; switch multi_objective off "
+                "or choose another sampler"
+            )
         directions: list[Literal["minimize"]] = ["minimize"] * (
             num_goals if self.multi_objective else 1
         )

@@ -56,7 +56,8 @@ Default optimizer wrapper for Optuna.
 
 Typical options:
 
-- `sampler`: `tpe`, `random`, `simulated_annealing`, `auto`. TPE uses Optuna's
+- `sampler`: `tpe`, `cmaes`, `random`, `simulated_annealing`, `auto`. `cmaes` is
+  Optuna's `CmaEsSampler` with `with_margin=True` (single objective only). TPE uses Optuna's
   defaults: multivariate for a single objective, independent for several;
   override them through `sampler_kwargs`, e.g. `{"multivariate": False}`
 - `pruner`: `median`, `successive_halving`, `hyperband`
