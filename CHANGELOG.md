@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a band goal no longer weighs as many times more than a single-frequency goal as its
   band has points. Penalty values of band goals in logs and plots are smaller by that count.
 
+### Fixed
+- An analysis variant overwrote the raw file of the netlist's own analysis of that type in
+  the trial folder (both named after the analysis, e.g. `hb1.raw`). VACASK raw files are
+  now renamed after their netlist once read, e.g. `deck_hb_op.sim.hb1.raw`.
+- A script that runs COBRA with parallel trials but without an `if __name__ == "__main__":`
+  guard stopped with a bare `BrokenProcessPool`; the error now names the missing guard.
+
 ## 3.2.0 - 2026-11-06
 
 ### Added

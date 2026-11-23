@@ -440,7 +440,8 @@ evaluations may be performed.
 With `parallel_trials` above 1 the surrogates are also vector-fitted in that many
 worker processes, each using one BLAS thread, because fits in threads of one
 process cannot overlap. A Python script that runs COBRA this way must start it
-under `if __name__ == "__main__":`, since the worker processes import the script.
+under `if __name__ == "__main__":`, since the worker processes import the script;
+without it they run the script again and die, and COBRA stops with an error saying so.
 
 The summary's `wall time` is always the run's elapsed time. The per-stage
 percentages beside it are shares of the summed stage times, which measure work

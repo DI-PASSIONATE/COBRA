@@ -201,6 +201,24 @@ def test_fitting_processes_fit_outside_the_trial_thread(tmp_path, caplog):
     assert SimulationType.AC in context.simulation_results
 
 
+def test_a_broken_fitting_process_explains_the_main_guard(tmp_path):
+    """A script without a main guard makes the spawned fitting processes run it again and die."""
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+
+    class _BrokenPool:
+        def submit(self, *_args, **_kwargs):
+            future: Future = Future()
+            future.set_exception(BrokenProcessPool("A process in the process pool was terminated abruptly"))
+            return future
+
+    stage = CircuitSimulationStage(_StubSimulator([]))
+    stage._fitting_pool = _BrokenPool()  # ty: ignore[invalid-assignment] - a stand-in pool
+
+    with pytest.raises(RuntimeError, match='__name__ == "__main__"'):
+        stage._preprocess(_line_with_shunt_capacitor(), str(tmp_path / "X1"))
+
+
 def test_a_fit_that_fails_in_a_fitting_process_is_a_simulation_failure(tmp_path, caplog):
     context = _stage_context(tmp_path)
     context.predicted_networks = [rf.Network(name="X1")]

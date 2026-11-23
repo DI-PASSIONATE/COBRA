@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 import shutil
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -19,6 +20,9 @@ from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.vector_fit import vector_fit_vacask
 from tests.conftest import skrf_medium
+
+if TYPE_CHECKING:
+    from cobra.spice_sim.base_simulator import SimulationResult
 
 VACASK = shutil.which(os.environ.get("COBRA_VACASK", "vacask"))
 pytestmark = pytest.mark.skipif(VACASK is None, reason="vacask executable not found")
@@ -351,3 +355,36 @@ def test_hbnoise_mixer_noise_figures_match_the_analytic_values(tmp_path, shunt, 
     np.testing.assert_allclose(frame["GAIN_SIG"], frame["GAIN_IMG"], rtol=1e-6)
     np.testing.assert_allclose(frame["NF_DSB"], nf_dsb, atol=1e-3)
     np.testing.assert_allclose(frame["NF_SSB"], nf_ssb, atol=1e-3)
+
+
+def test_a_variant_in_the_same_folder_keeps_the_base_runs_raw_file(tmp_path):
+    """The base HB and an analysis variant both run an analysis named hb1 in one trial folder."""
+    from cobra.spice_sim.simulation_type import AnalysisVariant
+
+    simulator = VacaskSimulator(VACASK or "vacask")
+    deck = tmp_path / "deck.sim"
+    deck.write_text(_MATCHED_PAD)
+    netlist = simulator.netlist_parser.parse_file(deck)
+    low_drive = AnalysisVariant.create("HB_low", SimulationType.HB, {"vp1:ampl": 0.02})
+    results: dict[str, SimulationResult] = {}
+    for name, source in (("deck_hb.sim", netlist), ("deck_hb_low.sim", low_drive.apply(netlist))):
+        prepared = simulator.prepare_netlist(source, SimulationType.HB, {})
+        prepared.save(tmp_path / name)
+        result = simulator.run_simulation(str(tmp_path / name), prepared)
+        assert result is not None
+        results[name] = result
+
+    assert not (tmp_path / "hb1.raw").exists()
+    for name, result in results.items():
+        raw = tmp_path / f"{name}.hb1.raw"
+        assert str(raw) in result.output_files
+        assert raw.is_file()
+    # Each kept raw file is its own run's: the variant's drive is 20 dB lower.
+    base = hb_spectrum.find_dataframe(results["deck_hb.sim"].dataframes, "out", "power")
+    low = hb_spectrum.find_dataframe(results["deck_hb_low.sim"].dataframes, "out", "power")
+    assert base is not None
+    assert low is not None
+    band = (0.95e9, 1.05e9)
+    base_power = hb_spectrum.spectrum(base, "out", "power", band)[1]
+    low_power = hb_spectrum.spectrum(low, "out", "power", band)[1]
+    np.testing.assert_allclose(base_power - low_power, [20.0], atol=0.01)
