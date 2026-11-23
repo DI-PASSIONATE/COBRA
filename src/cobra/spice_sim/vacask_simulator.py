@@ -124,6 +124,17 @@ class VacaskSimulator(BaseSimulator):
             ),
             advanced=True,
         ),
+        CobraSetting(
+            name="force_dc_pin",
+            dtype=bool,
+            default=True,
+            description=(
+                "Pin every surrogate fit to its 0 Hz point, also where snp2le skips the pin\n"
+                "because it would exceed passivity slightly below ~160 Hz. Without the pin a\n"
+                "fit keeps its extrapolated DC value, which can connect a transformer's windings."
+            ),
+            advanced=True,
+        ),
     ]
 
     def __init__(
@@ -133,6 +144,7 @@ class VacaskSimulator(BaseSimulator):
         enforce_passivity: bool = False,
         vector_fit_max_order: int = 12,
         surrogate_thermal_noise: bool = False,
+        force_dc_pin: bool = True,
     ):
         if isinstance(vacask_threads, bool) or not isinstance(vacask_threads, int):
             raise ConfigurationError("vacask_threads must be an integer")
@@ -156,6 +168,7 @@ class VacaskSimulator(BaseSimulator):
                 "snp2le builds the noise generator only for a strictly passive fit"
             )
         self.surrogate_thermal_noise = surrogate_thermal_noise
+        self.force_dc_pin = force_dc_pin
 
     def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # snp2le models the S-parameters as a VACASK subcircuit in <name>.inc.
@@ -165,6 +178,7 @@ class VacaskSimulator(BaseSimulator):
             enforce_passivity=self.enforce_passivity,
             max_order=self.vector_fit_max_order,
             thermal_noise=self.surrogate_thermal_noise,
+            force_dc_pin=self.force_dc_pin,
         )
 
     # -------------------------------------------------------------------------
