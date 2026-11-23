@@ -412,6 +412,112 @@ def test_a_skipped_dc_pin_is_reported(tmp_path, monkeypatch, caplog):
     assert "X1 does not meet its 0 Hz point: DC pin skipped: test" in caplog.text
 
 
+def _two_port_from_dc():
+    """The lossy two-port with a 0 Hz point of a lower shunt resistance, like a surrogate's leak.
+
+    The fit extrapolates the band to DC, so snp2le pins it to that point. The band carries a
+    little noise, as a surrogate's prediction does.
+    """
+    import skrf as rf
+
+    media = skrf_medium(rf.Frequency(0, 20, 101, "GHz"))
+    network = media.inductor(1e-9) ** media.resistor(10) ** media.shunt_resistor(200)
+    leaky = media.inductor(1e-9) ** media.resistor(10) ** media.shunt_resistor(150)
+    noise = 1e-4 * np.random.default_rng(1).standard_normal(network.s[1:].shape)
+    network.s[1:] += 0.5 * (noise + np.swapaxes(noise, 1, 2))
+    network.s[0] = leaky.s[0]
+    return network
+
+
+def _pin_lines(path):
+    """The DC pin's elements in the subcircuit file *path*."""
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    return [line.strip() for line in lines if "dcp_" in line and not line.startswith("//")]
+
+
+def _vector_fit_module():
+    """``cobra.spice_sim.vector_fit``, the module (the package exports a function of that name)."""
+    import importlib
+
+    return importlib.import_module("cobra.spice_sim.vector_fit")
+
+
+def _skipping_dc_pin(monkeypatch, message):
+    """Make snp2le skip its DC pin with *message*, behind COBRA's wrapper."""
+    from snp2le.core.dcpin import DCPinHealth
+
+    vector_fit = _vector_fit_module()
+    with vector_fit._forcing_dc_pin(False):
+        pass
+
+    def skip(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
+        return DCPinHealth(False, f"DC pin skipped: {message}"), model_s
+
+    monkeypatch.setattr(vector_fit, "_snp2le_add_dc_pin", skip)
+
+
+_PASSIVITY_MESSAGE = "it would take sigma_max to 1.0010000 at 80 Hz, where the fit is passive"
+
+
+def test_a_forced_dc_pin_is_snp2le_s_own_pin(tmp_path, monkeypatch, caplog):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    pinned = _pin_lines(vector_fit_vacask(_two_port_from_dc(), str(tmp_path / "X1")))
+    _skipping_dc_pin(monkeypatch, _PASSIVITY_MESSAGE)
+    with caplog.at_level("INFO", logger="cobra.spice_sim.vector_fit"):
+        forced = _pin_lines(vector_fit_vacask(_two_port_from_dc(), str(tmp_path / "X1")))
+
+    assert pinned
+    assert forced == pinned
+    assert "// DC pin (forced by COBRA)" in (tmp_path / "X1.inc").read_text(encoding="utf-8")
+    assert f"X1: DC pin forced by COBRA, though {_PASSIVITY_MESSAGE}" in caplog.text
+    assert "does not meet its 0 Hz point" not in caplog.text
+
+
+def test_without_force_dc_pin_the_skip_stands(tmp_path, monkeypatch, caplog):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    _skipping_dc_pin(monkeypatch, _PASSIVITY_MESSAGE)
+    with caplog.at_level("WARNING", logger="cobra.spice_sim.vector_fit"):
+        path = vector_fit_vacask(_two_port_from_dc(), str(tmp_path / "X1"), force_dc_pin=False)
+
+    assert not _pin_lines(path)
+    assert "X1 does not meet its 0 Hz point" in caplog.text
+
+
+def test_a_dc_pin_skipped_for_another_reason_is_not_forced(tmp_path, monkeypatch, caplog):
+    from cobra.spice_sim.vector_fit import vector_fit_vacask
+
+    _skipping_dc_pin(monkeypatch, "it would move the fitted band by 1.0e-02, more than the fit's RMS error")
+    with caplog.at_level("WARNING", logger="cobra.spice_sim.vector_fit"):
+        path = vector_fit_vacask(_two_port_from_dc(), str(tmp_path / "X1"))
+
+    assert not _pin_lines(path)
+    assert "X1 does not meet its 0 Hz point" in caplog.text
+
+
+def test_snp2le_names_the_passivity_skip_as_cobra_expects():
+    import inspect
+
+    from snp2le.core import dcpin
+
+    vector_fit = _vector_fit_module()
+    with vector_fit._forcing_dc_pin(False):
+        pass
+    assert vector_fit._PASSIVITY_SKIP in inspect.getsource(vector_fit._snp2le_add_dc_pin)
+    assert dcpin.add_dc_pin is vector_fit._add_dc_pin
+
+
+def test_the_dc_pin_setting_reaches_the_fit(monkeypatch):
+    from cobra.spice_sim import vacask_simulator
+
+    calls = []
+    monkeypatch.setattr(vacask_simulator, "vector_fit_vacask", lambda *_, **kwargs: calls.append(kwargs))
+    VacaskSimulator().preprocess_ntwk(None, "X1")
+    VacaskSimulator(force_dc_pin=False).preprocess_ntwk(None, "X1")
+    assert [call["force_dc_pin"] for call in calls] == [True, False]
+
+
 # ---------------------------------------------------------------------------
 # Noise sweeps follow the goals
 # ---------------------------------------------------------------------------
