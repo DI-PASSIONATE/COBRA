@@ -5,6 +5,7 @@ import os
 import time
 from collections.abc import Generator
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from logging.handlers import QueueHandler, QueueListener
 from typing import TYPE_CHECKING
 
@@ -106,8 +107,17 @@ class CircuitSimulationStage(COBRABaseStage):
         """Preprocess *ntwk* in a fitting process, if :meth:`fitting_processes` started them."""
         if self._fitting_pool is None:
             self.simulator.preprocess_ntwk(ntwk, name=name)
-        else:
+            return
+        try:
             self._fitting_pool.submit(self.simulator.preprocess_ntwk, ntwk, name=name).result()
+        except BrokenProcessPool as exc:
+            raise RuntimeError(
+                "A vector-fitting process ended abruptly. With parallel_trials > 1 the fits run in "
+                "processes that import the script which started COBRA: if a script calls COBRA, "
+                'put that call under `if __name__ == "__main__":`, or the processes run the '
+                "script again and die. Otherwise a process may have run out of memory; try "
+                "fewer parallel trials."
+            ) from exc
 
     def run(self, context: "OptimizationContext") -> "OptimizationContext":
         ntwks: list[rf.Network] = context.predicted_networks

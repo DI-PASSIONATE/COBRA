@@ -355,10 +355,21 @@ class VacaskSimulator(BaseSimulator):
                 continue
             try:
                 plot = read_raw(raw_path)[0]
-                result.output_files.append(str(raw_path))
+                result.output_files.append(str(_kept_raw_path(raw_path, netlist_base)))
                 self._collect(plot, directive, netlist, stem, result)
             except (ValueError, KeyError) as exc:
                 logger.warning("Could not read VACASK result %s: %s", raw_path, exc)
+
+        # VACASK names a raw file after its analysis, so another netlist in this folder
+        # running an analysis of that name (an analysis variant) would overwrite it.
+        # Named after the netlist instead, each run keeps its own.
+        for directive in analyses:
+            for raw_path in (
+                results_dir / f"{directive.name}.raw",
+                results_dir / f"{directive.name}{_IMAGE_SUFFIX}.raw",
+            ):
+                if raw_path.is_file():
+                    raw_path.replace(_kept_raw_path(raw_path, netlist_base))
 
         if not result.dataframes and result.network is None:
             logger.warning(
@@ -511,6 +522,11 @@ class VacaskSimulator(BaseSimulator):
 # ---------------------------------------------------------------------------
 # Raw plots → COBRA tables
 # ---------------------------------------------------------------------------
+
+
+def _kept_raw_path(raw_path: Path, netlist_name: str) -> Path:
+    """Where a raw file of the netlist *netlist_name* is kept once read: ``deck.sim.hb1.raw``."""
+    return raw_path.with_name(f"{netlist_name}.{raw_path.name}")
 
 
 def noise_factor(

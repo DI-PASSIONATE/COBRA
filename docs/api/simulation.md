@@ -32,7 +32,10 @@ simulator that cannot be started at all (Xyce missing or not executable) raises
 `VacaskSimulator` runs native [VACASK](../advanced/vacask.md) netlists with the
 same responsibilities as `XyceSimulator`: it owns a `VacaskNetlistParser`, injects
 or switches analyses in `prepare_netlist`, and `run_simulation` calls
-`vacask -sp -qp -n N` and converts the raw files into a `SimulationResult`.
+`vacask -sp -qp -n N` and converts the raw files into a `SimulationResult`. VACASK
+names a raw file after its analysis; once read, it is renamed after the netlist
+(`deck_hb_op.sim.hb1.raw`), so the runs of one trial folder, e.g. an HB and an HB
+analysis variant, each keep their own.
 Settings: `vacask_command`, `vacask_threads`, `vector_fit_max_order`, `enforce_passivity`,
 `surrogate_thermal_noise`.
 
