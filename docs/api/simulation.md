@@ -37,18 +37,19 @@ names a raw file after its analysis; once read, it is renamed after the netlist
 (`deck_hb_op.sim.hb1.raw`), so the runs of one trial folder, e.g. an HB and an HB
 analysis variant, each keep their own.
 Settings: `vacask_command`, `vacask_threads`, `vector_fit_max_order`, `enforce_passivity`,
-`surrogate_thermal_noise`.
+`surrogate_thermal_noise`, `force_dc_pin`.
 
 - `read_raw(path) -> list[RawPlot]` (`cobra.spice_sim.raw_file`) reads a SPICE raw file;
   it raises `ValueError` for a file it cannot read.
-- `vector_fit_vacask(nw, name, enforce_passivity=False, max_order=12, thermal_noise=False)` (`cobra.spice_sim.vector_fit`)
+- `vector_fit_vacask(nw, name, enforce_passivity=False, max_order=12, thermal_noise=False, force_dc_pin=True)` (`cobra.spice_sim.vector_fit`)
   models a network with [snp2le](https://github.com/iic-jku/snp2le) (universal mode) and
   writes the VACASK subcircuit `<basename>_subct` to `<name>.inc`; it returns the file name.
   `vacask_include(subcircuit_text)` makes that text self-contained: `ground GND`, the
   `load` lines it needs, and `model` bindings inside the subcircuit. All resistors are
   `noisy=0`; with `thermal_noise` snp2le adds a generator of the passive's thermal noise
   (strictly passive fits only; a fit without it is retried at 3/4 and 1/2 of `max_order`,
-  then `VectorFitError` is raised). The Xyce path still uses
+  then `VectorFitError` is raised). With `force_dc_pin` a DC pin snp2le skips for
+  passivity below the band is added anyway. The Xyce path still uses
   scikit-rf's SPICE writer.
 - `add_port_signals(frame, resistances)` (`cobra.spice_sim.vacask_simulator`) adds
   `V(<src>) = R*I(<src>)` and `I(V<src>) = I(<src>)` to an HB or transient table, so

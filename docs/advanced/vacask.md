@@ -27,7 +27,8 @@ optional executable. Select the backend in the configuration:
     "vacask_threads": 1,
     "vector_fit_max_order": 12,
     "enforce_passivity": false,
-    "surrogate_thermal_noise": false
+    "surrogate_thermal_noise": false,
+    "force_dc_pin": true
   }
 }
 ```
@@ -39,6 +40,7 @@ optional executable. Select the backend in the configuration:
 | `vector_fit_max_order` | `12` | Highest model order snp2le may use for a surrogate (at least 2); see [Surrogate file](#surrogate-file) |
 | `enforce_passivity` | `false` | Enforce passivity on the vector-fitted surrogate; slower pre-processing, no non-physical gain |
 | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise, so noise figures include their losses; requires `enforce_passivity`. See [Surrogate noise](#surrogate-noise) |
+| `force_dc_pin` | `true` | Pin each surrogate fit to its 0 Hz point also where snp2le would skip the pin for passivity below the band. See [Surrogate file](#surrogate-file) |
 
 COBRA runs `vacask -sp -qp -n N deck.sim`, so the `postprocess` steps of the
 `control` block are skipped. Use `--simulator VacaskSimulator` with
@@ -217,10 +219,20 @@ with an RMS error above 3e-3 is therefore refitted at lower max orders (30, 20,
 15, 12, 10, those below `vector_fit_max_order`) until one reaches 3e-3, and the
 fit with the lowest RMS error is kept; COBRA logs the orders tried. On 40 + 40
 random geometries of ORCA's inductor and transformer models this cut the worst
-in-band error from 0.080 to 0.027 and from 0.065 to 0.014. When snp2le cannot
-pin a fit to the surrogate's 0 Hz point (its passivity check below the band
-rejects the pin), COBRA logs a warning: the model then keeps the fit's own,
-extrapolated DC admittance.
+in-band error from 0.080 to 0.027 and from 0.065 to 0.014.
+
+snp2le pins each fit to the surrogate's 0 Hz point, through a low-pass at 160 Hz,
+so a winding's DC resistance and the isolation between windings are the data's.
+It skips the pin when the pinned model would exceed passivity (sigma_max = 1)
+below the band where the fit is passive, typically by 1e-4 to 1e-3 around the
+corner. The model would then keep the fit's own, extrapolated DC admittance,
+which for ORCA transformer surrogates can be a conductance of ~1 S between the
+windings: in the OJCAS LNA it raised P_DC by 3 mW. With `force_dc_pin` (the
+default) COBRA adds the pin anyway in that case and logs it at INFO level; the
+excursion lies far below the frequencies of op, AC, noise and HB analyses, but
+check it before long transient runs or phase noise at offsets of a few Hz.
+snp2le still takes a pin out that would make the DC operating point singular,
+and COBRA logs a warning for every fit left without its pin.
 
 A fit that does not converge is stopped by snp2le after 250 pole
 relocations and refitted at the pole counts it was cycling at, so the trial keeps

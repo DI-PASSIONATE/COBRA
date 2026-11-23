@@ -251,6 +251,7 @@ analysis the chosen simulator cannot run are rejected before the run starts.
 | | `vector_fit_max_order` | `12` | Highest model order snp2le may use when it fits a surrogate (integer, at least 2) |
 | | `enforce_passivity` | `false` | Enforce passivity on the vector fit |
 | | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity`. A fit without it is retried at lower orders, then the trial is penalised. Poor fits (RMS above 3e-3) are retried at lower orders too |
+| | `force_dc_pin` | `true` | Pin each surrogate fit to its 0 Hz point also where snp2le skips the pin for passivity below the band |
 
 VACASK netlists use VACASK analysis names as `simulation_parameters` keys
 (`"AC"`, `"HB"`, `"TRAN"`, `"NOISE"`, `"HBNOISE"`) and VACASK parameter names

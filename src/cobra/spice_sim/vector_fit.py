@@ -1,12 +1,15 @@
 import contextlib
+import contextvars
 import logging
 import os
 import re
 import threading
 import warnings
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import skrf
 from skrf.vectorFitting import VectorFitting
 
@@ -175,6 +178,7 @@ def vector_fit_vacask(
     enforce_passivity: bool = False,
     max_order: int = 12,
     thermal_noise: bool = False,
+    force_dc_pin: bool = True,
 ) -> str:
     """Model *nw* with snp2le and write it as the VACASK subcircuit ``<basename>_subct`` to ``<name>.inc``.
 
@@ -191,6 +195,14 @@ def vector_fit_vacask(
     kept.  If no fit is usable, a :class:`VectorFitError` is raised: a noiseless
     surrogate would make the noise figure optimistic.  *max_order* bounds the
     model order of the fit.  The file is self-contained, see :func:`vacask_include`.
+
+    When *nw* has a 0 Hz point, snp2le pins the model to it (its DC pin), so a winding's DC
+    resistance and isolation are the data's, not the fit's extrapolation.  snp2le leaves the
+    pin out when the pinned model would exceed sigma_max = 1 somewhere below the band where
+    the fit is passive, typically by 1e-4 to 1e-3 around the pin's 160 Hz corner.  With
+    *force_dc_pin* COBRA adds the pin anyway in that case (see :func:`_force_dc_pin`); the
+    excursion stays far below the frequencies of op, AC, noise and HB analyses.  A pin left
+    out for another reason is logged as a warning.
     """
     # Imported here: snp2le is only needed by the VACASK backend.
     from snp2le.core.engine import convert
@@ -202,32 +214,33 @@ def vector_fit_vacask(
     tried: list[str] = []
     reason = ""
     cap: int | None = max_order
-    while cap is not None:
-        state = ConverterState(
-            mode="universal", enforce_passivity=enforce_passivity, max_order=cap, thermal_noise=thermal_noise
-        )
-        result = convert(state, nw)
-        if not result.ok:
-            reason = f"snp2le could not model {surrogate}: {result.error}"
-            tried.append(f"{cap}: no fit")
-            cap = _next_cap(cap, cap)
-            continue
-        for message in result.messages:
-            logger.debug("snp2le %s: %s", surrogate, message)
-        noise = cast("NoiseHealth | None", result.noise)
-        if noise is not None and not noise.ok:
-            reason = (
-                f"no fit of surrogate {surrogate} gets its thermal noise (passivity enforcement: "
-                f"{result.passivity_path}): {noise.message}"
+    with _forcing_dc_pin(force_dc_pin):
+        while cap is not None:
+            state = ConverterState(
+                mode="universal", enforce_passivity=enforce_passivity, max_order=cap, thermal_noise=thermal_noise
             )
-            tried.append(f"{cap}: no thermal noise")
-        else:
-            tried.append(f"{cap}: RMS {result.rms_error:.1e}")
-            if best is None or result.rms_error < best.rms_error:
-                best = result
-            if result.rms_error <= _FIT_RMS_OK:
-                break
-        cap = _next_cap(cap, result.model_order)
+            result = convert(state, nw)
+            if not result.ok:
+                reason = f"snp2le could not model {surrogate}: {result.error}"
+                tried.append(f"{cap}: no fit")
+                cap = _next_cap(cap, cap)
+                continue
+            for message in result.messages:
+                logger.debug("snp2le %s: %s", surrogate, message)
+            noise = cast("NoiseHealth | None", result.noise)
+            if noise is not None and not noise.ok:
+                reason = (
+                    f"no fit of surrogate {surrogate} gets its thermal noise (passivity enforcement: "
+                    f"{result.passivity_path}): {noise.message}"
+                )
+                tried.append(f"{cap}: no thermal noise")
+            else:
+                tried.append(f"{cap}: RMS {result.rms_error:.1e}")
+                if best is None or result.rms_error < best.rms_error:
+                    best = result
+                if result.rms_error <= _FIT_RMS_OK:
+                    break
+            cap = _next_cap(cap, result.model_order)
     if best is None:
         raise VectorFitError(f"{reason} (max orders tried: {'; '.join(tried)})")
     if len(tried) > 1:
@@ -236,7 +249,9 @@ def vector_fit_vacask(
             surrogate, best.model_order, best.rms_error, "; ".join(tried),
         )
     pin = cast("DCPinHealth | None", best.dc_pin)
-    if pin is not None and pin.message.startswith("DC pin skipped"):
+    if pin is not None and pin.message.startswith(_FORCED):
+        logger.info("Surrogate %s: %s", surrogate, pin.message)
+    elif pin is not None and pin.message.startswith("DC pin skipped"):
         # The model keeps the fit's extrapolated DC admittance, which can connect windings.
         logger.warning("Surrogate %s does not meet its 0 Hz point: %s", surrogate, pin.message)
     circuit = cast("CircuitIR", best.ir)
@@ -244,6 +259,85 @@ def vector_fit_vacask(
     netlist_filename = name + ".inc"
     Path(netlist_filename).write_text(vacask_include(render_vacask(circuit)), encoding="utf-8")
     return netlist_filename
+
+
+#: Whether the snp2le fits of the current context force a DC pin snp2le skips for passivity.
+_FORCE_DC_PIN: contextvars.ContextVar[bool] = contextvars.ContextVar("force_dc_pin", default=False)
+#: The end of snp2le's message when it skips its DC pin for passivity below the band.
+_PASSIVITY_SKIP = "where the fit is passive"
+_FORCED = "DC pin forced"
+#: dY entries below this fraction of the largest target entry are dropped, as in snp2le.
+_DY_ZERO = 1e-12
+#: The function of snp2le's ``dcpin`` module its engine pins with.
+_PIN_HOOK = "add_dc_pin"
+#: snp2le's own ``dcpin.add_dc_pin``, wrapped by :func:`_add_dc_pin`.
+_snp2le_add_dc_pin: Callable[..., tuple[Any, Any]] | None = None
+
+
+@contextlib.contextmanager
+def _forcing_dc_pin(force: bool) -> Iterator[None]:
+    """Make the snp2le fits inside force (or not) a DC pin snp2le skips for passivity.
+
+    snp2le's engine calls ``dcpin.add_dc_pin`` through its module, so the first call routes it
+    through :func:`_add_dc_pin` for good, in whichever process fits (also COBRA's spawned
+    fitting processes). Outside this context the wrapper returns snp2le's result unchanged.
+    """
+    global _snp2le_add_dc_pin  # noqa: PLW0603
+    from snp2le.core import dcpin
+
+    if getattr(dcpin, _PIN_HOOK) is not _add_dc_pin:
+        _snp2le_add_dc_pin = getattr(dcpin, _PIN_HOOK)
+        setattr(dcpin, _PIN_HOOK, _add_dc_pin)
+    token = _FORCE_DC_PIN.set(force)
+    try:
+        yield
+    finally:
+        _FORCE_DC_PIN.reset(token)
+
+
+def _add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
+    """snp2le's ``add_dc_pin``; a pin skipped for passivity below the band is forced if asked."""
+    assert _snp2le_add_dc_pin is not None  # noqa: S101
+    health, s = _snp2le_add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak)
+    if health.ok or not _FORCE_DC_PIN.get() or not health.message.endswith(_PASSIVITY_SKIP):
+        return health, s
+    return _force_dc_pin(health, ir, vf, s0, rz, freq, model_s, fc, leak)
+
+
+def _force_dc_pin(health, ir, vf, s0, rz, freq, model_s, fc, leak):
+    """Add the DC pin snp2le skipped, with snp2le's own target, elements and pinned S.
+
+    The model then meets the 0 Hz point: Y = Y_fit + dY / (1 + s/wc), dY = Y_dc - Y_fit(0).
+    snp2le's engine still checks the DC operating point afterwards and takes the pin out
+    again if it would make it singular.
+    """
+    from snp2le.core import dcpin
+    from snp2le.core.universal import model_sparams
+
+    rz = np.asarray(rz, dtype=float)
+    y_dc = dcpin.dc_target(s0, rz, leak)[0]
+    y_fit0 = _admittance(np.real(model_sparams(vf, [0.0])[0]), rz)
+    dy = y_dc - y_fit0
+    dy[np.abs(dy) < _DY_ZERO * max(1.0, float(np.max(np.abs(y_dc))))] = 0.0
+    elements = dcpin.pin_elements(list(ir.ports), dy, fc)
+    for element in elements:
+        ir.add(element)
+    health.ok = True
+    health.n_sources = sum(1 for element in elements if element.kind == "G")
+    health.message = f"{_FORCED} by COBRA, though {health.message.removeprefix('DC pin skipped: ')}"
+    ir.notes.append(
+        f"DC pin (forced by COBRA): Y = Y_fit + dY / (1 + s/wc), fc = {fc:g} Hz, so the model "
+        "meets the file's 0 Hz point. Nodes dcp_d*, controlled sources Gdcp_*, noiseless"
+    )
+    return health, dcpin.pinned_sparams(model_s, freq, dy, rz, fc)
+
+
+def _admittance(s: np.ndarray, rz: np.ndarray) -> np.ndarray:
+    """Y of a real S-matrix *s* with real reference resistances *rz*: R^-1/2 (I - S)(I + S)^-1 R^-1/2."""
+    eye = np.eye(len(s))
+    g = np.linalg.solve((eye + s).T, (eye - s).T).T
+    r = 1.0 / np.sqrt(rz)
+    return r[:, None] * g * r[None, :]
 
 
 #: Max orders, below the configured one, at which a fit without its thermal noise
