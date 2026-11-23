@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now renamed after their netlist once read, e.g. `deck_hb_op.sim.hb1.raw`.
 - A script that runs COBRA with parallel trials but without an `if __name__ == "__main__":`
   guard stopped with a bare `BrokenProcessPool`; the error now names the missing guard.
+- A VACASK surrogate fit whose DC pin snp2le skipped for passivity below the band kept the
+  fit's extrapolated DC admittance, e.g. a conductance between a transformer's windings
+  (+3 mW P_DC in the OJCAS LNA). COBRA now adds the pin anyway (`VacaskSimulator` setting
+  `force_dc_pin`, on by default) and logs it; a pin skipped for another reason is still
+  logged as a warning.
 
 ## 3.2.0 - 2026-11-06
 
