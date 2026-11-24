@@ -252,15 +252,16 @@ class OptunaOptimizer(BaseOptimizer):
             self._get_study().enqueue_trial(start)
 
     def step(self, context: "OptimizationContext", model_input_ranges: list[OptimizationProperty], netlist_property_ranges: list[OptimizationProperty]) -> None:
+        all_params = model_input_ranges + netlist_property_ranges
         if not self._start_point_queued:
-            self._queue_start_point(model_input_ranges + netlist_property_ranges)
+            self._queue_start_point(all_params)
         trial = self._get_study().ask()
         context.trial = trial
         self._param_to_trial_name = {}
+        by_name = {p.name: p for p in all_params}
+        sampled: dict[str, Any] = {}
 
         def _suggest(params: list[OptimizationProperty], with_unit: bool) -> dict[str, Any]:
-            by_name = {p.name: p for p in params}
-            sampled: dict[str, Any] = {}
             values: dict[str, Any] = {}
 
             for param in params:

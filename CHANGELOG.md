@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - A goal whose value is not a number counted as met if it had both a lower and an upper limit; it
   now counts as failed. Coupling `k` is also defined above a winding's self-resonance.
+- Optuna failed if a netlist variable was linked to a model input, or the other way round.
 
 ## 3.3.0 - 2026-11-24
 
