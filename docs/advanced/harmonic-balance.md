@@ -6,9 +6,7 @@ description: >-
 
 # Harmonic Balance
 
-S-parameters describe only small-signal behavior. For large-signal design — power amplifiers, mixers, or any circuit where compression and mixing products matter — COBRA can optimize against a Harmonic Balance (`.HB`) analysis instead of, or together with, the `.AC` sweep.
-
-HB returns the steady-state spectrum at a chosen point in the circuit: how much power sits at which frequency. That makes it the basis for output-power, gain, and isolation goals.
+For power amplifiers, mixers, or any circuit where compression and mixing products matter, COBRA can optimize against a Harmonic Balance (`.HB`) analysis instead of, or together with, the `.AC` sweep. Its spectrum at a chosen point in the circuit is the basis for output-power, gain, and isolation goals.
 
 ```mermaid
 flowchart LR
@@ -84,8 +82,6 @@ $$P[\mathrm{dBm}] = 10 \cdot \log_{10}\!\left(\frac{2 \cdot \lvert V_\mathrm{pk}
 
 The DC line has no negative-frequency twin and holds the DC value itself, so its power is $\lvert V \cdot I \rvert$: with a 0 V probe in the supply, `Power_dBm[Vdd]` over `0-0.1GHz` is the DC supply power under the HB drive (the bias current changes with drive, so it is not the quiescent power).
 
-Because the real probe current is used instead of an assumed load resistance, the result stays valid for arbitrary and reactive loads, not just 50 Ω.
-
 Gain additionally needs the drive level. It is derived from the SIN source of the port nominated as the input, using its amplitude $A$ and port impedance $z_0$ from the netlist:
 
 $$P_\mathrm{avail} = \frac{A^2}{8 \cdot z_0} \qquad\qquad G[\mathrm{dB}] = P_\mathrm{out}[\mathrm{dBm}] - P_\mathrm{in}[\mathrm{dBm}]$$
@@ -122,7 +118,7 @@ A goal targets one spectral line by giving a single frequency, or a band by givi
 
 ## Isolation
 
-Suppressing spurs with absolute `Power_dBm` caps means re-tuning every cap whenever the wanted signal moves. `Isolation_dB[<node>]` states the requirement the way a datasheet does — as a margin:
+`Isolation_dB[<node>]` limits spurs relative to the wanted signal, instead of with one `Power_dBm` cap per spur:
 
 ```text
 Isolation_dB[Out] > 30 dB  @ 35ghz
@@ -132,12 +128,10 @@ The goal's frequency range names the **wanted** line; every other line in the sp
 
 $$\mathrm{Isolation[dB]} = P_\mathrm{target} - \max_{f \neq f_\mathrm{target}} P(f)$$
 
-so one goal replaces a cap per spur and keeps holding as the design changes: raising conversion gain by 3 dB does not suddenly satisfy it.
-
 !!! note
-    DC is excluded from the spur search. The 0 Hz bin carries the operating point, not a mixing product, and would otherwise dominate every comparison.
+    DC is excluded from the spur search.
 
-A frequency range is required — without a target line there is nothing to measure against, and the goal is rejected before the run starts. Where the range spans several bins, the weakest of them is taken as the target, so the margin is the worst case.
+A frequency range is required. Where the range spans several bins, the weakest of them is taken as the target, so the margin is the worst case.
 
 ### Scripting Example
 
@@ -184,9 +178,6 @@ $$L = \sum_i w_i \cdot p_i$$
 
 If a goal needs an analysis the netlist does not contain, the missing directive is injected automatically — including a matching `.PRINT HB format=csv` line, without which Xyce would produce no HB output at all.
 
-!!! note
-    This is what makes a typical mixer specification expressible in one optimization: `S11` matching from the `.AC` sweep, conversion gain and mixing-product isolation from the `.HB` spectrum.
-
 ## Spectrum Visualization
 
 During optimization the visualization panel plots the spectrum at the selected analysis point as a stem plot, updated every iteration.
@@ -202,8 +193,6 @@ During optimization the visualization panel plots the spectrum at the selected a
 - **Clicking a line** toggles a marker on it, labelled with its frequency, value, and harmonic index — `H2` for single-tone, or the mixing-product decomposition such as `2f1-f2` for multi-tone. Clicking a marked line again removes its marker, and the click snaps to the nearest line, so it need not land exactly on one.
 - When the run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them. When only one is active, that plot is shown and the selector is disabled.
 
-The mixing-product labels are the practical tool for isolation work: they identify which unwanted product a given line belongs to while the optimizer is running.
-
 ## Worked Example: Mixer
 
 `examples/netlists/Mixer/mixer_hb.cir` is a downconverting mixer:
@@ -214,7 +203,7 @@ The mixing-product labels are the practical tool for isolation work: they identi
 | LO input | 95 GHz |
 | IF output (target) | 35 GHz |
 
-The simulation does not use 130 GHz and 95 GHz as fundamentals. It uses `.HB 95E9 10E9` with `numfreq=4,40`, so the coarse 95 GHz tone and a fine 10 GHz grid together resolve 130 GHz and 35 GHz with enough mixing products. The lower fundamental carries far more harmonics precisely because the frequency resolution there is not oversampled.
+The simulation does not use 130 GHz and 95 GHz as fundamentals. It uses `.HB 95E9 10E9` with `numfreq=4,40`, so the coarse 95 GHz tone and a fine 10 GHz grid together resolve 130 GHz and 35 GHz with enough mixing products.
 
 Alongside the wanted difference frequency, the sum frequency (225 GHz) and higher products such as `2f_LO - f_RF` appear. Constraining them is an isolation goal: every line other than the target should sit a defined margin below it.
 

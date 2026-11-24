@@ -164,8 +164,7 @@ supply and bias sources, whose node touches more elements, are not ports. An
 **Port probes.** A port is a probe point named after its source. The HB and
 transient tables get `V(<src>) = R*I(<src>)` and `I(V<src>) = I(<src>)`, so no
 0 V probe source is needed. `Power_dBm[Vout]` is the power into the port
-resistor (`2 R |I|^2` with COBRA's half-amplitude phasors), and a gain goal
-works between two ports:
+resistor, and a gain goal works between two ports:
 
 ```json
 {"parameter": "Gain_dB[Vin@Vout]", "frequency_range": "130ghz", "min_value": 10.0,
@@ -174,82 +173,35 @@ works between two ports:
 ```
 
 `probe_nodes` lists the nodes saved with `v()` and `i()` first, then the port
-sources. A 3 dB attenuator surrogate gives `Gain_dB` = -3.0 dB end to end.
-Instance-style surrogates (an undefined master such as `s_equivalent`) still work
+sources. Instance-style surrogates (an undefined master such as `s_equivalent`) still work
 in this style.
-
-Checked with real xschem LNA netlists (one netlist per analysis, `ground GND`,
-`save default`): they parse and the ports `Vin` and `Vout` are detected.
 
 ### Surrogate file
 
-VACASK surrogates are written by
 [snp2le](https://github.com/iic-jku/snp2le) (Apache-2.0, JKU Linz), a required
-dependency. COBRA runs its universal mode (vector fit, resistors `noisy=0`) and
-makes the file self-contained. It begins with
+dependency, vector-fits each surrogate and writes it as a self-contained subcircuit
+that works with any ground name and is unaffected by the netlist's `model` lines.
+Include it at the top level.
 
-```text
-ground GND
-load "capacitor.osdi"
-load "inductor.osdi"
-load "resistor.osdi"
-
-subckt X1_subct (...)
-  model resistor resistor
-  ...
-```
-
-`ground GND` is snp2le's ground name; VACASK accepts several, so the file also
-works in decks with `ground 0`. The `load` lines and local `model` bindings
-mean the netlist's own `model` lines (for example a PDK resistor) do not apply
-to the surrogate. Include it at the top level. The setting `vector_fit_max_order`
-(default 12) is the highest model order snp2le may use: snp2le's GUI default of 6
-is too coarse.
-
-Broadband models need more. The octagonal-inductor model of the LNA preset spans
-0 to 500 GHz: at order 12 its fit is off by up to 0.17 in |S| at 110 to 170 GHz,
-at order 40 by 0.02, and orders 40 and 60 give the same circuit results, so
-`examples/configs/vacask_lna_inductor.json` sets 40. Check a new model by
-re-simulating one design at two orders.
-
-A high max order is no guarantee of a good fit, though: snp2le's passivity
-enforcement can perturb a high-order fit, or fall back to a reduced order, and
-the optimizer then finds designs whose performance exists only in the fit. A fit
-with an RMS error above 3e-3 is therefore refitted at lower max orders (30, 20,
-15, 12, 10, those below `vector_fit_max_order`) until one reaches 3e-3, and the
-fit with the lowest RMS error is kept; COBRA logs the orders tried. On 40 + 40
-random geometries of ORCA's inductor and transformer models this cut the worst
-in-band error from 0.080 to 0.027 and from 0.065 to 0.014.
-
-snp2le pins each fit to the surrogate's 0 Hz point, through a low-pass at 160 Hz,
-so a winding's DC resistance and the isolation between windings are the data's.
-It skips the pin when the pinned model would exceed passivity (sigma_max = 1)
-below the band where the fit is passive, by less than 1e-2 between a few Hz and
-the corner. The model would then keep the fit's own, extrapolated DC admittance,
-which for ORCA transformer surrogates can be a conductance of ~1 S between the
-windings: in the OJCAS LNA it raised P_DC by 3 mW. With `force_dc_pin` (the
-default) COBRA adds the pin anyway in that case and logs it at INFO level; the
-excursion lies far below the frequencies of op, AC, noise and HB analyses, but
-check it before long transient runs or phase noise at offsets of a few Hz.
-snp2le still takes a pin out that would make the DC operating point singular,
-and COBRA logs a warning for every fit left without its pin.
-
-COBRA switches off snp2le's convex passivity refit (`convex_max_states=0`): on
-ORCA transformer surrogates it lowers the worst RMS error from 2.4e-3 to 7e-4, but
-a fit takes seconds instead of tenths of a second, in every trial.
-
-A fit that does not converge is stopped by snp2le after 250 pole
-relocations and refitted at the pole counts it was cycling at, so the trial keeps
-a model. The Xyce backend fits with scikit-rf directly; there COBRA stops such a
-fit after 1000 relocations, logs a warning and penalises the trial.
+- **Order:** `vector_fit_max_order` is the highest model order. Broadband models need
+  more than the default 12: `examples/configs/vacask_lna_inductor.json` uses 40 for an
+  inductor model spanning 0 to 500 GHz. Check a new model by re-simulating one design
+  at two orders.
+- **Poor fits:** a fit with an RMS error above 3e-3 is refitted at lower max orders (30,
+  20, 15, 12, 10) and the best one is kept. The log names the orders tried.
+- **0 Hz point:** each fit is pinned to the surrogate's 0 Hz point, which sets a winding's
+  DC resistance and the isolation between windings. snp2le skips the pin when it would
+  make the model non-passive below the band; with `force_dc_pin` (the default) COBRA adds
+  it anyway. The model then exceeds passivity by less than 1e-2 between a few Hz and
+  160 Hz: check this before long transient runs or phase noise at offsets of a few Hz.
+  COBRA warns about every fit left without its pin.
+- **Fits that do not converge** are stopped and refitted by snp2le. With Xyce, COBRA
+  stops them, logs a warning and penalises the trial.
 
 ### PDK models (IHP SG13G2)
 
-Use the PDK converted for VACASK rather than a foreign include of its ngspice
-models. The ngspice files do not load as they are: `sg13g2_hbt_mod.lib` is
-Latin-1 (VACASK reads UTF-8 only), the HBT cards carry ngspice-only parameters
-such as `vbe_max`, and the resistors use an `r3_cmc` model Cadnip does not map.
-VACASK's `sg13g2tovc` script converts the PDK once:
+VACASK cannot load the PDK's ngspice models as they are. Convert the PDK once with
+VACASK's `sg13g2tovc` script:
 
 ```bash
 PDK_ROOT=/path/to/IHP-Open-PDK PDK=ihp-sg13g2 python3 /path/to/vacask/lib/vacask/python/sg13g2tovc.py
@@ -272,16 +224,13 @@ with the PDK's `.vacaskrc.toml` copied to `~/.vacaskrc.toml`. A missing module
 path shows up as `File 'mosvar.osdi' not found`.
 
 !!! warning "Write `nx` as a real number"
-    The IHP HBT computes series resistances from `(4/nx)`. VACASK evaluates an
-    integer division for an integer `nx`, so `nx=8` zeroes them and the gain
-    jumps (by about 9 dB in the LNA example). Write `nx=8.0`; values COBRA's
+    With an integer `nx`, VACASK's integer division zeroes the HBT's series
+    resistances and the gain jumps. Write `nx=8.0`, not `nx=8`; values COBRA's
     optimizer writes are always real numbers.
 
 `examples/netlists/VACASK/lna_trafo_hb.sim` (configuration
 `examples/configs/vacask_lna_trafo_hb.json`) is the LNA example ported this way.
-Against the Xyce version with the same surrogate, its 130 GHz gain is 2.6 dB
-against Xyce's 3.4 dB; the difference comes from the PDK's VBIC 1.15 (Xyce) and
-VBIC 1.3 (VACASK) models, not from COBRA.
+Its gain differs slightly from the Xyce version, since the PDK's VBIC models do.
 
 !!! note
     Relative includes resolve from the copy of the deck in
@@ -349,9 +298,7 @@ Written next to the netlist copy in the results directory:
 | `noise` | `<netlist>.NOISE.csv`: `FREQ`, `ONOISE`, `GAIN`, `NF` |
 | `hbnoise` | `<netlist>.HBNOISE.csv`: `FREQ`, `ONOISE`, `GAIN_SIG`, `NF_DSB`, and with the image twin `GAIN_IMG`, `NF_SSB` |
 
-VACASK reports peak amplitudes. COBRA halves the HB phasors so they follow the
-Xyce convention (amplitude/2): a 0.2 V source with 50 ohm into 50 ohm gives
-exactly -10 dBm.
+COBRA halves VACASK's HB phasors to follow the Xyce convention (amplitude/2).
 
 ## Noise Figure
 
@@ -371,30 +318,18 @@ with `n_out` the total output noise, `n_src` the noise the source-port resistor
 contributes to it, `n_term` that of the other ports' resistors, `T0` = 290 K and
 `T` the simulation temperature (`options temp=` in degrees Celsius, default 27).
 The other ports' resistors are terminations and are excluded, as in Spectre and
-ADS. A matched 6 dB pad gives NF = 6.000 dB. The source-port resistor must be
-noisy (the default).
+ADS. The source-port resistor must be noisy (the default).
 
 ### Surrogate noise
 
-Vector-fit resistors are written with `noisy=0`: they place poles, they do not
-model loss. By default surrogate blocks are therefore noiseless, and the NF is
-optimistic by roughly the loss of the surrogate blocks in front of the first
-gain stage.
+Surrogates are noiseless by default, so the NF is optimistic by roughly the loss of
+the surrogates in front of the first gain stage. With `"surrogate_thermal_noise": true`
+they emit the thermal noise of a passive, kT(I - S S^H), at their ports; their
+S-parameters stay unchanged.
 
-With `"surrogate_thermal_noise": true`, snp2le appends a noise generator to each
-surrogate subcircuit: one 0.25 ohm resistor per port (the only noisy elements)
-drives a spectral factor of the fit, so the ports emit the noise of a passive
-at the simulation temperature, kT(I - S S^H) (Bosma). The S-parameters and the
-operating point stay unchanged. The generator exists only for a strictly passive
-fit, so the setting requires `"enforce_passivity": true` and COBRA rejects the
-configuration otherwise. Fits of de-embedded EM data at high orders often miss
-strict passivity, and whether one does scatters across orders. A fit without the
-generator is therefore refitted at the same lower max orders as a poor fit
-(above), each kept below the order the previous fit stopped at; COBRA logs the
-orders tried and the one kept. If no order gets the generator, the
-trial is penalised like a failed fit, because a noiseless surrogate would make
-the noise figure optimistic. A matched passive two-port at T0 then has NF = 1/G_av,
-checked against VACASK to 1e-3 dB. Xyce surrogates stay noiseless.
+This needs a strictly passive fit, so `"enforce_passivity": true` is required. A fit that
+misses it is refitted at the lower max orders [above](#surrogate-file); if none reaches
+it, the trial is penalised. Xyce surrogates stay noiseless.
 
 ### Mixers (`hbnoise`)
 
@@ -410,19 +345,15 @@ If `inspur` is given in Hz instead of tone weights, `NF_SSB` is unavailable and
 COBRA warns.
 
 !!! note "Version"
-    `hbnoise` exists only on VACASK `main` builds after release 0.3.4 (checked
-    with `0.3.4-98-g5abdba1f`); an older binary fails with "Analysis type
-    'hbnoise' not found". The noise figures are checked against an ideal
-    multiplying mixer: with a noiseless mixer `NF_DSB` = 0 dB and `NF_SSB` = 3.01 dB,
-    and with a noisy 50 ohm shunt at the RF node 3.01 dB and 6.02 dB, matching the
-    analytic values to 0.001 dB.
+    `hbnoise` needs a VACASK `main` build after release 0.3.4 (checked with
+    `0.3.4-98-g5abdba1f`); an older binary fails with "Analysis type 'hbnoise' not
+    found".
 
 ## Units
 
-VACASK's SI prefixes are case-sensitive: `f p n u m k M G T`. `M` is mega, and
-`F`, `P`, `U` are not prefixes. An optimization parameter's `unit` is appended
-verbatim, so use `"f"` (not `"F"`) for femtofarads. `cobra parse` warns when a
-VACASK `unit` has no VACASK scale prefix.
+VACASK's SI prefixes are case-sensitive: `f p n u m k M G T`, with `M` for mega. Use
+`"f"` (not `"F"`) as an optimization parameter's `unit` for femtofarads; `cobra parse`
+warns about a `unit` VACASK does not know.
 
 ## Tests
 

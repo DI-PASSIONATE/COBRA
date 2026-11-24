@@ -6,7 +6,7 @@ description: >-
 
 # Transient Analysis
 
-A transient (`.TRAN`) analysis is the second way COBRA obtains a large-signal spectrum. Where [Harmonic Balance](harmonic-balance.md) solves for the periodic steady state directly, transient integrates the circuit in time; COBRA then takes the FFT of the settled part of the waveform. From that point on both analyses are identical: the same phasor convention, the same power formula, the same goals and the same plot.
+A transient (`.TRAN`) analysis is the second way to a large-signal spectrum: COBRA takes the FFT of the settled part of the waveform. Goals and plots are the same as with [Harmonic Balance](harmonic-balance.md).
 
 ```mermaid
 flowchart LR
@@ -44,7 +44,7 @@ All four `.TRAN` arguments are editable under **Simulation Parameters** once the
 Xyce integrates from $t = 0$ but only prints from `start_time` on, so `start_time` is the settling time: everything before it — the start-up transient — never reaches the FFT. The printed window `stop_time − start_time` then determines the spectrum:
 
 - The frequency resolution is $1 / (\text{stop\_time} - \text{start\_time})$. A 1 ns window gives 1 GHz bins.
-- The window should hold a **whole number of periods** of every tone of interest. The FFT is not windowed, because a whole number of periods leaves no leakage and a window would only smear energy into neighbouring bins.
+- The window should hold a **whole number of periods** of every tone of interest. The FFT is not windowed.
 - A goal frequency must land on a bin. `cobra parse` warns when it does not.
 
 For the mixer example the choice is:
@@ -58,7 +58,7 @@ One nanosecond to settle, one nanosecond of signal: 35 GHz, 95 GHz and 130 GHz a
 !!! tip
     Start with a generous `start_time` and shorten it while the goal values stay put: once they stop changing, the circuit was already settled.
 
-Xyce prints at the time steps its integrator actually took, which are neither exactly `step` nor perfectly uniform. COBRA interpolates the samples onto a uniform grid before the FFT, so the `step` argument only sets the initial step, and `max_step` the ceiling.
+COBRA interpolates Xyce's time steps onto a uniform grid before the FFT: `step` is the initial step, `max_step` the ceiling.
 
 ## From Waveform to Spectrum
 
@@ -100,7 +100,7 @@ In a configuration file the analysis is stated explicitly next to `kind`:
 }
 ```
 
-`analysis` defaults to `"HB"`, so existing configurations are unchanged. In the GUI, both families appear in the goal dialog; the netlist's own analysis is listed first.
+`analysis` defaults to `"HB"`.
 
 ### Scripting Example
 
@@ -121,7 +121,7 @@ If a goal needs a `.TRAN` analysis the netlist does not contain, COBRA injects o
 
 The transient spectrum uses the same stem plot as HB, selected through the **Plot** dropdown as *Transient Spectrum* when the run produces it. Quantity selection, gain reference port and click-to-mark behave identically.
 
-The fundamentals used to colour and label the lines are the SIN frequencies of the driven ports, highest first: for the mixer (`P2` at 130 GHz, `P1` at 95 GHz) the IF line is labelled `f1-f2`. Because an FFT has a bin at every multiple of the resolution, labels are limited to mixing products up to fifth order so noise-floor bins are not dressed up as far-fetched products.
+The fundamentals used to colour and label the lines are the SIN frequencies of the driven ports, highest first: for the mixer (`P2` at 130 GHz, `P1` at 95 GHz) the IF line is labelled `f1-f2`. Labels are limited to mixing products up to fifth order.
 
 ## Worked Example: Mixer
 
@@ -131,7 +131,7 @@ The fundamentals used to colour and label the lines are the SIN frequencies of t
 cobra run examples/configs/mixer_tran_config.json
 ```
 
-`examples/configs/mixer_hb_tran_config.json` evaluates both analyses in one run: it uses the HB netlist, injects the `.TRAN` analysis from `simulation_parameters`, and carries the HB and the `TRAN:` goals side by side. Both should report the same gain and isolation; with a 1 ps step the transient values sit within about 0.2 dB (gain) and 0.5 dB (isolation) of HB, and they converge onto the HB values as the step shrinks (0.1 ps: within 0.02 dB).
+`examples/configs/mixer_hb_tran_config.json` evaluates both analyses in one run: it uses the HB netlist, injects the `.TRAN` analysis from `simulation_parameters`, and carries the HB and the `TRAN:` goals side by side. The transient values converge onto the HB values as the step shrinks (1 ps: within about 0.5 dB).
 
 ## Result Files
 
