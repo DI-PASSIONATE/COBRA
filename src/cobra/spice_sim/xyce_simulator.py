@@ -21,6 +21,7 @@ from cobra.spice_sim.base_simulator import (
 )
 from cobra.spice_sim.hb_spectrum import spice_float
 from cobra.spice_sim.netlist_parsers.netlist import Netlist
+from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
 from cobra.spice_sim.netlist_parsers.statement import Statement
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
@@ -44,7 +45,8 @@ def _is_device_options(statement: Statement, parser: XyceNetlistParser) -> bool:
 
 
 class XyceSimulator(BaseSimulator):
-    netlist_parser: ClassVar[XyceNetlistParser] = XyceNetlistParser()
+    _parser: ClassVar[XyceNetlistParser] = XyceNetlistParser()
+    netlist_parser: ClassVar[NetlistParser] = _parser
     supported_simulation_types: ClassVar[frozenset[SimulationType]] = frozenset(
         {SimulationType.AC, SimulationType.HB, SimulationType.TRAN, SimulationType.DC, SimulationType.NOISE}
     )
@@ -154,7 +156,7 @@ class XyceSimulator(BaseSimulator):
 
         # Drop the top-level directives of other analyses, each with its
         # continuation lines, and insert the new ones before .END.
-        parser = self.netlist_parser
+        parser = self._parser
         dropped = parser.analysis_keywords | parser.modifier_keywords | _ANALYSIS_COMPANIONS
         kept = [
             statement for statement in netlist.statements
@@ -210,8 +212,8 @@ class XyceSimulator(BaseSimulator):
         )
         if directive is None or len(directive.positional) < 2:
             return netlist
-        source = self.netlist_parser.fold(directive.positional[1])
-        parser = self.netlist_parser
+        source = self._parser.fold(directive.positional[1])
+        parser = self._parser
         statements = list(netlist.statements)
         for element in netlist.list_elements(["P", "V", "I"]):
             statement = statements[element.statement_index]

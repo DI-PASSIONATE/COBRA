@@ -224,8 +224,8 @@ in-band error from 0.080 to 0.027 and from 0.065 to 0.014.
 snp2le pins each fit to the surrogate's 0 Hz point, through a low-pass at 160 Hz,
 so a winding's DC resistance and the isolation between windings are the data's.
 It skips the pin when the pinned model would exceed passivity (sigma_max = 1)
-below the band where the fit is passive, typically by 1e-4 to 1e-3 around the
-corner. The model would then keep the fit's own, extrapolated DC admittance,
+below the band where the fit is passive, by less than 1e-2 between a few Hz and
+the corner. The model would then keep the fit's own, extrapolated DC admittance,
 which for ORCA transformer surrogates can be a conductance of ~1 S between the
 windings: in the OJCAS LNA it raised P_DC by 3 mW. With `force_dc_pin` (the
 default) COBRA adds the pin anyway in that case and logs it at INFO level; the
@@ -233,6 +233,10 @@ excursion lies far below the frequencies of op, AC, noise and HB analyses, but
 check it before long transient runs or phase noise at offsets of a few Hz.
 snp2le still takes a pin out that would make the DC operating point singular,
 and COBRA logs a warning for every fit left without its pin.
+
+COBRA switches off snp2le's convex passivity refit (`convex_max_states=0`): on
+ORCA transformer surrogates it lowers the worst RMS error from 2.4e-3 to 7e-4, but
+a fit takes seconds instead of tenths of a second, in every trial.
 
 A fit that does not converge is stopped by snp2le after 250 pole
 relocations and refitted at the pole counts it was cycling at, so the trial keeps

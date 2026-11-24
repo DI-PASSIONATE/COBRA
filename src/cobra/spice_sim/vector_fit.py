@@ -5,7 +5,7 @@ import os
 import re
 import threading
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -199,7 +199,7 @@ def vector_fit_vacask(
     When *nw* has a 0 Hz point, snp2le pins the model to it (its DC pin), so a winding's DC
     resistance and isolation are the data's, not the fit's extrapolation.  snp2le leaves the
     pin out when the pinned model would exceed sigma_max = 1 somewhere below the band where
-    the fit is passive, typically by 1e-4 to 1e-3 around the pin's 160 Hz corner.  With
+    the fit is passive, by less than 1e-2 between a few Hz and the pin's 160 Hz corner.  With
     *force_dc_pin* COBRA adds the pin anyway in that case (see :func:`_force_dc_pin`); the
     excursion stays far below the frequencies of op, AC, noise and HB analyses.  A pin left
     out for another reason is logged as a warning.
@@ -217,7 +217,11 @@ def vector_fit_vacask(
     with _forcing_dc_pin(force_dc_pin):
         while cap is not None:
             state = ConverterState(
-                mode="universal", enforce_passivity=enforce_passivity, max_order=cap, thermal_noise=thermal_noise
+                mode="universal",
+                enforce_passivity=enforce_passivity,
+                max_order=cap,
+                thermal_noise=thermal_noise,
+                convex_max_states=0,
             )
             result = convert(state, nw)
             if not result.ok:
@@ -275,7 +279,7 @@ _snp2le_add_dc_pin: Callable[..., tuple[Any, Any]] | None = None
 
 
 @contextlib.contextmanager
-def _forcing_dc_pin(force: bool) -> Iterator[None]:
+def _forcing_dc_pin(force: bool) -> Generator[None]:
     """Make the snp2le fits inside force (or not) a DC pin snp2le skips for passivity.
 
     snp2le's engine calls ``dcpin.add_dc_pin`` through its module, so the first call routes it
