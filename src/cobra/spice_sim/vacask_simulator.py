@@ -480,14 +480,14 @@ class VacaskSimulator(BaseSimulator):
         gain = np.real(variables["gain"])
         columns: dict[str, np.ndarray] = {"FREQ": np.real(variables["frequency"]), "ONOISE": onoise}
         if directive.simulation_type is SimulationType.NOISE:
-            columns |= {"GAIN": gain, "NF": 10 * np.log10(factor)}
+            columns |= {"GAIN": gain, "NF": noise_figure_db(factor)}
             return pd.DataFrame(columns)
-        columns |= {"GAIN_SIG": gain, "NF_DSB": 10 * np.log10(factor)}
+        columns |= {"GAIN_SIG": gain, "NF_DSB": noise_figure_db(factor)}
         if image is not None:
             image_gain = np.real(image.variables["gain"])
             columns |= {
                 "GAIN_IMG": image_gain,
-                "NF_SSB": 10 * np.log10(factor * (gain + image_gain) / gain),
+                "NF_SSB": noise_figure_db(factor * (gain + image_gain) / gain),
             }
         return pd.DataFrame(columns)
 
@@ -558,6 +558,12 @@ def noise_factor(
     """
     added = onoise - source - terminations
     return 1.0 + added * temperature / (source * T0)
+
+
+def noise_figure_db(factor: np.ndarray) -> np.ndarray:
+    """The noise figure in dB of a noise factor; NaN where the factor is not positive."""
+    factor = np.asarray(factor, dtype=float)
+    return 10 * np.log10(np.where(factor > 0, factor, np.nan))
 
 
 def _image_spur(text: str) -> str | None:
