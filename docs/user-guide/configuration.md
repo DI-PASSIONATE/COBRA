@@ -444,6 +444,11 @@ process cannot overlap. A Python script that runs COBRA this way must start it
 under `if __name__ == "__main__":`, since the worker processes import the script;
 without it they run the script again and die, and COBRA stops with an error saying so.
 
+A component whose S-parameters are the same as in an earlier trial is not fitted again:
+a fixed Touchstone component, every component of a [retune](../advanced/fine-tuning.md#retune-with-the-em-models-fixed),
+or a geometry the optimizer returns to. The last 128 fits of a run are kept; the log
+gives the number of fits made and reused at the end.
+
 The summary's `wall time` is always the run's elapsed time. The per-stage
 percentages beside it are shares of the summed stage times, which measure work
 done rather than time elapsed and therefore add up to more than `wall time` when

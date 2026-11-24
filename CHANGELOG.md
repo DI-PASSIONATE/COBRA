@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different analyses and may be expressions themselves. The formula takes numbers,
   `+ - * / **`, `abs`, `sqrt`, `exp`, `ln`, `log10`, `min` and `max`, and is parsed, not
   evaluated as Python. In the GUI: the goal dialog's *Expression* tab.
+- A surrogate with the same S-parameters as in an earlier trial is not fitted again, e.g. a
+  fixed Touchstone component or the components of a retune.
 - `design_goals[].scale`: the unit a goal's miss of its bound is measured in, e.g. `1.0`
   for one dB. In the GUI: the goal dialog's *Scale*.
 
