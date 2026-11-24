@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pandas as pd
     import skrf as rf
 
@@ -13,6 +16,7 @@ if TYPE_CHECKING:
     from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
     from cobra.spice_sim.simulation_type import SimulationType, SimulationTypeMetadata
 
+logger = logging.getLogger(__name__)
 
 #: Reference temperature of the noise figure (IEEE), in kelvin.
 T0 = 290.0
@@ -61,6 +65,19 @@ class BaseSimulator(ABC):
     #: Whether :meth:`preprocess_ntwk` writes one file that depends only on the network, the last
     #: part of the name and the settings, so COBRA may reuse it for the same network.
     reuses_fits: ClassVar[bool] = False
+
+    #: Seconds one simulation may run (``simulation_timeout``); 0 sets no limit.
+    timeout: float = 0.0
+
+    def report_timeout(self, simulator: str, sim_type: SimulationType, results_dir: str | Path) -> None:
+        """Log that *simulator* was stopped at :attr:`timeout`; the caller returns ``None``."""
+        logger.warning(
+            "%s stopped after %g s (simulation_timeout) for %s in %s",
+            simulator,
+            self.timeout,
+            sim_type,
+            results_dir,
+        )
 
     @classmethod
     def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:

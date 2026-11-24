@@ -41,6 +41,7 @@ optional executable. Select the backend in the configuration:
 | `enforce_passivity` | `false` | Enforce passivity on the vector-fitted surrogate; slower pre-processing, no non-physical gain |
 | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise, so noise figures include their losses; requires `enforce_passivity`. See [Surrogate noise](#surrogate-noise) |
 | `force_dc_pin` | `true` | Pin each surrogate fit to its 0 Hz point also where snp2le would skip the pin for passivity below the band. See [Surrogate file](#surrogate-file) |
+| `simulation_timeout` | `0` | Seconds one simulation may run before it is stopped and the trial counts as failed; `0` sets no limit |
 
 COBRA runs `vacask -sp -qp -n N deck.sim`, so the `postprocess` steps of the
 `control` block are skipped. Use `--simulator VacaskSimulator` with

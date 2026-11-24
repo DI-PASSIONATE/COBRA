@@ -24,6 +24,7 @@ from cobra.spice_sim.netlist_parsers.netlist import Netlist
 from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
 from cobra.spice_sim.netlist_parsers.statement import Statement
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
+from cobra.spice_sim.run_command import TIMEOUT_SETTING, check_timeout, run_command
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vector_fit import vector_fit
 
@@ -95,6 +96,7 @@ class XyceSimulator(BaseSimulator):
             ),
             advanced=True,
         ),
+        TIMEOUT_SETTING,
     ]
 
     def __init__(
@@ -103,6 +105,7 @@ class XyceSimulator(BaseSimulator):
         parallel_xyce: bool = False,
         enforce_passivity: bool = False,
         parallel_xyce_processes: int = DEFAULT_XYCE_PROCESSES,
+        simulation_timeout: float = 0.0,
     ):
         if isinstance(parallel_xyce_processes, bool) or not isinstance(parallel_xyce_processes, int):
             raise ConfigurationError("parallel_xyce_processes must be an integer")
@@ -114,6 +117,7 @@ class XyceSimulator(BaseSimulator):
         self.parallel = parallel_xyce
         self.enforce_passivity = enforce_passivity
         self.parallel_processes = parallel_xyce_processes
+        self.timeout = check_timeout(simulation_timeout)
 
     def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # Preprocess the network by vector fitting the S-parameters to create a compact model that can be included in the netlist for circuit simulation.
@@ -262,11 +266,11 @@ class XyceSimulator(BaseSimulator):
             ["mpirun", "-np", str(self.parallel_processes)] if self.parallel else []
         )
         command = [*parallel_command, self.xyce_command, netlist_base]
-        # check=False: a non-zero return code is reported below, not raised.
         try:
-            proc = subprocess.run(
-                command, capture_output=True, text=True, cwd=results_dir, check=False
-            )
+            proc = run_command(command, results_dir, self.timeout)
+        except subprocess.TimeoutExpired:
+            self.report_timeout("Xyce", sim_type, results_dir)
+            return None
         except OSError as exc:
             # The executable is missing or cannot be started: no choice of design
             # parameters can fix this, so abort instead of penalising the trial.

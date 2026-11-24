@@ -230,6 +230,10 @@ analysis the chosen simulator cannot run are rejected before the run starts.
 | | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity` |
 | | `force_dc_pin` | `true` | Pin each surrogate fit to its 0 Hz point also where snp2le skips the pin for passivity below the band |
 
+Both take `simulation_timeout` (default `0`, no limit): the seconds one simulation may run
+before it is stopped and the trial counts as failed. Set it well above a normal run; harmonic
+balance can take minutes.
+
 See [Surrogate file](../advanced/vacask.md#surrogate-file) for the VACASK fit settings.
 
 VACASK netlists use VACASK analysis names as `simulation_parameters` keys

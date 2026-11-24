@@ -124,6 +124,7 @@ guarantees.
 
 ## Large Runtime or Slow Progress
 
+- If a run stops making progress because a simulation hangs, set the simulator's `simulation_timeout`.
 - Reduce `max_iterations` during early debugging.
 - Narrow parameter search ranges.
 - Start with fewer design goals, then add constraints incrementally.

@@ -34,6 +34,7 @@ from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import (
     vacask_float,
 )
 from cobra.spice_sim.raw_file import RawPlot, read_raw
+from cobra.spice_sim.run_command import TIMEOUT_SETTING, check_timeout, run_command
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.vector_fit import vector_fit_vacask
 
@@ -138,6 +139,7 @@ class VacaskSimulator(BaseSimulator):
             ),
             advanced=True,
         ),
+        TIMEOUT_SETTING,
     ]
 
     def __init__(
@@ -148,6 +150,7 @@ class VacaskSimulator(BaseSimulator):
         vector_fit_max_order: int = 12,
         surrogate_thermal_noise: bool = False,
         force_dc_pin: bool = True,
+        simulation_timeout: float = 0.0,
     ):
         if isinstance(vacask_threads, bool) or not isinstance(vacask_threads, int):
             raise ConfigurationError("vacask_threads must be an integer")
@@ -172,6 +175,7 @@ class VacaskSimulator(BaseSimulator):
             )
         self.surrogate_thermal_noise = surrogate_thermal_noise
         self.force_dc_pin = force_dc_pin
+        self.timeout = check_timeout(simulation_timeout)
 
     def preprocess_ntwk(self, ntwk, name="cobra_output"):
         # snp2le models the S-parameters as a VACASK subcircuit in <name>.inc.
@@ -333,14 +337,10 @@ class VacaskSimulator(BaseSimulator):
 
         command = [self.vacask_command, "-sp", "-qp", "-n", str(self.threads), netlist_base]
         try:
-            proc = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                cwd=results_dir,
-                check=False,
-                stdin=subprocess.DEVNULL,
-            )
+            proc = run_command(command, results_dir, self.timeout, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            self.report_timeout("VACASK", sim_type, results_dir)
+            return None
         except OSError as exc:
             raise SimulatorError(
                 f"Could not run '{' '.join(command)}': {exc}. "
