@@ -166,6 +166,16 @@ Each parsed component maps to one source path:
 - ONNX surrogate model for optimizable geometry behavior, or
 - fixed Touchstone file when component response is static.
 
+COBRA reads this metadata of an ONNX model, all written by ORCA:
+
+| Key | Use |
+| --- | --- |
+| `input_parameter_ranges` | Required for `frequency`: the band the model is evaluated over, in 1 GHz steps plus sub-GHz points if it starts below 1 GHz. Trained ranges, and the `step` of inputs such as whole turns, for the checks of `cobra parse` |
+| `input_constraints` | Geometries that violate one are [not simulated](../advanced/troubleshooting.md#trained-ranges-and-infeasible-geometries) |
+| `windings` | Ports (1-based) of each winding, e.g. `[[1, 2, 5], [3, 4, 6]]`. The predicted 0 Hz point is replaced by that of ideal windings: no path to ground or between windings |
+| `touchstone_type` | The Palace result EM fine-tuning uses (`normal`, `dc`, `deembedded` or `dc_deembedded`; `dc` without the key) |
+| `physics_guarantees`, `orca_version` | Shown by `cobra parse` and the GUI |
+
 ## Vector Fit Integration
 
 COBRA uses vector fitting so surrogate/frequency-domain responses can be represented in SPICE-compatible subcircuit form for Xyce simulation.

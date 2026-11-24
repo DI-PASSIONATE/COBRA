@@ -10,7 +10,7 @@ the docs do not settle the question; call out docs/code differences.
 | JSON schema and paths | `docs/user-guide/configuration.md` | `src/cobra/configuration/` |
 | CLI and `cobra parse` | `docs/user-guide/configuration.md` (Inspect Before Running) | `src/cobra/__main__.py`, `src/cobra/configuration/inspection.py` |
 | Python API | `docs/api/core.md`, `docs/user-guide/scripting.md` | `src/cobra/cobra.py` |
-| Goals and parameters | README capability tables | `src/cobra/optimizers/design_goal_collection.py`, `design_goal.py` |
+| Goals and parameters | `docs/user-guide/configuration.md` (Design Goals), `docs/api/optimizers.md` | `src/cobra/optimizers/design_goal_collection.py`, `design_goal.py` |
 | Harmonic Balance | `docs/advanced/harmonic-balance.md` | `src/cobra/spice_sim/hb_spectrum.py` |
 | Fine-tuning | `docs/advanced/fine-tuning.md` | `src/cobra/configuration/geometry_loader.py`, `src/cobra/stages/` |
 | GUI | `docs/user-guide/gui.md` | `src/cobra/gui/` |

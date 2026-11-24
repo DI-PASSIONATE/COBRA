@@ -115,6 +115,15 @@ Once a goal exists, the dialog's *Expression* tab makes a goal on a formula over
 - `MODEL_INPUT`: geometry/model inputs for ONNX surrogate components.
 - `NETLIST_VARIABLE`: parsed netlist values patched directly in netlist text.
 
+## Models from Hugging Face
+
+The **HuggingFace** button of a component lists the models tagged `orca-rfic` on Hugging Face
+and those already downloaded (`[LOCAL]`). **Download** saves a repository to
+`./models/<owner>/<repo>/`; **Use** selects its `<repo>.onnx`. A repository may also hold
+`<repo>.py` with the ORCA geometry class; without it, EM fine-tuning is off for that model.
+[ORCA's documentation](https://di-passionate.github.io/ORCA/sharing_models/) covers sharing
+your own models.
+
 ## During Optimization
 
 The GUI displays:
