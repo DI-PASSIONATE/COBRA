@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from cobra.spice_sim.netlist_parsers.netlist import Netlist, SimulationDirective
+    from cobra.spice_sim.netlist_parsers.netlist_parser import NetlistParser
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,8 @@ _EXTRA_DEFAULTS: dict[SimulationType, dict[str, str]] = {
 
 
 class VacaskSimulator(BaseSimulator):
-    netlist_parser: ClassVar[VacaskNetlistParser] = VacaskNetlistParser()
+    _parser: ClassVar[VacaskNetlistParser] = VacaskNetlistParser()
+    netlist_parser: ClassVar[NetlistParser] = _parser
     supported_simulation_types: ClassVar[frozenset[SimulationType]] = frozenset({
         SimulationType.AC,
         SimulationType.HB,
@@ -199,7 +201,7 @@ class VacaskSimulator(BaseSimulator):
         image-sideband twin for the SSB noise figure.  A noise analysis COBRA
         adds sweeps *goal_band* unless *sim_params* give ``from`` or ``to``.
         """
-        parser = self.netlist_parser
+        parser = self._parser
         analyses = [d for d in netlist.simulation_directives if d.name is not None]
         wanted = [d for d in analyses if d.simulation_type is sim_type]
         names = {d.name for d in analyses}
@@ -269,7 +271,7 @@ class VacaskSimulator(BaseSimulator):
                     f'or set simulation_parameters["{sim_type.name}"]["out"].'
                 )
             if "in" not in params:
-                pairs = self.netlist_parser.port_pairs(netlist)
+                pairs = self._parser.port_pairs(netlist)
                 if not pairs:
                     raise ConfigurationError(
                         f"A {sim_type.name} analysis needs its input port source: declare ports "
@@ -289,7 +291,7 @@ class VacaskSimulator(BaseSimulator):
         self, name: str, sim_type: SimulationType, positional: list[str], params: dict[str, str]
     ) -> str:
         """An ``analysis`` statement named *name* with the given slot values and parameters."""
-        parser = self.netlist_parser
+        parser = self._parser
         stub = parser.make_statements(f"analysis {name} {parser.analysis_keyword(sim_type)}\n")[0]
         if self.get_simulation_metadata(sim_type).positional_param_names == ["freq"]:
             positional = " ".join(positional).split()
@@ -413,13 +415,13 @@ class VacaskSimulator(BaseSimulator):
             result.output_files.append(str(touchstone))
         elif sim_type is SimulationType.HB:
             path = Path(f"{stem}.HB.FD.csv")
-            frame = add_port_signals(hb_dataframe(plot), self.netlist_parser.port_resistances(netlist))
+            frame = add_port_signals(hb_dataframe(plot), self._parser.port_resistances(netlist))
             frame.to_csv(path, index=False)
             result.dataframes[str(path)] = frame
             result.output_files.append(str(path))
         elif sim_type is SimulationType.TRAN:
             path = Path(f"{stem}.csv")
-            frame = add_port_signals(tran_dataframe(plot), self.netlist_parser.port_resistances(netlist))
+            frame = add_port_signals(tran_dataframe(plot), self._parser.port_resistances(netlist))
             frame.to_csv(path, index=False)
             result.dataframes[str(path)] = frame
             result.output_files.append(str(path))
@@ -457,7 +459,7 @@ class VacaskSimulator(BaseSimulator):
         image gain, which turns the DSB into the SSB noise figure.
         """
         source = directive.kv_params.get("in", "").strip('"')
-        pairs = dict(self.netlist_parser.port_pairs(netlist))
+        pairs = dict(self._parser.port_pairs(netlist))
         if source not in pairs:
             raise KeyError(
                 f"noise input '{source}' is not a port source of an acsp ports list; the noise "
@@ -513,7 +515,7 @@ class VacaskSimulator(BaseSimulator):
         for i, j in indices:
             s[:, i - 1, j - 1] = plot.variables[f"s({i},{j})"]
         z0 = []
-        for _, resistor in self.netlist_parser.port_pairs(netlist):
+        for _, resistor in self._parser.port_pairs(netlist):
             text = netlist.get_element(resistor).params.get("r", "") if netlist.has_element(resistor) else ""
             try:
                 z0.append(vacask_float(text))

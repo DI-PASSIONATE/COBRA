@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A goal's penalty is the mean over the points of its frequency range instead of their sum,
   so a band goal no longer weighs as many times more than a single-frequency goal as its
   band has points. Penalty values of band goals in logs and plots are smaller by that count.
+- Requires snp2le 0.2.2 or newer. Its convex passivity refit stays off, so fits are unchanged.
+- PySide6 6.12.0 is excluded on Linux with Python 3.11, where it crashes a long GUI session.
 
 ### Fixed
 - An analysis variant overwrote the raw file of the netlist's own analysis of that type in
