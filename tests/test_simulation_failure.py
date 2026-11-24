@@ -123,6 +123,12 @@ def test_failed_run_clears_the_previous_iterations_result(tmp_path, caplog):
     assert "AC" in caplog.text
 
 
+def _surrogate_network() -> rf.Network:
+    network = skrf_medium(rf.Frequency(1, 20, 41, "GHz")).line(30, "deg")
+    network.name = "X1"
+    return network
+
+
 class _UnfittableSimulator(_StubSimulator):
     def preprocess_ntwk(self, ntwk, name: str = "cobra_output") -> str:
         raise VectorFitError("vector fit did not converge in 1000 pole relocations")
@@ -131,7 +137,7 @@ class _UnfittableSimulator(_StubSimulator):
 def test_a_surrogate_that_cannot_be_fitted_is_a_simulation_failure(tmp_path, caplog):
     """One trial's unfittable surrogate is penalised; it must not abort the whole run."""
     context = _stage_context(tmp_path)
-    context.predicted_networks = [rf.Network(name="X1")]
+    context.predicted_networks = [_surrogate_network()]
     stage = CircuitSimulationStage(_UnfittableSimulator([]))
 
     with caplog.at_level(logging.WARNING):
@@ -190,7 +196,7 @@ class _ProcessReportingSimulator(_StubSimulator):
 
 def test_fitting_processes_fit_outside_the_trial_thread(tmp_path, caplog):
     context = _stage_context(tmp_path)
-    context.predicted_networks = [rf.Network(name="X1")]
+    context.predicted_networks = [_surrogate_network()]
     stage = CircuitSimulationStage(_ProcessReportingSimulator([SimulationResult()]))
 
     with caplog.at_level(logging.WARNING), stage.fitting_processes(2):
@@ -221,7 +227,7 @@ def test_a_broken_fitting_process_explains_the_main_guard(tmp_path):
 
 def test_a_fit_that_fails_in_a_fitting_process_is_a_simulation_failure(tmp_path, caplog):
     context = _stage_context(tmp_path)
-    context.predicted_networks = [rf.Network(name="X1")]
+    context.predicted_networks = [_surrogate_network()]
     stage = CircuitSimulationStage(_UnfittableSimulator([]))
 
     with caplog.at_level(logging.WARNING), stage.fitting_processes(2):
