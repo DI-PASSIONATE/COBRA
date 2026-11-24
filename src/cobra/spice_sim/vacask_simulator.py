@@ -68,6 +68,7 @@ class VacaskSimulator(BaseSimulator):
         SimulationType.HBNOISE,
     })
     command_setting: ClassVar[str] = "vacask_command"
+    reuses_fits: ClassVar[bool] = True
     named_analysis_parameters: ClassVar[bool] = True
 
     _settings: ClassVar[list[CobraSetting]] = [

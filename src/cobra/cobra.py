@@ -285,6 +285,7 @@ class COBRA:
             )
 
         self._parallel_trials = parallel_trials
+        self.circuit_simulation_stage.fit_cache.clear()
 
         # Create results folder with timestamp and name
         if results_dir is None:
@@ -524,6 +525,9 @@ class COBRA:
             json.dump(context.to_json_dict(), f, indent=4, default=str)
 
         self.log_stage_times(context)
+        fits = self.circuit_simulation_stage.fit_cache
+        if fits.fitted:
+            logger.info("Surrogate fits: %d made, %d reused", fits.fitted, fits.reused)
         logger.info("All results saved to %s", results_dir)
 
         return context

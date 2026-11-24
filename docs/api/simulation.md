@@ -172,3 +172,8 @@ COBRA uses vector fitting so surrogate/frequency-domain responses can be represe
 
 !!! note
     This conversion is central for integrating surrogate S-parameter behavior into a standard circuit simulation loop.
+
+`CircuitSimulationStage` keeps the fits of a run (`FitCache`) and reuses one when a
+component of the same name has the same S-parameters again. A simulator allows this with
+`reuses_fits = True` (default `False`), if its `preprocess_ntwk` writes one text file that
+depends only on the network, the last part of the name and the settings.

@@ -51,6 +51,7 @@ class XyceSimulator(BaseSimulator):
         {SimulationType.AC, SimulationType.HB, SimulationType.TRAN, SimulationType.DC, SimulationType.NOISE}
     )
     command_setting: ClassVar[str] = "xyce_command"
+    reuses_fits: ClassVar[bool] = True
 
     _settings: ClassVar[list[CobraSetting]] = [
         CobraSetting(
