@@ -2,6 +2,7 @@ import glob
 import logging
 import os
 import re
+import shutil
 import subprocess
 from typing import ClassVar
 
@@ -14,10 +15,10 @@ from cobra.configuration.setting import CobraSetting
 from cobra.spice_sim import tran_spectrum
 from cobra.spice_sim.base_simulator import (
     BOLTZMANN,
+    NOT_RUNNABLE_EXIT_CODES,
     T0,
     BaseSimulator,
     SimulationResult,
-    SimulatorError,
 )
 from cobra.spice_sim.hb_spectrum import spice_float
 from cobra.spice_sim.netlist_parsers.netlist import Netlist
@@ -274,12 +275,13 @@ class XyceSimulator(BaseSimulator):
         except OSError as exc:
             # The executable is missing or cannot be started: no choice of design
             # parameters can fix this, so abort instead of penalising the trial.
-            raise SimulatorError(
-                f"Could not run '{' '.join(command)}': {exc}. "
-                "Check that Xyce is installed and on PATH (or set the xyce_command "
-                "setting to its absolute path); run `cobra doctor` to inspect the environment."
-            ) from exc
+            raise self.not_runnable("Xyce", command, exc) from exc
 
+        # mpirun has exit codes of its own for a program it cannot find.
+        missing = self.parallel and proc.returncode != 0 and shutil.which(self.xyce_command) is None
+        if missing or proc.returncode in NOT_RUNNABLE_EXIT_CODES:
+            reason = proc.stderr.strip()[-2000:] or f"exit code {proc.returncode}"
+            raise self.not_runnable("Xyce", command, reason)
         if proc.returncode != 0:
             # A convergence failure is a property of the parameters, not of the setup:
             # report it and let the caller penalise this trial.

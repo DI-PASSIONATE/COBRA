@@ -28,7 +28,12 @@ import skrf as rf
 from cobra.configuration.configuration import ConfigurationError
 from cobra.configuration.setting import CobraSetting
 from cobra.spice_sim import tran_spectrum
-from cobra.spice_sim.base_simulator import T0, BaseSimulator, SimulationResult, SimulatorError
+from cobra.spice_sim.base_simulator import (
+    NOT_RUNNABLE_EXIT_CODES,
+    T0,
+    BaseSimulator,
+    SimulationResult,
+)
 from cobra.spice_sim.netlist_parsers.vacask_netlist_parser import (
     VacaskNetlistParser,
     vacask_float,
@@ -342,12 +347,11 @@ class VacaskSimulator(BaseSimulator):
             self.report_timeout("VACASK", sim_type, results_dir)
             return None
         except OSError as exc:
-            raise SimulatorError(
-                f"Could not run '{' '.join(command)}': {exc}. "
-                "Check that VACASK is installed and on PATH (or set the vacask_command "
-                "setting to its absolute path); run `cobra doctor` to inspect the environment."
-            ) from exc
+            raise self.not_runnable("VACASK", command, exc) from exc
 
+        if proc.returncode in NOT_RUNNABLE_EXIT_CODES:
+            reason = proc.stderr.strip()[-2000:] or f"exit code {proc.returncode}"
+            raise self.not_runnable("VACASK", command, reason)
         if proc.returncode != 0:
             # A convergence failure is a property of the parameters, not of the setup:
             # report it and let the caller penalise this trial.

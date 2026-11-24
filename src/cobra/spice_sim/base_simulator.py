@@ -23,6 +23,10 @@ T0 = 290.0
 #: Boltzmann constant in J/K.
 BOLTZMANN = 1.380649e-23
 
+#: Exit codes of a shell, wrapper script or loader that could not run the simulator: not
+#: executable (126), not found or a shared library missing (127).
+NOT_RUNNABLE_EXIT_CODES = frozenset({126, 127})
+
 
 class SimulatorError(RuntimeError):
     """Raised when the simulator itself could not be run.
@@ -77,6 +81,14 @@ class BaseSimulator(ABC):
             self.timeout,
             sim_type,
             results_dir,
+        )
+
+    def not_runnable(self, simulator: str, command: list[str], reason: object) -> SimulatorError:
+        """The error to raise when *command* could not run *simulator* at all."""
+        return SimulatorError(
+            f"Could not run '{' '.join(command)}': {reason}. "
+            f"Check that {simulator} is installed and on PATH (or set the {self.command_setting} "
+            "setting to its absolute path); run `cobra doctor` to inspect the environment."
         )
 
     @classmethod

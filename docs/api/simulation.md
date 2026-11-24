@@ -24,8 +24,8 @@ One simulation is run per analysis type required by the goals. Results are retur
 Xyce exit code or no output files. `CircuitSimulationStage` records no result
 for that analysis type, and `DesignGoalChecker` gives every goal that needed it
 `FAILED_SIMULATION_PENALTY`, so the optimizer avoids those parameters. A
-simulator that cannot be started at all (Xyce missing or not executable) raises
-`SimulatorError` instead and aborts the run.
+simulator that cannot be run at all (missing, not executable, or lacking a shared
+library) raises `SimulatorError` instead and aborts the run.
 
 ## VacaskSimulator
 
