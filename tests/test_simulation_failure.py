@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,7 @@ from cobra.spice_sim.base_simulator import (
     SimulatorError,
 )
 from cobra.spice_sim.simulation_type import SimulationType
+from cobra.spice_sim.vacask_simulator import VacaskSimulator
 from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.circuit_sim_stage import CircuitSimulationStage
@@ -249,6 +251,36 @@ def test_missing_xyce_executable_aborts_the_run(tmp_path):
 
     with pytest.raises(SimulatorError, match="definitely-not-installed-xyce"):
         simulator.run_simulation(str(netlist), XyceSimulator.netlist_parser.parse_file(netlist))
+
+
+@pytest.mark.parametrize("code", [126, 127])
+@pytest.mark.parametrize("simulator", [XyceSimulator(), VacaskSimulator()], ids=["xyce", "vacask"])
+def test_a_simulator_that_cannot_be_run_behind_a_wrapper_aborts_the_run(tmp_path, monkeypatch, simulator, code):
+    netlist = tmp_path / "circuit.cir"
+    netlist.write_text(netlist_path("minimal_ac").read_text(encoding="utf-8"), encoding="utf-8")
+    parsed = XyceSimulator.netlist_parser.parse_file(netlist)
+    failed = subprocess.CompletedProcess(args=[], returncode=code, stdout="", stderr="libklu.so.2: cannot open")
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: failed)
+
+    with pytest.raises(SimulatorError, match=rf"libklu\.so\.2.*{simulator.command_setting}"):
+        simulator.run_simulation(str(netlist), parsed)
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_mpi_aborts_the_run_only_if_xyce_is_missing(tmp_path, monkeypatch, installed):
+    netlist = tmp_path / "circuit.cir"
+    netlist.write_text(netlist_path("minimal_ac").read_text(encoding="utf-8"), encoding="utf-8")
+    parsed = XyceSimulator.netlist_parser.parse_file(netlist)
+    failed = subprocess.CompletedProcess(args=[], returncode=183, stdout="", stderr="unable to launch")
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: failed)
+    command = sys.executable if installed else "definitely-not-installed-xyce"
+    simulator = XyceSimulator(xyce_command=command, parallel_xyce=True, parallel_xyce_processes=2)
+
+    if installed:
+        assert simulator.run_simulation(str(netlist), parsed) is None
+    else:
+        with pytest.raises(SimulatorError, match="unable to launch"):
+            simulator.run_simulation(str(netlist), parsed)
 
 
 def test_non_zero_exit_code_is_a_simulation_failure(tmp_path, monkeypatch, caplog):

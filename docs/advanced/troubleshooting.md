@@ -55,8 +55,9 @@ the netlist itself is at fault:
 - Narrow the parameter ranges so the optimizer cannot reach unphysical values.
 
 **A simulator that cannot be run at all** — Xyce is not installed, not on
-`PATH`, or not executable — raises `SimulatorError` and stops the run, because
-no choice of parameters can fix it:
+`PATH`, not executable, or lacks a shared library — raises `SimulatorError` and
+stops the run, because no choice of parameters can fix it. A wrapper script
+reports this with exit code 126 or 127:
 
 - Verify `Xyce` is installed and in `PATH` (`cobra doctor` reports this).
 - Or set the simulator's `xyce_command` setting to the absolute path of the
