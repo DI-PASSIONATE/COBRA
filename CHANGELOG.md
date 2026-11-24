@@ -8,59 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
-- Sampler `cmaes` for `OptunaOptimizer`: Optuna's CMA-ES with the margin variant for
-  parameters on a step grid, seeded by `random_seed`; single objective only. Adds the
-  `cmaes` package as a dependency. In the GUI: *CmaEsSampler* in the sampler list.
-- Retune with the EM models fixed (`fine_tuning.retune_trials`, `retune_range`,
-  `retune_min_steps`): after a fine-tuning iteration that misses the goals, the circuit
-  values are optimized again in a circuit-only run, with that iteration's Palace networks as
-  fixed component models and the netlist variables in ranges narrowed around their values
-  (±30 %, at least ±2 steps, by default).
+- `analysis_variants`: run an analysis again with other netlist values, e.g. HB at another
+  drive, and read it in goals.
+- Goal kind `expression`: a formula over other goals' parameters, e.g. gain compression.
+- `design_goals[].scale`: the unit a goal's miss is measured in, e.g. `1.0` for one dB.
+- `fine_tuning.retune_trials`, `retune_range` and `retune_min_steps`: after an EM iteration
+  that misses the goals, retune the circuit values with the EM models fixed.
+- `OptunaOptimizer` sampler `cmaes` (single objective; new dependency `cmaes`).
+- `VacaskSimulator` setting `force_dc_pin` (on by default): fits keep their 0 Hz point also
+  where snp2le skips its DC pin for passivity.
 - `COBRA.run(results_dir=...)` writes the results to a given folder.
-- `analysis_variants`: further analyses of a type per run, each on the netlist with some
-  values changed (`netlist_values`, named as `netlist_variable` parameters), e.g. the HB at
-  another drive. A goal reads one by naming it as its `analysis`, with the variant's name as
-  its prefix (`HB_m40:Power_dBm[Vdd]`); a gain goal on it refers to the drive the variant
-  sets. Before, a run held one result per analysis type, so the supply power at the
-  operating point and the gain at the drive could not share a run. `cobra parse` lists the
-  variants and checks their values against the netlist. In the GUI: the *Analysis variants*
-  list and a tab per variant in the goal dialog.
-- Goal kind `expression`: a formula (`expression`) over the parameters of other goals
-  (`terms`), e.g. `g - g_test` for gain compression at a test drive. Terms may come from
-  different analyses and may be expressions themselves. The formula takes numbers,
-  `+ - * / **`, `abs`, `sqrt`, `exp`, `ln`, `log10`, `min` and `max`, and is parsed, not
-  evaluated as Python. In the GUI: the goal dialog's *Expression* tab.
-- A surrogate with the same S-parameters as in an earlier trial is not fitted again, e.g. a
-  fixed Touchstone component or the components of a retune.
-- `design_goals[].scale`: the unit a goal's miss of its bound is measured in, e.g. `1.0`
-  for one dB. In the GUI: the goal dialog's *Scale*.
 
 ### Changed
-- The GUI's configuration panel is split into collapsible sections (*Netlist and
-  models*, *Analyses*, *Optimizer*, *Simulator*, *Fine-tuning*), each with a one-line
-  summary while collapsed. Rarely changed settings sit behind an *Advanced* fold per
-  section (`CobraSetting(advanced=True)` for backend settings); fine-tuning is switched
-  on in its section header.
-- A goal with a bound of 0 measures its miss in units of 1 instead of dividing it by 1e-9;
-  a conversion gain goal of at least 0 dB gave penalties of 1e17 to 1e20 and outweighed
-  every other goal.
-- A goal's penalty is the mean over the points of its frequency range instead of their sum,
-  so a band goal no longer weighs as many times more than a single-frequency goal as its
-  band has points. Penalty values of band goals in logs and plots are smaller by that count.
-- Requires snp2le 0.2.2 or newer. Its convex passivity refit stays off, so fits are unchanged.
-- PySide6 6.12.0 is excluded on Linux with Python 3.11, where it crashes a long GUI session.
+- **Penalties differ from earlier versions:** a goal over a frequency range scores the mean
+  over its points instead of the sum, and a bound of 0 is measured in units of 1.
+- A surrogate with the same S-parameters as in an earlier trial is not fitted again.
+- GUI: the configuration panel has collapsible sections, with rarely used settings under
+  *Advanced*.
+- VACASK raw files are named after their netlist, e.g. `deck_hb_op.sim.hb1.raw`.
+- Requires snp2le 0.2.2 or newer, and excludes PySide6 6.12.0 on Linux with Python 3.11, where
+  it crashes the GUI.
 
 ### Fixed
-- An analysis variant overwrote the raw file of the netlist's own analysis of that type in
-  the trial folder (both named after the analysis, e.g. `hb1.raw`). VACASK raw files are
-  now renamed after their netlist once read, e.g. `deck_hb_op.sim.hb1.raw`.
-- A script that runs COBRA with parallel trials but without an `if __name__ == "__main__":`
-  guard stopped with a bare `BrokenProcessPool`; the error now names the missing guard.
-- A VACASK surrogate fit whose DC pin snp2le skipped for passivity below the band kept the
-  fit's extrapolated DC admittance, e.g. a conductance between a transformer's windings
-  (+3 mW P_DC in the OJCAS LNA). COBRA now adds the pin anyway (`VacaskSimulator` setting
-  `force_dc_pin`, on by default) and logs it; a pin skipped for another reason is still
-  logged as a warning.
+- Parallel trials in a script without an `if __name__ == "__main__":` guard stopped with a bare
+  `BrokenProcessPool`; the error now names the missing guard.
 
 ## 3.2.0 - 2026-11-06
 
