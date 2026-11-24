@@ -81,6 +81,8 @@ dependencies = [
     # Lumped-element models of the surrogates for VacaskSimulator
     "snp2le>=0.2.2",
     "threadpoolctl>=3.5",
+    # Stops a simulation that runs into its time limit
+    "psutil>=6.0",
 ]
 
 # ORCA supplies the geometry presets and the Palace simulation of EM fine-tuning. It is
