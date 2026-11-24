@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Parallel trials in a script without an `if __name__ == "__main__":` guard stopped with a bare
   `BrokenProcessPool`; the error now names the missing guard.
+- The run summary and `times` left out the time of EM fine-tuning (shown as 0 %).
 
 ## 3.2.0 - 2026-11-06
 
