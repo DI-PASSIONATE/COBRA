@@ -310,7 +310,7 @@ or spectral line) or a band (`"125-135GHz"`, every point or line inside counts);
 
 | `kind` | `parameter` | Also required |
 | --- | --- | --- |
-| `catalogue` | An `.AC` parameter such as `S21_dB`, `Qp`, `k` or `K`; also `NF` (small-signal noise, Xyce and VACASK) and, with VACASK, `NF_SSB`, `NF_DSB` (hbnoise), in dB | — |
+| `catalogue` | An `.AC` parameter: an S-parameter such as `S21_dB`, `Lp`/`Ls` (nH), `Rp`/`Rs` (Ω), `Qp`/`Qs`, `k`, `SRF` (GHz) or `K`; also `NF` (small-signal noise, Xyce and VACASK) and, with VACASK, `NF_SSB`, `NF_DSB` (hbnoise), in dB | — |
 | `power_dbm` | `Power_dBm[<node>]` | `node` |
 | `gain_db` | `Gain_dB[<port>@<node>]` | `node`; `port`, a driven port; `source_amplitude`, its SIN amplitude in volts; `impedance`, its `z0` |
 | `isolation_db` | `Isolation_dB[<node>]` | `node`; `frequency_range`, naming the wanted line |

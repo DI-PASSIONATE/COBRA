@@ -1,7 +1,7 @@
 # COBRA - A Circuit-Level Open-Source Based RFIC AI-Assisted Optimizer
 [![Documentation](https://img.shields.io/badge/docs-COBRA-green?logo=materialformkdocs&logoColor=white)](https://di-passionate.github.io/COBRA/)
 [![License](https://img.shields.io/github/license/DI-PASSIONATE/COBRA)](https://github.com/DI-PASSIONATE/COBRA/blob/main/LICENSE)
-[![Python](https://img.shields.io/pypi/pyversions/cobra-rfic?logo=python)](pyproject.toml)
+[![Python](https://img.shields.io/pypi/pyversions/cobra-rfic?logo=python)](https://github.com/DI-PASSIONATE/COBRA/blob/main/pyproject.toml)
 [![PyPI](https://img.shields.io/pypi/v/cobra-rfic?logo=pypi)](https://pypi.org/project/cobra-rfic/)
 [![Tests](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/DI-PASSIONATE/COBRA/actions/workflows/tests.yml)
 [![GitHub stars](https://img.shields.io/github/stars/DI-PASSIONATE/COBRA?style=social)](https://github.com/DI-PASSIONATE/COBRA/stargazers)
@@ -16,489 +16,82 @@ Gianluca Simone\*, David Lurz\*, Martin Grund\*, Fabian Schneider°, Michael Loo
 
 [Paper](https://doi.org/10.1109/SBCCI69725.2026.11706804) | [Documentation](https://di-passionate.github.io/COBRA/) | [BibTex](#cite-this-work)
 
-**COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design: a circuit-level optimizer that consumes surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA). It combines:
-
-- surrogate-model S-parameter prediction (from [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated ONNX models or fixed Touchstone SNP files),
-- circuit-level simulation via Xyce or [VACASK](https://codeberg.org/arpadbuermen/VACASK),
-- goal-driven optimization (Optuna-based).
-- optional EM fine-tuning (Palace) to ensure accurate results
-- and real-time visualization of optimization progress
-
-You can easily define goals and configurations in the GUI:
+**COBRA** is an open-source EDA tool for AI-assisted RFIC (RF integrated circuit) design. It optimizes a circuit towards your design goals: surrogate models built by [ORCA](https://github.com/DI-PASSIONATE/ORCA) predict the passives' S-parameters in milliseconds, [Xyce](https://xyce.sandia.gov/) or [VACASK](https://codeberg.org/arpadbuermen/VACASK) simulates the circuit, and [Optuna](https://optuna.org) proposes the next design.
 
 ![COBRA GUI screenshot showing netlist loading, component mapping, design goal configuration, and optimization controls](https://raw.githubusercontent.com/DI-PASSIONATE/COBRA/main/docs/cobra_config.png)
 
-and visualize optimization progress in real time:
-
 ![COBRA GUI screenshot showing real-time S-parameter and loss plots during optimization](https://raw.githubusercontent.com/DI-PASSIONATE/COBRA/main/docs/cobra_visual.png)
 
-## How COBRA Fits with ORCA
-
-COBRA is the optimization/runtime side of the flow.
-
-- [ORCA](https://github.com/DI-PASSIONATE/ORCA) creates the surrogate model (for example, `tf_octa_c_ports.onnx`) from EM simulation data.
-- COBRA loads that ONNX model and predicts S-parameters during optimization loops.
-- Optional fine-tuning in COBRA can call full-wave EM simulations (Palace) and uses [ORCA](https://github.com/DI-PASSIONATE/ORCA) geometry classes (preset or custom).
-
-In short: [ORCA](https://github.com/DI-PASSIONATE/ORCA) builds the model, COBRA uses it to optimize circuits quickly and can verify/refine with EM fine-tuning.
-
 > [!NOTE]
-> COBRA is still under active development, and the paper is not available online yet. The current codebase is functional and can be used for experimentation, but we keep adding features, improving documentation, and refining the API. If you encounter any issues or have questions, please [open an issue](https://github.com/DI-PASSIONATE/COBRA/issues) or reach out.
+> COBRA is under active development. If you run into a problem or have a question, please [open an issue](https://github.com/DI-PASSIONATE/COBRA/issues).
+
+## Key Features
+
+- **Surrogates and fixed components** in one circuit: ORCA's ONNX models for geometries to optimize, Touchstone files for everything else.
+- **Goals from many analyses**: S-parameters, inductance, Q and coupling, noise figure, [harmonic balance](https://di-passionate.github.io/COBRA/advanced/harmonic-balance/) and [transient](https://di-passionate.github.io/COBRA/advanced/transient/) power, gain and isolation, or your own formula over them.
+- **Geometry and circuit together**: optimize layout dimensions and netlist values in the same run.
+- **EM verification**: simulate the result full-wave with [Palace](https://awslabs.github.io/palace/stable/) and [retune the circuit](https://di-passionate.github.io/COBRA/advanced/fine-tuning/) on it.
+- **GUI, command line and Python**: GUI and command line share one JSON configuration.
+- **Shared models**: browse and download surrogates from Hugging Face in the GUI.
 
 ## Installation
-### Requirements
 
-- Python 3.11 to 3.13
-- [Xyce](https://xyce.sandia.gov/) (default circuit simulator backend) or [VACASK](https://codeberg.org/arpadbuermen/VACASK) (optional second backend, native VACASK netlists; see [docs](docs/advanced/vacask.md))
-- [snp2le](https://github.com/iic-jku/snp2le) (installed with COBRA; writes the VACASK surrogates)
-- [Qucs-S](https://qucs-s-help.readthedocs.io/en/latest/) (to create a '.cir' netlist for Xyce)
-- A component model source per parsed component:
-    - [ORCA](https://github.com/DI-PASSIONATE/ORCA)-generated surrogate ONNX model (`.onnx`) for optimizable geometry/model inputs, or
-    - fixed Touchstone file (`.sNp`, e.g. `.s2p`, `.s4p`, `.s6p`) for non-optimizable components
-
-Optional:
-
-- [AWS Palace](https://awslabs.github.io/palace/stable/), if you want EM fine-tuning
-- [ORCA](https://github.com/DI-PASSIONATE/ORCA), if you want EM fine-tuning or its geometry presets: `pip install "cobra-rfic[orca]"`
-
-### For users: install from PyPI
-
-COBRA is published as [`cobra-rfic`](https://pypi.org/project/cobra-rfic/). The
-import package and the CLI are both still called `cobra`.
-
-Into a virtual environment with `pip`:
+COBRA needs Python 3.11 to 3.13 and Xyce or [VACASK](https://di-passionate.github.io/COBRA/advanced/vacask/). It is published on PyPI as [`cobra-rfic`](https://pypi.org/project/cobra-rfic/); the import package and the command are called `cobra`.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install cobra-rfic
+pip install cobra-rfic             # or: uv tool install cobra-rfic
+pip install "cobra-rfic[orca]"     # with ORCA, for EM fine-tuning
+cobra doctor                       # check simulators and packages
 ```
 
-Or, with `uv`, as an isolated tool that puts the `cobra` command on your `PATH`:
-
-```bash
-uv tool install cobra-rfic
-```
-
-Upgrade later with `pip install -U cobra-rfic` or `uv tool upgrade cobra-rfic`.
-
-### For developers: install from source
-
-1. Clone the repository:
+From source, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/DI-PASSIONATE/COBRA
 cd COBRA
+uv sync
+uv run pytest
 ```
 
-2. Install `uv` (if needed):
+See the [installation guide](https://di-passionate.github.io/COBRA/setup/) for the external tools and other setups.
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+## Quickstart
 
-3. Create the environment from `uv.lock`. This installs COBRA in editable mode
-   plus the dev tools (`pytest`, `ruff`, `ty`), fetching a supported Python if
-   none is installed:
-
-```bash
-uv sync --python 3.12
-```
-
-Run commands through `uv run` (`uv run cobra`, `uv run pytest`), or activate the
-environment with `source .venv/bin/activate`. Re-run `uv sync` after pulling
-changes to `pyproject.toml` or `uv.lock`.
-
-Without `uv`, a plain `venv` works too:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e . pytest pytest-cov
-```
-
-### Running the tests
-
-The suite covers the netlist parser, the run-configuration schema, the design-goal
-and penalty math, the harmonic-balance spectrum helpers and the CLI. It is headless
-and requires **no display, no Xyce and no Palace**:
-
-```bash
-uv run pytest                # or: pytest
-uv run pytest --cov          # with a coverage report
-```
-
-## Running COBRA
-
-COBRA supports three main usage modes.
-
-Technically, fully GUI-free usage through Python code is supported and works well for scripted workflows, CI, and reproducible experiments. For most users and day-to-day interactive optimization, the GUI is still highly recommended.
-
-### 1. GUI mode
-
-After installation, start the GUI with:
+Start the GUI, load a netlist (e.g. from [Qucs-S](https://qucs-s-help.readthedocs.io/en/latest/)), pick a model per component, add goals and parameters, and run:
 
 ```bash
 cobra
 ```
 
-The GUI lets you:
-
-- load a netlist and map each parsed subcircuit component to either an ONNX surrogate model or a fixed SNP Touchstone file,
-- configure optimization parameters and design goals,
-- run/pause/stop optimization,
-- visualize S-parameters, harmonic-balance output spectra, and goal losses in real time,
-- optionally enable EM fine-tuning with Palace and select ORCA geometry presets or custom geometry classes.
-- browse, download, and use community surrogate models directly from HuggingFace.
-
-For a more detailed walkthrough of the GUI features, see the [GUI User Guide](#gui-user-guide) section below or [visit the documentation](https://di-passionate.github.io/COBRA/).
-
-
-### 2. Python script mode
-
-Use the provided example:
-
-```bash
-python examples/main.py
-```
-
-The example in `examples/main.py` shows how to:
-
-- parse `netlist_multiple_SPFiles.cir` with `XyceNetlistParser().parse_file(...)`,
-- map `X1` to an ONNX surrogate and `X2` to a fixed Touchstone SNP file,
-- optimize prefixed model inputs for `X1` (for example `X1:bottom_winding_diameter`),
-- optimize parsed netlist values `Cshunt_p` and `Cshunt_n` with `linked_to`,
-- configure `OptunaOptimizer` and `XyceSimulator`,
-- run `cobra.run(...)` with optional ORCA geometry (`TransformerOcta`). The ORCA geometry is only required for finetuning.
-
-### 3. JSON configuration and CLI mode
-
-The GUI has **Save configuration** and **Load configuration** buttons for reproducible runs. A
-saved configuration restores the netlist, component models, simulation settings,
-optimizer and simulator options, optimization parameters, goals, and optional
-fine-tuning settings.
-
-Or start a configuration from a netlist on the command line, then add its
-design goals and optimization parameters:
+Or run without the GUI:
 
 ```bash
 cobra init design.cir --model X1=models/coil.onnx -o cobra_config.json
+cobra parse cobra_config.json      # check it
+cobra run cobra_config.json
 ```
 
-Run the same configuration without opening the GUI:
-
-```bash
-cobra run path/to/cobra_config.json
-```
-
-Check a configuration or a netlist before starting a run:
-
-```bash
-cobra parse path/to/cobra_config.json
-```
-
-The report lists the parsed netlist, ports, surrogate components, goals, and
-tunable variables, and cross-checks the configuration against the netlist it
-references (missing model mappings, unresolvable optimization parameters,
-unavailable HB nodes, missing include or library files). It exits with `2` when
-it finds an error that would stop a run.
-
-Check the environment before a run, and turn up the detail when one misbehaves:
-
-```bash
-cobra doctor                                  # packages, Xyce, VACASK, Palace
-cobra run config.json -v                      # debug output
-cobra run config.json --log-file results/run.log
-```
-
-Requested output goes to stdout and diagnostics to stderr, so reports stay
-pipeable (`cobra parse config.json --json > report.json`). See
-[the CLI reference](docs/user-guide/cli.md) for all commands, options, and exit
-codes.
-
-Relative netlist, model, and custom geometry paths are resolved from the directory
-containing the JSON file. Every GUI or CLI run also archives its exact input as
-`cobra_config.json` inside the timestamped results directory. This input file is
-separate from `cobra_optimization_context.json`, which contains run history and
-results.
-
-See the [JSON Configuration Guide](https://di-passionate.github.io/COBRA/user-guide/configuration/)
-for the schema and a complete example.
-
-## GUI User Guide
-Coming soon
-
-### Using the HuggingFace Model Browser
-
-The GUI includes a built-in browser for ORCA surrogate models shared on HuggingFace. How to upload your own models to HuggingFace and make them discoverable in COBRA is covered in ORCA's documentation, but the basic convention is to tag your HuggingFace repo with `orca-rfic` and include the required files (`<repo>.onnx` and optionally `<repo>.py`).
-Each component selector row in the configuration panel has a **HuggingFace** button next to the standard Browse button.
-
-**Browsing and downloading a model:**
-
-1. Click **HuggingFace** for any component.
-2. The dialog opens and immediately shows any models you have already downloaded (marked `[LOCAL]`) at the top of the list.
-3. While the list loads, public models tagged `orca-rfic` on HuggingFace are fetched in the background and appended once available, sorted by download count.
-4. Select a model to see its details on the right (owner, downloads, likes, tags, description, and whether EM fine-tuning is available).
-5. If the model is not yet local, click **Download** — the repo is saved to `./models/<owner>/<repo>/`.
-6. Once downloaded (or if already local), click **Use** to populate the component's file field with the path to `<repo>.onnx`.
-
-**File convention for shared models:**
-
-COBRA expects each HuggingFace repo to contain at least two files:
-
-| File | Purpose |
-|------|---------|
-| `<repo>.onnx` | The ORCA-generated surrogate model
-| `<repo>.py` | The ORCA geometry class for EM fine-tuning
-
-If the geometry class file is missing, COBRA will disable fine-tuning for that model and show a warning in the details panel. This allows sharing surrogate models e.g. for the default components included with ORCA.
-
-**Using a downloaded model in scripts:**
-
-Downloaded models land in `./models/<owner>/<repo>/` relative to the working directory.
-You can reference them directly in Python scripts:
-
-```python
-import os
-cobra = COBRA(
-    netlist=netlist,
-    component_onnx_mapping={
-        "X1": "models/UserA/my_transformer/my_transformer.onnx",
-    },
-    ...
-)
-```
-
-## Capabilities
-
-### Design parameters
-
-Small-signal parameters, derived from the `.AC` S-parameter result:
-
-| Parameter | Description |
-|-----------|-------------|
-| `S11_dB`, `S21_dB`, `S31_dB`, `S41_dB`, `S12_dB`, `S22_dB` | S-parameters in dB |
-| `Lp`, `Ls` | Primary / secondary inductance (nH), derived from mixed-mode Z-parameters |
-| `Rp`, `Rs` | Primary / secondary series resistance (Ω) |
-| `Qp`, `Qs` | Primary / secondary quality factor |
-| `k` | Magnetic coupling coefficient |
-| `SRF` | Self-resonance frequency (GHz) |
-
-Large-signal parameters, derived from the `.HB` result (see [Harmonic Balance Support](#harmonic-balance-support)). These are generated per netlist, so `<node>` and `<port>` are the names found in your circuit:
-
-| Parameter | Description |
-|-----------|-------------|
-| `Power_dBm[<node>]` | Output power in dBm at the selected analysis point |
-| `Gain_dB[<port>@<node>]` | Transducer gain in dB at `<node>`, referred to the drive level of input port `<port>` |
-
-Each goal accepts an optional `frequency_range` string (e.g., `"125-135ghz"`), a `min_value`, a `max_value`, and a `weight`. For HB goals a single frequency such as `"35ghz"` selects the corresponding spectral line.
-
-### Optimizer options
-
-`OptunaOptimizer` wraps [Optuna](https://optuna.org) and supports:
-
-- **Samplers**: `"tpe"` (default, Bayesian), `"random"`, `"simulated_annealing"`, `"auto"` (requires `optunahub`)
-- **Pruners**: `None` (default), `"median"`, `"successive_halving"`, `"hyperband"`
-- **Multi-objective mode**: set `multi_objective=True` to optimize for a Pareto front instead of a single aggregated loss
-
-`GradientDescentOptimizer` is a local search (SPSA gradient descent in normalised coordinates, one trial at a time). Select it as the run's optimizer, or for EM fine-tuning by passing `fine_tuning_optimizer="gradient_descent"` to `COBRA`.
-
-A parameter's `initial_value` is evaluated first: Optuna's first trial uses it, gradient descent starts there. Use it to retune around a known design.
-
-When no trial meets every goal, the run ends at the trial that misses them by the least (over-fulfilled goals do not make up for a missed one), without simulating it again. If the callback stops the run, the trials still in flight are finished and reported to it as well.
-
-### Optimization parameter types
-
-| `OptimizationType` | What it controls |
-|--------------------|-----------------|
-| `MODEL_INPUT` | Geometry parameter fed directly to the ONNX surrogate model |
-| `NETLIST_VARIABLE` | Parsed netlist element values/parameters (for example component values like `C1 0F` or instance/model params) patched directly in the netlist |
-
-Parameters can be linked (`linked_to="other_param"`) so that one variable always mirrors another, useful for symmetrically constrained components.
-
-## Harmonic Balance Support
-
-S-parameters only describe small-signal behaviour. For large-signal designs — power amplifiers, mixers, anything where compression or mixing products matter — COBRA can optimize against a Harmonic Balance (`.HB`) analysis instead of, or in addition to, the `.AC` sweep.
-
-### Netlist requirements
-
-A Qucs-S schematic with a Harmonic Balance simulation block exports the three directives COBRA needs:
-
-```spice
-.options hbint numfreq=3 STARTUPPERIODS=2
-.HB 130G
-.PRINT hb format=csv I(VOut) v(Out) v(Vdd) v(ip) v(on) v(op) v(sub)
-```
-
-- `.HB` lists the **fundamental frequencies**. One token is a single-tone analysis (LNA, PA); several tokens make it multi-tone (`.HB 95E9 10E9` for a mixer), and Xyce then solves for all mixing products of those tones.
-- `.options hbint numfreq=…` sets the number of harmonics per fundamental (`numfreq=4,40` assigns a different count to each tone).
-- `.PRINT hb …` determines which signals end up in the result file.
-
-Both the `.HB` frequencies and the `.options hbint` values are editable in the GUI under **Simulation Parameters** once a netlist is loaded, so you can sweep the harmonic settings without touching the schematic.
-
-### Analysis points
-
-Output power needs both a voltage and a current. The Qucs-S convention is a labelled node with a 0 V source used as a current probe in series with it:
-
-```spice
-VOut Out _net6 DC 0
-```
-
-This yields the pair `V(Out)` and `I(VOut)`. COBRA scans the `.PRINT hb` line and offers every node that has **both** halves of such a pair in the **Analysis Point** dropdown in the configuration panel. The selected node is what the HB design parameters and the spectrum plot refer to.
-
-### Goals
-
-Once a netlist with an HB analysis is loaded, `Power_dBm[<node>]` and one `Gain_dB[<port>@<node>]` per driven port appear in the goal dialog. A goal such as `Power_dBm[Out] > 10` with a frequency range of `35ghz` constrains exactly the 35 GHz line of the output spectrum, which is how you express a mixer conversion target.
-
-AC and HB goals can be mixed freely. COBRA determines which analyses are required, generates one netlist per analysis type, runs them, and combines the resulting penalties in a single loss. If a goal needs an analysis the netlist does not contain, the missing directive is injected automatically — including a matching `.PRINT HB format=csv` line, without which Xyce would produce no HB output at all.
-
-### Spectrum visualization
-
-During optimization the visualization panel plots the output spectrum of the selected analysis point as a stem plot:
-
-- **Quantity** — output power (dBm), gain (dB) against a selectable input port, node voltage (dBV), or probe current (dBmA).
-- **Fundamentals** are highlighted in a separate colour from the remaining lines.
-- **Click any line** to drop a marker labelled with its frequency, value, and harmonic index — `H2` for a single-tone analysis, or the mixing-product decomposition such as `2f1-f2` for multi-tone, so unwanted products are easy to identify when tuning for isolation.
-
-When the run produces more than one of the S-parameter, HB and transient plots, a selector switches the left plot between them; when only one is active, that plot is shown and the selector is disabled.
-
-### Transient analysis
-
-A `.TRAN` analysis reaches the same spectrum by a different route: Xyce integrates in time, and COBRA takes the FFT of the printed window. The `.TRAN` arguments are `<print step> <stop time> [<start time> [<max step>]]`; the start time (output start) is the settling time — nothing before it is printed, so nothing before it enters the FFT.
-
-The `.PRINT tran` line must use `format=csv` (Qucs-S exports `format=raw`, which COBRA does not read). The spectrum is written next to Xyce's output as `<netlist>.TRAN.FD.csv`, and the goals are the HB ones with a `TRAN:` prefix — `TRAN:Power_dBm[Out]`, `TRAN:Gain_dB[P2@Out]`, `TRAN:Isolation_dB[Out]` — so HB and transient goals can be mixed in one run. `examples/configs/mixer_tran_config.json` is the transient counterpart of the HB mixer example.
-
-## Typical Inputs and Outputs
-
-Inputs:
-
-- circuit netlist `.cir` / `.sp` (Qucs-S / Xyce format)
-- one or more component model files: ORCA-generated ONNX (`.onnx`) and/or fixed Touchstone (`.sNp`)
-- design goals and optimization parameter definitions
-
-Results are saved to a timestamped folder `results/<timestamp>_<netlist_name>/` and include:
-
-- `cobra_optimization_context.json` — full optimization history and best parameters
-- `surrogate_s_params_<component>.s<N>p` — best-trial surrogate S-parameters
-- `trials/trial_<n>/` — the working directory of one trial: its netlist,
-  `<component>_predicted.s<N>p`, vector-fitted SPICE subcircuits
-  (`<component>.sp`) included by that netlist, and the simulator output
-  (`<netlist>.HB.FD.csv` / `.HB.FD.prn` for a harmonic-balance analysis). Only
-  the most recently finished trial is kept.
-
-## EM Fine-Tuning Notes (Optional)
-
-If you enable fine-tuning:
-
-- pass `palace_fine_tuning_command` to `COBRA` (or enable it in the GUI),
-- provide one ORCA geometry object per ONNX component via `orca_geometries={"X1": geometry}` in `cobra.run(...)`,
-- choose `fine_tuning_optimizer="reuse"` to continue with the surrogate optimizer, or `"gradient_descent"` to switch to gradient descent for the fine-tuning phase,
-- COBRA will generate a GDS file, mesh it with gmsh, run a full Palace EM simulation, and iterate.
-
-## How COBRA Works Internally
-
-COBRA runs a staged pipeline on each optimization iteration. Understanding each stage clarifies why certain design choices were made.
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          COBRA run loop                              │
-│                                                                      │
-│  ┌──────────────┐   new params   ┌─────────────────┐                 │
-│  │  Optimizer   │───────────────▶│ Netlist Parser  │ (patch .cir)    │
-│  │  (Optuna)    │                └────────┬────────┘                 │
-│  └──────┬───────┘                         │ updated netlist          │
-│         │ tell(penalties)                 ▼                          │
-│         │                       ┌─────────────────┐                  │
-│         │                       │  EM Surrogate   │ (ONNX inference) │
-│         │                       │  Stage          │                  │
-│         │                       └────────┬────────┘                  │
-│         │                                │ rf.Network per component  │
-│         │                                ▼                           │
-│         │                       ┌─────────────────┐                  │
-│         │                       │  Circuit Sim    │ (vector fit →    │
-│         │                       │  Stage          │  Xyce)           │
-│         │                       └────────┬────────┘                  │
-│         │                                │ simulated rf.Network      │
-│         │                                ▼                           │
-│         └───────────────────────┌─────────────────┐                  │
-│                                 │  Design Goal    │                  │
-│                                 │  Checker        │                  │
-│                                 └─────────────────┘                  │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-### Stage 1 — Optimizer (`OptunaOptimizer`)
-
-Optuna's sampler proposes the next set of parameters (geometry inputs and/or netlist variables). After each iteration the checker's penalty values are fed back via `tell()`, so the sampler can learn the landscape. TPE (Tree-structured Parzen Estimator) is the default because it works well with a small number of evaluations — exactly what is needed when each evaluation involves a circuit simulation.
-
-### Stage 2 — Netlist parsing and patching (`XyceNetlistParser`, `Netlist`)
-
-`XyceNetlistParser().parse_file(...)` turns the `.cir` file into a `Netlist`: the logical lines (with `+` continuations), the components, directives and subcircuits. A trial copies the template (`Netlist.copy()`) and edits it without re-parsing; an edit replaces only the changed token, so spacing, inline comments and continuation layout are kept and untouched lines render unchanged. Element and parameter names match case-insensitively (`c1` updates `C1`). The first line of a netlist is its title, as in Xyce.
-
-Before each simulation the netlist is updated in two ways:
-
-1. **Parsed netlist elements** (`NETLIST_VARIABLE` parameters) are patched in the `Netlist` (for example R/C/L values and supported instance/model parameters) so Xyce picks them up.
-2. **TSTONEFILE rewriting** — Qucs-S exports Touchstone references as `YLIN` devices with a `.MODEL … LIN TSTONEFILE=…` directive. Xyce cannot parse this syntax, and more importantly SPICE simulators in general cannot use a raw Touchstone file as a subcircuit. The parser detects these blocks and rewrites them into normal `X…` subcircuit instances that point to the vector-fitted `.sp` file that will be generated in Stage 3.
-
-### Stage 3 — EM surrogate inference (`EMSurrogateStage`)
-
-The ONNX model (produced by ORCA) receives the current geometry parameters and a frequency sweep as inputs. It returns the real and imaginary parts of each S-parameter entry, which are assembled into a `scikit-rf` `Network` object.
-
-Before inference, the geometry is checked against the feasibility constraints the model declares in its `input_constraints` metadata (written by ORCA). A trial that violates one is not simulated at all, since the surrogate was never trained on that geometry, and it does not count as an iteration: Optuna records it as pruned and suggests a replacement (optimizers without a pruned state get the failed-simulation penalty instead).
-
-A model input that only takes values on a grid (e.g. whole turns) may declare its `step` in `input_parameter_ranges`; `cobra parse` then warns when a parameter allows values off that grid.
-
-ORCA also records the version that exported a model (`orca_version`, with the commit for a development build); COBRA shows it in the model's tooltip and in the `cobra parse` report, without acting on it. ORCA records which Palace result a model was trained on in its `touchstone_type` metadata (`normal`, `dc`, `deembedded` or `dc_deembedded`); EM fine-tuning simulates that variant, and `dc` for a model without the key.
-
-A model may declare its `windings` metadata (ORCA writes it from the geometry's `windings()`): the ports (1-based, as in its `S<i><j>` outputs) at the terminals of each winding, for example `[[1, 2, 5], [3, 4, 6]]` for a transformer with center taps. COBRA then replaces the predicted 0 Hz point by that of ideal windings: the predicted resistance inside each winding, no path to ground and no connection between windings. Windings are near shorts at DC, so a small error in the predicted S-parameters is a large admittance error there; uncleaned, it leaks bias current to ground or couples the windings by up to 1 S, and shifts the DC operating point (in an LNA, P_DC 12.5 instead of 16.1 mW). A model without the key keeps its prediction.
-
-The sweep covers the whole band the model declares in its `input_parameter_ranges` metadata (the `frequency` entry, written by ORCA), in 1 GHz steps; a model without that metadata is rejected before the run starts, since COBRA will not guess a band. A band that starts below 1 GHz also gets the sub-GHz points ORCA's presets simulate (10, 20, 100, 200, 300, 500 and 700 MHz). The full band is used deliberately rather than just the design goals' range: the vector fit of the next stage extrapolates freely outside the frequencies it was given, and Xyce evaluates the fitted subcircuit at the DC operating point and at every harmonic of an `.HB` or `.TRAN` analysis. `cobra parse` warns when the netlist's `.AC` sweep or `.HB` harmonics reach beyond the model's band.
-
-ONNX was chosen because it is a portable, framework-agnostic format: the model runs with `onnxruntime` at inference time without requiring the full training environment (PyTorch, TensorFlow, …), keeping COBRA's dependency footprint small and deployment straightforward.
-
-A plain Touchstone file (`.sNp`) can also be used instead of an ONNX model when no geometry variation is needed — COBRA detects the file extension and loads it directly as a fixed network.
-
-### Stage 4 — Vector fitting and circuit simulation (`CircuitSimulationStage`)
-
-**Why vector fitting?**
-
-Xyce (like all SPICE-family simulators) cannot read a Touchstone file directly as a component. SPICE netlists describe circuits in terms of lumped elements and analytical subcircuits — there is no native mechanism to embed a tabulated frequency-domain response.
-
-COBRA solves this by vector-fitting the surrogate-predicted S-parameter network using `scikit-rf`'s `VectorFitting` implementation. Vector fitting approximates the frequency response as a sum of rational functions (poles and residues). The fitted model is then written out as a standard SPICE subcircuit (`.sp`) containing only resistors, capacitors, inductors, and controlled sources — elements every SPICE engine understands natively.
-
-`VectorFitting.auto_fit` has no iteration limit and, on some data, never converges: its adding-and-skimming loop can cycle between two model orders forever (3 of 20 ORCA inductors tested at its default order limit). COBRA stops such a fit after 1000 pole relocations (a converging fit needs about 20 to 120), logs a warning and penalises that trial. The VACASK backend's fitter, snp2le, has its own limit (250 relocations) and refits a stuck fit instead, so there the trial keeps a model.
-
-The generated subcircuit is automatically included in the patched netlist via a `.INCLUDE` directive, so Xyce sees a fully self-contained netlist on every iteration.
-
-After the include is in place, COBRA runs one Xyce simulation per analysis type required by the goals (`.AC`, `.HB`, …), reads each result back — a Touchstone file as a `scikit-rf` `Network` for `.AC`, a frequency-domain table as a DataFrame for `.HB` — and passes them to the goal checker.
-
-### Stage 5 — Design goal checking (`DesignGoalChecker`)
-
-Each `DesignGoal` computes a penalty scalar from the simulated network. The penalty is zero (or negative, acting as a reward) when the network already satisfies the goal, and grows proportionally to the squared normalized deviation when it does not. This smooth, differentiable penalty signal is what the optimizer minimizes.
-
-Goals are grouped by the analysis they need, so each one is evaluated against the matching result: S-parameter and lumped-element goals against the `.AC` network, power and gain goals against the `.HB` spectrum.
-
-For 4-port networks the checker automatically converts to mixed-mode (differential/common-mode) parameters before extracting lumped quantities such as inductance, Q-factor, and coupling coefficient.
-
-### Optional Stage 6 — EM fine-tuning (`EMFineTuningStage`)
-
-Once the surrogate-driven optimization converges, COBRA can verify and refine the result with a real EM simulation:
-
-1. The current geometry parameters are used to generate a GDS layout file via the ORCA geometry class.
-2. gmsh meshes the GDS layout according to the PDK stackup.
-3. Palace runs a full-wave EM simulation and produces a verified Touchstone file.
-4. The verified S-parameters replace the surrogate prediction and are passed back through the circuit simulation and goal-checking stages.
-5. If the goals are not met, the optimizer is updated with the real penalty and a new iteration begins.
-
-This two-phase approach (fast surrogate loop + occasional EM verification) gives the speed of a surrogate-based optimizer while still guaranteeing that the final design is validated against the actual physics.
-
-## Troubleshooting
-
-- If `cobra` command is not found, ensure your virtual environment is activated and reinstall with `pip install -e .`.
-- If geometry presets fail to load, verify ORCA is installed in the same environment (`pip install "cobra-rfic[orca]"`).
-- If circuit simulation fails, verify Xyce is installed and available in your `PATH`.
-- If `AutoSampler` fails to initialize, install its optional dependencies: `pip install optunahub cmaes scipy torch`.
+Or from Python, as in [examples/main.py](https://github.com/DI-PASSIONATE/COBRA/blob/main/examples/main.py). Each run writes its parameters, history and simulation results to `results/<timestamp>_<netlist>/`.
+
+## How It Works
+
+Each trial:
+
+1. The optimizer proposes geometry and netlist values.
+2. The surrogates predict each component's S-parameters.
+3. Vector fitting turns them into subcircuits a SPICE simulator can use.
+4. Xyce or VACASK runs every analysis the goals need.
+5. Each goal's miss becomes a penalty, from which the optimizer proposes the next trial.
+
+## Documentation
+
+| Topic | Page |
+| --- | --- |
+| First run | [Quickstart](https://di-passionate.github.io/COBRA/getting-started/quickstart/) |
+| Interfaces | [GUI](https://di-passionate.github.io/COBRA/user-guide/gui/), [command line](https://di-passionate.github.io/COBRA/user-guide/cli/), [Python](https://di-passionate.github.io/COBRA/user-guide/scripting/) |
+| Goals, parameters, optimizers and simulators | [JSON configuration](https://di-passionate.github.io/COBRA/user-guide/configuration/) |
+| Examples | [Examples](https://di-passionate.github.io/COBRA/user-guide/examples/) |
+| Problems | [Troubleshooting](https://di-passionate.github.io/COBRA/advanced/troubleshooting/), [FAQ](https://di-passionate.github.io/COBRA/advanced/faq/) |
 
 ## Cite This Work
 If you use COBRA in your research, please cite our [SBCCI 2026 paper](https://doi.org/10.1109/SBCCI69725.2026.11706804):
@@ -535,12 +128,12 @@ We thank our colleagues in the LITES institute for their feedback and support du
   <tr>
     <td align="left" width="50%">
       <a href="https://www.lites.tf.fau.de/" target="_blank">
-        <img src="docs/lites.png" alt="Lehrstuhl für Intelligente Technische Elektronik und Systeme @ FAU" width="94%"/>
+        <img src="https://raw.githubusercontent.com/DI-PASSIONATE/COBRA/main/docs/lites.png" alt="Lehrstuhl für Intelligente Technische Elektronik und Systeme @ FAU" width="94%"/>
       </a>
     </td>
     <td align="right" width="50%">
       <a href="https://www.elektronikforschung.de/projekte/di-passionate" target="_blank">
-        <img src="docs/bmftr.jpg" alt="DI-PASSIONATE Project (funded by BMFTR)" width="94%"/>
+        <img src="https://raw.githubusercontent.com/DI-PASSIONATE/COBRA/main/docs/bmftr.jpg" alt="DI-PASSIONATE Project (funded by BMFTR)" width="94%"/>
       </a>
     </td>
   </tr>

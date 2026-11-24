@@ -120,4 +120,4 @@ mean over its frequency points of the squared miss of its bound, divided by the 
 
 ---
 
-If you use COBRA in research, see citation information in the repository README.
+If you use COBRA in research, please [cite it](https://github.com/DI-PASSIONATE/COBRA#cite-this-work).
