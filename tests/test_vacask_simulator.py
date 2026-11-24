@@ -16,6 +16,7 @@ from cobra.spice_sim.vacask_simulator import (
     VacaskSimulator,
     hb_dataframe,
     noise_factor,
+    noise_figure_db,
     tran_dataframe,
 )
 from tests.conftest import skrf_medium
@@ -119,6 +120,10 @@ control
   analysis sp1 acsp ports=["vp1", "rp1", "vp2", "rp2"] from=1G to=2G mode="lin" points=1
 endc
 """
+
+
+def test_a_noise_factor_that_is_not_positive_has_no_noise_figure():
+    np.testing.assert_allclose(noise_figure_db(np.array([10.0, 0.0, -1.0])), [10.0, np.nan, np.nan])
 
 
 def test_noise_factor_refers_added_noise_to_t0():

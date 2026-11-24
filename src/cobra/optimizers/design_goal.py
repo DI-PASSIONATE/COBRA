@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from cobra.spice_sim.base_simulator import SimulationResult
     from cobra.spice_sim.simulation_type import Analysis, AnalysisVariant, SimulationType
 
+logger = logging.getLogger(__name__)
 
 FAILED_SIMULATION_PENALTY = 1e6
 """Penalty for a goal whose simulation produced no result.
@@ -187,7 +189,7 @@ class DesignGoal:
         return self._score(self.parameter.formula(sim_result, self.frequency_range))
 
     def evaluate(self, sim_results: Mapping[Analysis, SimulationResult]) -> float:
-        """The penalty for a trial's results; :data:`FAILED_SIMULATION_PENALTY` without them."""
+        """The penalty for a trial's results; :data:`FAILED_SIMULATION_PENALTY` without a value."""
         try:
             values = self.parameter.values(sim_results, self.frequency_range)
         except UnavailableValueError:
@@ -195,6 +197,17 @@ class DesignGoal:
         return self._score(values)
 
     def _score(self, values: np.ndarray | float) -> float:
+        missing = int(np.count_nonzero(np.isnan(np.asarray(values, dtype=float))))
+        if missing:
+            logger.warning(
+                "'%s' has no value at %d of %d points in %s; the goal counts as failed",
+                self.parameter.name,
+                missing,
+                np.size(values),
+                self.frequency_range or "the whole sweep",
+            )
+            return self._fail()
+
         # Store the current value for later reference
         self.current_value = values
 

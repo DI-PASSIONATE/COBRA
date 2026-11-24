@@ -85,7 +85,7 @@ def _qs(sim_result: SimulationResult, frequency_range: str | None = None):
 
 def _k(sim_result: SimulationResult, frequency_range: str | None = None):
     _, z11, z22, z21, _ = _mm_z(sim_result, frequency_range)
-    return np.abs(np.imag(z21) / np.sqrt(np.imag(z11) * np.imag(z22)))
+    return np.abs(np.imag(z21)) / np.sqrt(np.abs(np.imag(z11) * np.imag(z22)))
 
 
 def _srf(sim_result: SimulationResult, frequency_range: str | None = None):

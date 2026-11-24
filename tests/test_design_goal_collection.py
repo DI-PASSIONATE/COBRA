@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+import skrf
 
 from cobra.optimizers.design_goal import GoalInputs
 from cobra.optimizers.design_goal_collection import (
@@ -76,3 +77,15 @@ def test_isolation_errors_explain_what_is_missing():
         make_isolation_db("OUT").formula(_hb_result(), None)
     with pytest.raises(ValueError, match="no line outside"):
         make_isolation_db("OUT").formula(_hb_result(freqs=[0.0, 35e9], volts=[100.0, 1.0]), "35GHz")
+
+
+def test_coupling_is_defined_when_one_winding_is_above_its_resonance():
+    frequency = skrf.Frequency(10, 10, 1, "GHz")
+    z = np.array([[[1 + 100j, 30j], [30j, 1 - 50j]]])
+    network = skrf.Network(frequency=frequency, z=z)
+    parameter = find_parameter("k")
+    assert parameter is not None
+
+    k = parameter.formula(SimulationResult(network=network), None)
+
+    assert np.asarray(k) == pytest.approx(30 / np.sqrt(100 * 50))

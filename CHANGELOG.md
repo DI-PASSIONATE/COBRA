@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- A goal whose value is not a number counted as met if it had both a lower and an upper limit; it
+  now counts as failed. Coupling `k` is also defined above a winding's self-resonance.
+
 ## 3.3.0 - 2026-11-24
 
 ### Added

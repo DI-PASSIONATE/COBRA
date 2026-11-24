@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from cobra.optimizers.design_goal import DesignGoal, DesignGoalChecker, DesignParameter
+from cobra.optimizers.design_goal import (
+    FAILED_SIMULATION_PENALTY,
+    DesignGoal,
+    DesignGoalChecker,
+    DesignParameter,
+)
 from cobra.optimizers.design_goal_collection import calculate_array_penalty
 from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.simulation_type import SimulationType
@@ -48,6 +53,38 @@ def test_two_sided_penalty_is_zero_inside_and_averages_violations_outside():
     below = ((-20.0 - -30.0) / 20.0) ** 2
     above = ((-5.0 - -10.0) / 10.0) ** 2
     assert calculate_array_penalty(-20.0, -10.0, values) == pytest.approx((below + above) / 3)
+
+
+@pytest.mark.parametrize("bounds", [(100.0, 200.0), (100.0, None), (None, 200.0)])
+@pytest.mark.parametrize("value", [np.nan, np.array([150.0, np.nan])])
+def test_a_value_that_is_not_a_number_fails_the_goal(bounds, value, caplog):
+    parameter = DesignParameter(
+        name="SRF",
+        simulation_type=SimulationType.AC,
+        formula=lambda _result, _range=None: value,
+        loss=calculate_array_penalty,
+    )
+    goal = DesignGoal(parameter, "30GHz", *bounds)
+
+    with caplog.at_level("WARNING"):
+        penalty = goal.evaluate({SimulationType.AC: SimulationResult()})
+
+    assert penalty == FAILED_SIMULATION_PENALTY
+    assert goal.current_penalty == FAILED_SIMULATION_PENALTY
+    assert goal.current_value is None
+    assert "'SRF' has no value at 1 of" in caplog.text
+    assert "30GHz" in caplog.text
+
+
+def test_a_vanishing_s_parameter_still_meets_an_upper_limit():
+    parameter = DesignParameter(
+        name="S12_dB",
+        simulation_type=SimulationType.AC,
+        formula=lambda _result, _range=None: np.array([-np.inf]),
+        loss=calculate_array_penalty,
+    )
+
+    assert DesignGoal(parameter, max_value=-30.0).evaluate({SimulationType.AC: SimulationResult()}) < 0
 
 
 def test_band_goal_weighs_as_much_as_a_single_point_goal():
