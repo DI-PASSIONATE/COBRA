@@ -17,6 +17,7 @@ from cobra.spice_sim.simulation_type import AnalysisVariant, SimulationType, bas
 from cobra.spice_sim.vector_fit import VectorFitError
 from cobra.spice_sim.xyce_simulator import XyceSimulator
 from cobra.stages.base_stage import COBRABaseStage
+from cobra.stages.fit_cache import FitCache
 
 if TYPE_CHECKING:
     import skrf as rf
@@ -70,6 +71,7 @@ class CircuitSimulationStage(COBRABaseStage):
     def __init__(self, simulator: BaseSimulator | None = None):
         self.simulator = simulator if simulator is not None else XyceSimulator("Xyce")
         self._fitting_pool: ProcessPoolExecutor | None = None
+        self.fit_cache = FitCache()
 
     @contextlib.contextmanager
     def fitting_processes(self, processes: int) -> Generator[None]:
@@ -103,13 +105,18 @@ class CircuitSimulationStage(COBRABaseStage):
             listener.stop()
             log_queue.close()
 
-    def _preprocess(self, ntwk: "rf.Network", name: str) -> None:
+    def _preprocess(self, ntwk: "rf.Network", name: str) -> str:
+        """Preprocess *ntwk*, reusing an earlier result for the same network if the simulator allows it."""
+        if self.simulator.reuses_fits:
+            return self.fit_cache.get(ntwk, name, self._fit)
+        return self._fit(ntwk, name)
+
+    def _fit(self, ntwk: "rf.Network", name: str) -> str:
         """Preprocess *ntwk* in a fitting process, if :meth:`fitting_processes` started them."""
         if self._fitting_pool is None:
-            self.simulator.preprocess_ntwk(ntwk, name=name)
-            return
+            return self.simulator.preprocess_ntwk(ntwk, name=name)
         try:
-            self._fitting_pool.submit(self.simulator.preprocess_ntwk, ntwk, name=name).result()
+            return self._fitting_pool.submit(self.simulator.preprocess_ntwk, ntwk, name=name).result()
         except BrokenProcessPool as exc:
             raise RuntimeError(
                 "A vector-fitting process ended abruptly. With parallel_trials > 1 the fits run in "

@@ -58,6 +58,9 @@ class BaseSimulator(ABC):
     command_setting: ClassVar[str]
     #: Whether analyses take named arguments beyond the slots of their metadata (VACASK).
     named_analysis_parameters: ClassVar[bool] = False
+    #: Whether :meth:`preprocess_ntwk` writes one file that depends only on the network, the last
+    #: part of the name and the settings, so COBRA may reuse it for the same network.
+    reuses_fits: ClassVar[bool] = False
 
     @classmethod
     def get_simulation_metadata(cls, sim_type: SimulationType) -> SimulationTypeMetadata:
