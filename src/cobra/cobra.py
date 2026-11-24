@@ -555,24 +555,29 @@ class COBRA:
         if self.em_surrogate_stage is not None:
             self.em_surrogate_stage.run(context)
 
-        # Perform circuit-level simulation; the stage records its vector fitting separately
+        # Log times for each stage; the run-wide context sums them up in absorb_trial
         t3 = time.time()
+        context.times["optimizer"] += t2 - t1
+        context.times["em_surrogate"] += t3 - t2
+        context.times["total_time"] += t3 - t1
+        self._simulate_and_score(context)
+        return context
+
+    def _simulate_and_score(self, context: OptimizationContext) -> None:
+        """Simulate the circuit with *context*'s networks, check the goals and record the times."""
+        # The stage records its vector fitting separately
+        started = time.time()
         fitting_before = context.times["vector_fitting"]
         self.circuit_simulation_stage.run(context)
         fitting = context.times["vector_fitting"] - fitting_before
 
-        # Check design goals
-        t4 = time.time()
+        simulated = time.time()
         context.design_goal_checker.check_goals(context)
-        t5 = time.time()
+        checked = time.time()
 
-        # Log times for each stage; the run-wide context sums them up in absorb_trial
-        context.times["optimizer"] += t2 - t1
-        context.times["em_surrogate"] += t3 - t2
-        context.times["circuit_simulation"] += t4 - t3 - fitting
-        context.times["design_goal_checking"] += t5 - t4
-        context.times["total_time"] += t5 - t1
-        return context
+        context.times["circuit_simulation"] += simulated - started - fitting
+        context.times["design_goal_checking"] += checked - simulated
+        context.times["total_time"] += checked - started
 
     def _penalise_infeasible(self, context: OptimizationContext) -> bool:
         """Score *context* as a failed simulation, without simulating, if a geometry cannot be built.
@@ -829,8 +834,7 @@ class COBRA:
         retuned.netlist_parameters = {**trial.netlist_parameters, **searched.netlist_parameters}
         self._render_netlist(retuned, netlist_template)
         retuned.predicted_networks = list(trial.predicted_networks)
-        self.circuit_simulation_stage.run(retuned)
-        retuned.design_goal_checker.check_goals(retuned)
+        self._simulate_and_score(retuned)
         logger.info(
             "Retune after EM fine-tuning iteration %d %s the design goals",
             iteration,
@@ -866,6 +870,7 @@ class COBRA:
         if self._penalise_infeasible(trial):
             return
 
+        started = time.time()
         networks = []
         for comp_name, is_ts, touchstone_type in zip(
             surrogate_stage.component_names, surrogate_stage.is_touchstone, surrogate_stage.touchstone_types, strict=True
@@ -883,9 +888,11 @@ class COBRA:
                 )
                 networks.append(trial.predicted_networks[0])
         trial.predicted_networks = networks
+        elapsed = time.time() - started
+        trial.times["em_fine_tuning"] += elapsed
+        trial.times["total_time"] += elapsed
 
-        self.circuit_simulation_stage.run(trial)
-        trial.design_goal_checker.check_goals(trial)
+        self._simulate_and_score(trial)
 
     def log_stage_times(self, context: OptimizationContext) -> None:
         """Log how the work of the run was distributed over the stages.

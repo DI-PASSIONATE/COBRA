@@ -9,6 +9,7 @@ that returns a fixed network, and the stage tests replace ORCA's
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import create_autospec
@@ -197,6 +198,23 @@ def test_fine_tuning_simulates_the_netlist_values_it_suggested(tmp_path, monkeyp
     assert len(simulated) == len(palace.calls) == FINE_TUNING_ITERATIONS
     for text, call in zip(simulated, palace.calls, strict=True):
         assert _r1(text) == float(call["netlist_parameters"]["R1"])
+
+
+@pytest.mark.parametrize("retune_trials", [0, 5])
+def test_the_stage_times_include_the_em_simulations(tmp_path, monkeypatch, retune_trials):
+    palace_run = _FakePalaceStage.run
+
+    def slow_run(self, context, **kwargs):
+        time.sleep(0.05)
+        return palace_run(self, context, **kwargs)
+
+    monkeypatch.setattr(_FakePalaceStage, "run", slow_run)
+    _, context, _, palace = _run_with_fine_tuning(tmp_path, monkeypatch, retune_trials=retune_trials)
+
+    times = dict(context.times)
+    total = times.pop("total_time")
+    assert 0.05 * len(palace.calls) <= times["em_fine_tuning"] < context.wall_time
+    assert sum(times.values()) == pytest.approx(total, rel=1e-3, abs=2e-3)
 
 
 def test_fine_tuning_returns_the_best_iteration_it_evaluated(tmp_path, monkeypatch):
