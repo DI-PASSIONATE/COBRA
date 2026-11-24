@@ -265,7 +265,7 @@ ports are the subcircuit's pins in order. See
 | `min_value`, `max_value` | Search bounds. Keep `model_input` bounds inside the range the model was trained on (its `input_parameter_ranges` metadata); the surrogate extrapolates outside it, and `cobra parse` warns |
 | `step` | Grid the values snap to; `null` for continuous |
 | `unit` | Scale suffix appended verbatim to `netlist_variable` values: `"p"` writes `1.5` as `1.5p`. `null` for `model_input`. VACASK prefixes are case-sensitive: use `"f"`, not `"F"`, for femto (`cobra parse` warns) |
-| `linked_to` | Name of another parameter this one mirrors, e.g. for symmetric windings. Links must not form a cycle |
+| `linked_to` | Name of another parameter this one mirrors, e.g. for symmetric windings. Links must not form a cycle. A `netlist_variable` linked to a `model_input` needs its own `unit`, e.g. `"u"` |
 | `initial_value` | Optional value the optimizer evaluates first, e.g. a known design to retune: Optuna's first trial uses it (parameters without one are sampled), gradient descent starts there. Must lie within the bounds and on the `step` grid; a linked parameter takes its master's |
 
 A model may declare that an input only takes values on a grid, such as whole

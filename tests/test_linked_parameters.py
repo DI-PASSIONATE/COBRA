@@ -8,6 +8,7 @@ which silently turns the reported best design into a different circuit.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,7 +29,7 @@ from cobra.spice_sim.base_simulator import SimulationResult
 from cobra.spice_sim.netlist_parsers.xyce_netlist_parser import XyceNetlistParser
 from cobra.spice_sim.simulation_type import SimulationType
 from cobra.spice_sim.xyce_simulator import XyceSimulator
-from tests.conftest import netlist_path
+from tests.conftest import make_context, netlist_path
 
 if TYPE_CHECKING:
     from cobra.spice_sim.netlist_parsers.netlist import Netlist
@@ -68,6 +69,40 @@ def test_broken_links_are_errors():
     a, b = _property("A", linked_to="B"), _property("B", linked_to="A")
     with pytest.raises(ValueError, match="Circular link"):
         resolve_linked_master(a, {p.name: p for p in (a, b)})
+
+
+# ---------------------------------------------------------------------------
+# Links between model inputs and netlist variables
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("master_is_model_input", [True, False], ids=["model-input-master", "netlist-master"])
+@pytest.mark.parametrize("optimizer_factory", [OptunaOptimizer, GradientDescentOptimizer], ids=["optuna", "gradient"])
+def test_a_link_can_cross_parameter_types(optimizer_factory, master_is_model_input):
+    master = replace(_property("master"), initial_value=12.0)
+    alias = _property("alias", linked_to="master")
+    unit = "u"
+    if master_is_model_input:
+        master, alias = replace(master, type=OptimizationType.MODEL_INPUT), replace(alias, unit=unit)
+        ranges = ([master], [alias])
+    else:
+        master, alias = replace(master, unit=unit), replace(alias, type=OptimizationType.MODEL_INPUT)
+        ranges = ([alias], [master])
+    optimizer = optimizer_factory()
+    optimizer.initialize(num_goals=1)
+
+    for step in range(3):
+        context = make_context()
+        optimizer.step(context, *ranges)
+        (model_value,) = context.model_parameters.values()
+        (netlist_value,) = context.netlist_parameters.values()
+        assert netlist_value == f"{model_value}{unit}"
+        if step == 0:
+            assert model_value == pytest.approx(12.0)
+        optimizer.tell(context, float(step))
+
+    best = optimizer.get_best_parameters()
+    assert best["master"] == best["alias"] == pytest.approx(12.0)
 
 
 # ---------------------------------------------------------------------------
