@@ -37,7 +37,7 @@ names a raw file after its analysis; once read, it is renamed after the netlist
 (`deck_hb_op.sim.hb1.raw`), so the runs of one trial folder, e.g. an HB and an HB
 analysis variant, each keep their own.
 Settings: `vacask_command`, `vacask_threads`, `vector_fit_max_order`, `enforce_passivity`,
-`surrogate_thermal_noise`, `force_dc_pin`.
+`surrogate_thermal_noise`, `force_dc_pin`, `simulation_timeout`.
 
 - `read_raw(path) -> list[RawPlot]` (`cobra.spice_sim.raw_file`) reads a SPICE raw file;
   it raises `ValueError` for a file it cannot read.

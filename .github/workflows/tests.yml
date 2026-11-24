@@ -52,6 +52,24 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest --cov --cov-report=term-missing
 
+  windows:
+    name: simulation timeout (windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        # Without the dev group: it brings ORCA, whose gdspy has no Windows wheel.
+        run: |
+          uv sync --python 3.13 --no-dev
+          uv pip install pytest
+      - name: Run the simulation timeout tests
+        run: uv run --no-sync pytest -v tests/test_simulation_timeout.py
+
   package:
     name: build and import
     runs-on: ubuntu-latest
