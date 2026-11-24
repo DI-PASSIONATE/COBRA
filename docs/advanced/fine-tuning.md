@@ -40,14 +40,10 @@ In a JSON configuration they are the fields of `fine_tuning`: `palace_command`,
 ## High-Level Loop
 
 1. The first iteration verifies the parameters the surrogate optimization ended with.
-2. For each ONNX component, ORCA's `simulate_geometry` draws the geometry from the current
-   parameters, meshes it with that sample's own ports and runs Palace, exactly as for the
-   model's training data. COBRA uses the Palace result the model was trained on, which
-   ORCA records in its `touchstone_type` metadata; for a model without it, the raw result
-   with ORCA's 0 Hz point (`_dc.sNp`), which the models exported before ORCA wrote the key
-   match. Another variant would evaluate a different network than the surrogate
-   optimization did: the de-embedded one removes the feed lines. Touchstone (`.snp`)
-   components keep their file.
+2. For each ONNX component, ORCA's `simulate_geometry` draws, meshes and simulates the
+   geometry as for the model's training data. COBRA uses the Palace result the model was
+   trained on (its `touchstone_type` metadata, else `dc`, the raw result with ORCA's 0 Hz
+   point). Touchstone components keep their file.
 3. Simulate the circuit with the Palace results and check the design goals.
 4. With `retune_trials` set, an iteration that misses the goals is followed by a
    retune (below), which may meet them without another Palace run.
@@ -60,35 +56,26 @@ and writes its parameters into the run's netlist.
 Each iteration runs in its own folder, `fine_tuning/iteration_NN/` inside the results
 folder, holding its netlist, GDS file, Palace model and Touchstone results.
 
-An iteration whose parameters violate a feasibility constraint of a component's ONNX model
-is not sent to Palace; it is scored like a failed simulation and the optimizer moves on.
-If a component cannot be simulated otherwise, fine-tuning stops with an error that names the
-component and the reason: parameters the geometry rejects as infeasible (when the model
-declares no constraints), a degenerate mesh that Palace could not solve, or a failed Palace
-run, whose log ORCA prints just above.
+An iteration that violates a feasibility constraint of an ONNX model is not sent to Palace;
+it is scored like a failed simulation. If Palace cannot simulate a component otherwise,
+fine-tuning stops with an error that names the component and the reason.
 
 ## Retune with the EM Models Fixed
 
-A design that the surrogate optimization brought within reach often misses its goals
-narrowly in the first Palace iteration: the circuit values were tuned to the surrogate's
-networks, not to Palace's. The retune tunes them again to Palace's, with the geometry
-fixed:
+The circuit values were tuned to the surrogates' networks, so a design often misses its
+goals narrowly in the first Palace iteration. The retune tunes them to Palace's networks
+without running Palace again:
 
-- every component is the network of the iteration just simulated: the Palace result for
-  an ONNX component, its file for a Touchstone one;
-- only the `netlist_variable` parameters are searched, in ranges narrowed around the
-  iteration's values: each value ± `max(retune_range × |value|, retune_min_steps × step)`,
-  clipped to its range and kept on its grid. The defaults, 0.3 and 2, give ±30 % for a
-  capacitance and ±2 for a transistor count `nx`. Model inputs, and netlist variables
-  linked to one, keep their values;
-- the search starts at the iteration's values, with a fresh copy of the run's optimizer and
-  the same design goals, and runs up to `retune_trials` circuit simulations, stopping at
-  the first that meets the goals.
+- Every component is fixed: the Palace result of an ONNX component, the file of a
+  Touchstone one.
+- Only `netlist_variable` parameters are searched, each within its value ±
+  `max(retune_range × |value|, retune_min_steps × step)`, clipped to its range and kept on
+  its grid. Variables linked to a model input keep their values.
+- The search starts at the iteration's values and stops after `retune_trials` simulations
+  or at the first that meets the goals.
 
-No trial runs Palace, so a retune takes minutes, and its result is exact for the
-geometry's EM model. Its best values are scored once more with the iteration's networks
-and count as a fine-tuning result of their own: if they meet the goals, fine-tuning
-stops there; otherwise the fine-tuning optimizer continues from them.
+If the best values meet the goals, fine-tuning stops; otherwise the fine-tuning optimizer
+continues from them.
 
 Each retune writes to `fine_tuning/retune_NN/`: the Palace networks as Touchstone files,
 the netlist it started from, its search (a COBRA results folder) and `result/`, the
@@ -97,11 +84,10 @@ iteration, and stopping the run stops the retune too.
 
 ## Frequency Range
 
-Palace simulates the band set in the geometry's simconfig file (`fstart`, `fstop`,
-`fstep`, in GHz, plus the single frequencies in `fpoint`), not the circuit's `.AC` sweep.
-ORCA's presets, for example, sweep 0–500 GHz in 1 GHz steps plus extra points below 10 GHz,
-which is slow. To shorten fine-tuning, subclass
-the geometry with a narrower simconfig and select it as a custom geometry:
+Palace simulates the band of the geometry's simconfig file (`fstart`, `fstop`, `fstep`, in
+GHz, plus the frequencies in `fpoint`), not the circuit's `.AC` sweep. ORCA's presets sweep
+0–500 GHz, which is slow. To shorten it, subclass the geometry with a narrower simconfig and
+select it as a custom geometry:
 
 ```python
 from dataclasses import dataclass
@@ -115,10 +101,9 @@ class NarrowBandTransformer(TransformerOcta):
     simconfig_filename: str = "/path/to/tf_octa_c_ports_narrow.simcfg"
 ```
 
-Keep the band wide enough to cover the circuit's analyses: outside it, the vector fit
-extrapolates. COBRA reads back the DC-extrapolated, de-embedded result. ORCA only writes
-that one when the sweep starts at or below 1 GHz with more than 20 points; otherwise
-COBRA uses the de-embedded result, which leaves the behaviour near DC to the vector fit.
+Keep the band wide enough to cover the circuit's analyses, since the vector fit extrapolates
+outside it. ORCA writes the `dc` result only when the sweep starts at or below 1 GHz with
+more than 20 points; otherwise COBRA uses the raw result, without a 0 Hz point.
 
 !!! warning
     Fine-tuning requires a correctly configured external EM environment and may be significantly slower than surrogate-only optimization.

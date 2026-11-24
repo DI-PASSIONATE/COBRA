@@ -12,15 +12,9 @@ the GUI or from a terminal.
 
 ## Save and Load in the GUI
 
-Use **Save configuration** to write the current run inputs to a JSON file. Use
-**Load configuration** to restore them. Loading rebuilds fields that depend on the netlist,
-including component model selectors, available HB nodes and ports, simulation
-parameters, optimization properties, and goals.
-
-Pressing **Start optimization** automatically saves the exact input configuration
-as `cobra_config.json` in the new timestamped results directory. The snapshot is
-created before optimization starts, so it remains available if a run fails or is
-stopped.
+**Save configuration** writes the current run inputs to a JSON file, **Load configuration**
+restores them. **Start optimization** saves the exact inputs as `cobra_config.json` in the
+results directory before the run starts.
 
 ## Start from a Netlist
 
@@ -42,11 +36,8 @@ configuration without either is rejected by `cobra parse` and `cobra run`. See
 cobra run path/to/cobra_config.json
 ```
 
-The command prints a header describing the run, shows iteration progress, and
-ends with a summary naming the results directory. Add `-v` for debug output,
-`-q` for warnings and errors only, or `--log-file PATH` to keep a full debug
-log of the run. Running `cobra` without a subcommand continues to open the GUI.
-See [Command Line](cli.md) for the full command and option reference.
+Add `-v` for debug output, `-q` for warnings and errors only, or `--log-file PATH` for a
+full debug log. See [Command Line](cli.md) for all options.
 
 ## Inspect Before Running
 
@@ -66,20 +57,14 @@ current value.
 For a configuration it additionally cross-checks the configuration against the
 netlist it references:
 
-- every surrogate component in the netlist has a `component_models` entry, and
-  every mapped model file exists, loads, and has as many ports as the instance
-  has nodes; the `.AC` sweep and `.HB` harmonics stay inside the band an ONNX
-  model declares in its metadata (the surrogate is evaluated over that band);
-  the model's feasibility constraints are well-formed (see below);
-- every `netlist_variable` resolves to an element (or an `instance:parameter`)
-  that exists, and every `model_input` matches an input of the mapped ONNX model;
-  a warning is raised when a `model_input`'s bounds (its master's, if linked) reach
-  beyond the range the model was trained on;
-- at least one design goal and one optimization parameter are defined;
-- every design goal is buildable, its frequency range parses, and the analysis it
-  needs is present or will be injected;
-- `simulation_parameters` name directives and `.options` categories the netlist
-  actually has;
+- every surrogate component has a model file that loads, with as many ports as the
+  instance has nodes and well-formed feasibility constraints;
+- the `.AC` sweep and `.HB` harmonics stay inside the band of the ONNX models;
+- every `netlist_variable` and `model_input` exists, and the bounds of a `model_input`
+  stay inside the range its model was trained on (a warning);
+- there is at least one design goal and one optimization parameter;
+- every goal can be built, and its analysis is present or will be added;
+- `simulation_parameters` name directives and options the netlist has;
 - fine-tuning geometries resolve and cover every ONNX component.
 
 Findings are grouped by severity. The command exits with `0` when no error was
@@ -103,11 +88,9 @@ The report is written to stdout and diagnostics to stderr, so
 
 ## Path Rules
 
-Relative paths are interpreted relative to the directory containing the JSON
-file, not the process working directory. When the GUI saves a configuration,
-netlist, component model, and custom geometry paths are rewritten relative to the
-new JSON destination where possible. This makes a directory containing a config
-and its inputs portable as a unit.
+Relative paths are relative to the directory of the JSON file. The GUI saves paths
+relative to it where possible, so a directory with a configuration and its inputs can be
+moved as a unit.
 
 ## Schema Version 1
 
@@ -209,12 +192,9 @@ apply to a run may use empty objects or arrays.
 seed). A seed makes the run repeatable when `parallel_trials` is 1; it reaches the
 `tpe`, `cmaes` and `random` samplers, and an optunahub sampler that accepts a seed.
 
-`cmaes` is Optuna's CMA-ES sampler in its margin variant, which keeps moving on the
-grid of parameters with a `step`. It adapts one search distribution to the penalty
-landscape, which suits continuous circuit values and many parallel trials; in the
-OJCAS ablation on the LNA it met the goals as often as TPE. It optimizes a single
-objective, so `multi_objective` must be off, and with only one parameter Optuna falls
-back to independent sampling.
+`cmaes` is Optuna's CMA-ES sampler in its margin variant, for parameters on a `step`
+grid. It suits continuous circuit values and many parallel trials, and needs
+`multi_objective` off and more than one parameter.
 
 ```json
 "optimizer": {"name": "OptunaOptimizer", "settings": {"sampler": "tpe", "random_seed": 42}}
@@ -231,12 +211,9 @@ parameters' `initial_value`; otherwise it starts in the middle of the ranges.
 "optimizer": {"name": "GradientDescentOptimizer", "settings": {"learning_rate": 0.05}}
 ```
 
-When no trial meets every goal, the run ends at the trial that misses them by
-the least: once a goal is missed, over-fulfilling the others does not count.
-That trial's netlist is the run's netlist, and its folder under `trials/` is
-kept. To aim past the specification rather than at its edge (the first trial
-that meets every goal often meets one of them by a hair), tighten the goals'
-`min_value` and `max_value` by the margin you want.
+When no trial meets every goal, the run ends at the trial that misses them by the least;
+over-fulfilling other goals does not count. The first trial that meets every goal often
+meets one of them by a hair, so tighten the bounds by the margin you want.
 
 ### Simulator
 
@@ -250,8 +227,10 @@ analysis the chosen simulator cannot run are rejected before the run starts.
 | | `vacask_threads` | `1` | `vacask -n N`; `0` = auto (`OMP_NUM_THREADS`); keep `1` with `parallel_trials` above 1 |
 | | `vector_fit_max_order` | `12` | Highest model order snp2le may use when it fits a surrogate (integer, at least 2) |
 | | `enforce_passivity` | `false` | Enforce passivity on the vector fit |
-| | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity`. A fit without it is retried at lower orders, then the trial is penalised. Poor fits (RMS above 3e-3) are retried at lower orders too |
+| | `surrogate_thermal_noise` | `false` | Add the surrogates' thermal noise to noise analyses; requires `enforce_passivity` |
 | | `force_dc_pin` | `true` | Pin each surrogate fit to its 0 Hz point also where snp2le skips the pin for passivity below the band |
+
+See [Surrogate file](../advanced/vacask.md#surrogate-file) for the VACASK fit settings.
 
 VACASK netlists use VACASK analysis names as `simulation_parameters` keys
 (`"AC"`, `"HB"`, `"TRAN"`, `"NOISE"`, `"HBNOISE"`) and VACASK parameter names
@@ -326,37 +305,29 @@ netlist has no `.NOISE`. Set the output node in `simulation_parameters`:
 "simulation_parameters": {".NOISE": {"out": "Out", "in": "P1"}}
 ```
 
-`in` defaults to port 1 and must be a `P` port. Without `start_freq`/`stop_freq`
-the sweep spans the frequencies of the `NF` goals. Xyce computes its input-referred
-noise from an AC solve with every source at its AC magnitude, so for the noise run
-COBRA sets the input port to `AC 1` and every other AC magnitude to 0. Xyce's ports
-are noiseless, so the noise figure is `F = 1 + INOISE / (4 k T0 z0)` with the input
-port's `z0`: the output port terminates the circuit and is left out, as with VACASK.
-The vector-fitted surrogates are noiseless in both simulators (in the Xyce SPICE
-subcircuit every resistor is written as a conductance controlled by its own voltage),
-unless VACASK's `surrogate_thermal_noise` adds their thermal noise (see
-[VACASK Simulator](../advanced/vacask.md#surrogate-noise)).
+`in` defaults to port 1 and must be a `P` port. Without `start_freq`/`stop_freq` the sweep
+spans the frequencies of the `NF` goals. For the noise run COBRA sets the input port to
+`AC 1` and every other AC magnitude to 0. The output port is left out of the noise figure.
+Surrogates are noiseless in both simulators, unless VACASK's
+[`surrogate_thermal_noise`](../advanced/vacask.md#surrogate-noise) is on.
 
 `node` must be a probe node and `port` a port of the netlist, spelled exactly as
 `cobra parse` lists them: names are case-sensitive, so `OUT` and `Out` differ.
 
 The spectrum goals (`power_dbm`, `gain_db`, `isolation_db`) name the analysis
 they read in `analysis`: `"HB"` (the default) or `"TRAN"`, in which case the
-parameter name carries a `TRAN:` prefix, e.g. `TRAN:Power_dBm[Out]`. Gain goals
-store the drive level so their power reference can be reconstructed. An
+parameter name carries a `TRAN:` prefix, e.g. `TRAN:Power_dBm[Out]`. An
 isolation goal's value is the margin in dB down to the strongest other line in
 the spectrum, DC excluded. See [Harmonic Balance](../advanced/harmonic-balance.md)
 and [Transient](../advanced/transient.md).
 
 ### Analysis Variants
 
-A run holds one result per analysis type, so one netlist cannot carry two HB
-analyses at different drives. `analysis_variants` adds them: each is an analysis
-of type `analysis` (`AC`, `HB`, `TRAN`, `DC`, `NOISE` or `HBNOISE`), run on a copy
-of the netlist with `netlist_values` set. The values use the names of
-`netlist_variable` parameters: an element (`"R1"`) or
-`"<instance>:<parameter>"` (`"vp_rf:ampl"`, a VACASK sine source's amplitude in
-volts). A variant name is an identifier other than an analysis type.
+`analysis_variants` runs an analysis again with other netlist values, e.g. HB at another
+drive. Each names an analysis type (`AC`, `HB`, `TRAN`, `DC`, `NOISE` or `HBNOISE`) and the
+`netlist_values` to set, named like `netlist_variable` parameters: an element (`"R1"`) or
+`"<instance>:<parameter>"` (`"vp_rf:ampl"`, a VACASK sine source's amplitude in volts). A
+variant name is an identifier other than an analysis type.
 
 ```json
 "analysis_variants": [
@@ -410,55 +381,39 @@ on a high-drive variant, at most 1 dB, and the same relative to the gain:
  "frequency_range": "35GHz", "max_value": 10.0}
 ```
 
-`fine_tuning.retune_trials` (default `0`, off) is the budget of the circuit-only
-retune that follows a fine-tuning iteration missing the goals: the circuit values are
-optimized again, with that iteration's Palace networks as fixed models, in ranges of
-± `retune_range` (relative, default `0.3`) around their values, at least
-`retune_min_steps` steps wide (default `2`). See
-[Fine-Tuning](../advanced/fine-tuning.md#retune-with-the-em-models-fixed).
+### Parallel Trials
 
-`fine_tuning.palace_processes` is the number of MPI ranks Palace uses per EM
-simulation; the Xyce simulator takes the equivalent `parallel_xyce_processes`
-setting, used when `parallel_xyce` is enabled. Both must be at least 1 and both
-default to the number of cores available on the machine writing the
-configuration, so set them explicitly when a configuration is shared between
-machines.
+`parallel_trials` (default 1) is the number of trials evaluated at the same time, each with
+its own single-threaded simulation. For small and medium-sized circuits it shortens a run
+more than MPI ranks (`parallel_xyce`); do not combine the two unless the machine has cores
+for both.
 
-`parallel_trials` is how many optimization trials are evaluated at the same
-time, each with its own single-threaded simulation in its own directory. It
-defaults to 1. For small and medium-sized circuits this is the setting that
-actually shortens a run: Xyce is often slower with several MPI ranks than with
-one, so N concurrent trials beat one N-rank simulation. Do not combine it with
-`parallel_xyce` unless the machine has cores for both — `parallel_trials` times
-`parallel_xyce_processes` is the peak load, and COBRA warns when both are set.
-The GUI exposes the two as a single *Parallelism* selector and refuses to load
-a configuration that sets both.
-It requires an optimizer that can suggest a trial before the previous one
-reported back: Optuna can, gradient descent cannot and rejects any value above
-1. One consequence to be aware of: once the design goals are met, the trials
-already running are still finished, so up to `parallel_trials - 1` extra
-evaluations may be performed.
-With `parallel_trials` above 1 the surrogates are also vector-fitted in that many
-worker processes, each using one BLAS thread, because fits in threads of one
-process cannot overlap. A Python script that runs COBRA this way must start it
-under `if __name__ == "__main__":`, since the worker processes import the script;
-without it they run the script again and die, and COBRA stops with an error saying so.
+- The optimizer must support it: Optuna does, gradient descent does not.
+- Trials already running when the goals are met are still finished.
+- The surrogates are fitted in that many worker processes. A Python script must therefore
+  start the run under `if __name__ == "__main__":`.
+- Stage percentages in the summary are shares of the summed stage times, which exceed the
+  `wall time` when trials ran concurrently.
 
-A component whose S-parameters are the same as in an earlier trial is not fitted again:
-a fixed Touchstone component, every component of a [retune](../advanced/fine-tuning.md#retune-with-the-em-models-fixed),
-or a geometry the optimizer returns to. The last 128 fits of a run are kept; the log
-gives the number of fits made and reused at the end.
+A component whose S-parameters are the same as in an earlier trial is not fitted again,
+e.g. a Touchstone component or a geometry the optimizer returns to. The log gives the
+number of fits made and reused.
 
-The summary's `wall time` is always the run's elapsed time. The per-stage
-percentages beside it are shares of the summed stage times, which measure work
-done rather than time elapsed and therefore add up to more than `wall time` when
-trials ran concurrently — the log line names both numbers so they cannot be
-confused.
+### Fine-Tuning
 
-Fine-tuning presets store their class name and the module ORCA exports its presets
-from, `orca.geometry.presets`. Custom geometries
-store a JSON-relative Python file and class name. ORCA is imported only when an
-enabled configuration requires a geometry.
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Verify the result with Palace |
+| `palace_command` | `"palace"` | Command that runs Palace |
+| `palace_processes` | number of cores | MPI ranks per EM simulation. Like `parallel_xyce_processes`, it defaults to the machine writing the configuration, so set it explicitly when sharing one |
+| `iterations` | `3` | Number of EM iterations |
+| `optimizer` | `"reuse"` | `"reuse"` or `"gradient_descent"` |
+| `retune_trials`, `retune_range`, `retune_min_steps` | `0` (off), `0.3`, `2` | Budget and ranges of the [retune](../advanced/fine-tuning.md#retune-with-the-em-models-fixed) |
+| `geometries` | `{}` | ORCA geometry per ONNX component: a preset from `orca.geometry.presets` or a class in a Python file |
+
+ORCA is imported only when an enabled configuration needs a geometry.
+
+## Validation
 
 Unknown fields, unsupported schema versions or backends, broken linked-parameter
 references, unavailable analysis-point nodes or ports, and missing input files
